@@ -234,4 +234,4 @@ server {
 - [DEBUG.md](./DEBUG.md) — Procedimentos de diagnóstico na interface e ciclo de vida de sinalização e WebRTC.
 - [PERFORMANCE.md](./PERFORMANCE.md) — Perfis de qualidade de vídeo, adaptação conservadora e limites da arquitetura mesh.
 - [TURN.md](./TURN.md) — Mecanismos de credenciais temporárias TURN, configuração de firewall e comportamento de fallback.
-- [SLIPLANE.md](./SLIPLANE.md) — Guia de deploy conteinerizado para o ambiente Sliplane.
+- [DEPLOY.md](./DEPLOY.md) — Guia de implantação e operação em servidor VPS Linux com proxy reverso.
