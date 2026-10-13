@@ -5,3 +5,7 @@ dist
 .gitignore
 npm-debug.log*
 pnpm-debug.log*
+.output
+.agent
+.impeccable
+screenshots

@@ -27,18 +27,3 @@ export interface DiagnosticEntry {
   event: string;
   details: Record<string, unknown>;
 }
-
-export interface ScreenShareState {
-  isSharing: boolean;
-  stream: MediaStream | null;
-  isAudioMuted: boolean;
-  hasAudioTrack: boolean;
-  error: string | null;
-}
-
-export interface PeerDiagnostics {
-  peerId: string;
-  connectionState: RTCPeerConnectionState;
-  iceConnectionState: RTCIceConnectionState;
-  signalingState: RTCSignalingState;
-}

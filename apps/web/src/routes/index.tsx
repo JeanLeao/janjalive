@@ -11,7 +11,6 @@ import {
   Stack,
   Group,
   Badge,
-  ActionIcon,
   Card,
   UnstyledButton,
 } from '@mantine/core';
@@ -20,7 +19,6 @@ import {
   IconScreen,
   IconPlus,
   IconLink,
-  IconInfo,
   IconShield,
   IconVolume,
   IconUsers,

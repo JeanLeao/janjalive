@@ -3,7 +3,6 @@ import {
   Box,
   Text,
   Button,
-  Group,
   UnstyledButton,
   Tooltip,
 } from '@mantine/core';
@@ -16,11 +15,8 @@ import {
 } from '../utils/avatar';
 import {
   IconScreen,
-  IconPlus,
   IconMaximize,
   IconMinimize,
-  IconVolume,
-  IconVolumeMute,
   IconSignal,
   IconLink,
 } from './Icons';

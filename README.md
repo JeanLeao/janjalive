@@ -1,6 +1,22 @@
 # Screen Room
 
-Aplicação WebRTC para salas com múltiplos participantes, dedicada exclusivamente a **compartilhamento de tela e áudio da tela/aba**. Não há botão, permissão nem captura de microfone: o cliente utiliza exclusivamente `navigator.mediaDevices.getDisplayMedia()`.
+Aplicação WebRTC streaming-first projetada especificamente para **compartilhamento de tela e áudio da aba/sistema em tempo real**.
+
+O Screen Room foi construído com foco em simplicidade, privacidade e desempenho: não exige cadastro, não armazena dados em contas de usuário e opera em salas efêmeras acessadas diretamente por link ou código.
+
+---
+
+## Características Principais
+
+- **Streaming-first:** O foco central é a visualização nítida de telas em tempo real, sem elementos dispensáveis de redes sociais.
+- **Salas efêmeras por link:** Crie uma sala instantaneamente e compartilhe o link ou código (`/room/:roomId`). As salas duram apenas enquanto houver participantes conectados.
+- **Acesso direto sem cadastro:** Visitantes entram imediatamente no navegador sem formulários de registro ou login.
+- **Nicknames temporários opcionais:** Participantes podem definir ou atualizar um nome de exibição durante a sessão (mantido em `sessionStorage`), permanecendo como visitantes neutros caso prefiram.
+- **Tela e áudio em sincronia:** Suporte a transmissão de vídeo e áudio da aba ou sistema com controle de mudo direto na interface.
+- **Sem captura de microfone:** O microfone pessoal **nunca é solicitado, capturado ou gravado**. A aplicação utiliza exclusivamente a API nativa `navigator.mediaDevices.getDisplayMedia()`.
+- **Múltiplas transmissões com palco dinâmico:** Se múltiplos participantes compartilharem a tela, o palco principal destaca uma transmissão com reprodutor em tamanho integral, enquanto as demais são exibidas em miniaturas clicáveis para alternância sem perda de conexão.
+- **Perfis de qualidade e adaptação:** Perfis ajustáveis (Econômico, Equilibrado e Alta Qualidade) com degradação automática em redes sob perda excessiva de pacotes.
+- **Diagnóstico em tempo real:** Métricas de latência (RTT), perda de pacotes, bitrate e conexões ativas visíveis diretamente na interface da sala.
 
 ---
 
@@ -11,47 +27,57 @@ O projeto é estruturado como um monorepo gerenciado por `pnpm`:
 ```text
 .
 ├── apps/
-│   ├── web/           # Frontend TanStack Start (SSR), React 19, TypeScript, Mantine UI
-│   └── signaling/     # Serviço Node.js para WebSocket (/signal) e TURN (/turn-credentials)
+│   ├── web/           # Frontend TanStack Start (SSR), React 19, TypeScript e Mantine UI
+│   └── signaling/     # Serviço Node.js para WebSocket (/signal) e credenciais TURN (/turn-credentials)
 └── packages/
-    └── protocol/      # Contratos compartilhados, esquemas, tipos, perfis e utilitários de sala
+    └── protocol/      # Contratos de mensagens, schemas Zod, tipos, perfis de qualidade e validações
 ```
 
-- **`apps/web`**: Interface web idiomática com rotas no TanStack Start, componentes Mantine, gerenciamento modular de peers WebRTC, controle de mídia, diagnóstico em tempo real e adaptação dinâmica de qualidade.
-- **`apps/signaling`**: Servidor de sinalização enxuto em Node.js com WebSocket (`/signal`), emissão de credenciais temporárias TURN (`/turn-credentials`), política de validação de origem e health check (`/healthz`). Não serve arquivos estáticos.
-- **`packages/protocol`**: Biblioteca de tipos e validações consumida tanto pelo web quanto pelo signaling, garantindo consistência de mensagens e entropia criptográfica dos IDs de sala.
+- **`apps/web`**: Interface web moderna com renderização híbrida/SSR via TanStack Start, componentes de interface Mantine, gerenciamento modular de conexões WebRTC (`PeerManager`), captura de mídia de exibição, métricas em tempo real e painel de configurações.
+- **`apps/signaling`**: Servidor de sinalização leve em Node.js com WebSocket em `/signal`, geração de credenciais temporárias TURN em `/turn-credentials`, validação rigorosa de origens (`ALLOWED_ORIGINS`) e endpoint de verificação de integridade (`/healthz`).
+- **`packages/protocol`**: Biblioteca compartilhada de tipagens TypeScript, esquemas de validação Zod, regras de identificação de salas e perfis de qualidade de vídeo, garantindo compatibilidade entre cliente e servidor.
+
+---
+
+## Pré-requisitos
+
+- **Node.js**: Versão 22 ou superior
+- **pnpm**: 12.6.0, definida no `packageManager` do projeto. Utilize Corepack para gerenciar a versão.
+
+---
+
+## Instalação
+
+Na raiz do repositório, instale as dependências de todos os pacotes:
+
+```bash
+pnpm install
+```
 
 ---
 
 ## Desenvolvimento Local
 
-### Pré-requisitos
-- Node.js 22+
-- `pnpm` 9+ ou 10+
-
-### Instalação
-```bash
-pnpm install
-```
-
-### Executar em Desenvolvimento
-Inicia simultaneamente o frontend (`apps/web`) e o servidor de sinalização (`apps/signaling`):
+Para iniciar o frontend e o servidor de sinalização em paralelo no modo de desenvolvimento:
 
 ```bash
 pnpm dev
 ```
 
 Por padrão:
-- `apps/signaling` roda em `http://localhost:3000`
-- `apps/web` roda em `http://localhost:3001` (com proxy automático de desenvolvimento encaminhando `/signal` e `/turn-credentials` para a porta 3000)
+- `apps/signaling` executa em `http://localhost:3000`
+- `apps/web` executa em `http://localhost:3001` (com proxy do Vite encaminhando `/signal` e `/turn-credentials` para a porta 3000)
 
-Você também pode iniciar cada serviço isoladamente:
+Acesse `http://localhost:3001` no navegador para utilizar a aplicação.
+
+### Executar Serviços Isoladamente
+
+Caso deseje executar apenas uma das partes:
+
 ```bash
 pnpm dev:web         # apenas o frontend (porta 3001)
-pnpm dev:signaling   # apenas o signaling (porta 3000)
+pnpm dev:signaling   # apenas o servidor de sinalização (porta 3000)
 ```
-
-Abra `http://localhost:3001` no navegador.
 
 ---
 
@@ -59,60 +85,61 @@ Abra `http://localhost:3001` no navegador.
 
 | Comando | Descrição |
 |---|---|
-| `pnpm dev` | Inicia todos os apps em paralelo no modo desenvolvimento |
-| `pnpm dev:web` | Inicia o app web em modo dev (porta 3001 com proxy para 3000) |
-| `pnpm dev:signaling` | Inicia o serviço de signaling com recarregamento a quente |
-| `pnpm build` | Compila recursivamente todos os pacotes e aplicações |
-| `pnpm test` | Executa toda a suíte de testes automatizados da nova arquitetura |
-| `pnpm typecheck` | Executa verificação de tipos TypeScript em todo o monorepo |
-| `pnpm start:web` | Inicia o servidor Node de produção da web (`node .output/server/index.mjs` via Nitro) |
-| `pnpm start:signaling` | Inicia o serviço de sinalização em modo produção |
-| `pnpm preview:web` | Inicia o preview local do Vite (`vite preview`, apenas para inspeção local de build) |
+| `pnpm dev` | Inicia todos os aplicativos em paralelo em modo desenvolvimento |
+| `pnpm dev:web` | Inicia o frontend em modo desenvolvimento (porta 3001 com proxy para 3000) |
+| `pnpm dev:signaling` | Inicia o serviço de sinalização com recarregamento a quente (`tsx watch`) |
+| `pnpm build` | Compila recursivamente todos os pacotes e aplicações do monorepo |
+| `pnpm test` | Executa toda a suíte de testes automatizados do projeto |
+| `pnpm typecheck` | Executa a verificação estática de tipos TypeScript em todo o monorepo |
+| `pnpm start:web` | Inicia o servidor de produção do web (`node .output/server/index.mjs` via Nitro) |
+| `pnpm start:signaling` | Inicia o serviço de sinalização compilado em modo de produção |
+| `pnpm preview:web` | Executa o preview local de build do Vite |
 
 ---
 
 ## Arquitetura de Produção: Dois Serviços sob Mesma Origem
 
-Em produção, `apps/web` e `apps/signaling` são processos independentes executados atrás de um **reverse proxy** que os expõe sob o mesmo domínio/origem pública.
+Em produção, `apps/web` e `apps/signaling` operam como processos desacoplados posicionados atrás de um **reverse proxy** que os expõe sob o mesmo domínio público.
 
-O frontend comunica-se exclusivamente via caminhos relativos:
-- `/signal` -> WebSocket encaminhado para `apps/signaling`
-- `/turn-credentials` -> HTTP encaminhado para `apps/signaling`
-- `/*` -> HTTP/SSR encaminhado para `apps/web`
+O frontend comunica-se exclusivamente através de rotas relativas sob a mesma origem:
+- `/signal` (WebSocket) -> encaminhado para `apps/signaling` (porta 3000)
+- `/turn-credentials` (HTTP GET) -> encaminhado para `apps/signaling` (porta 3000)
+- `/healthz` (HTTP GET) -> verificação de saúde do signaling
+- `/*` (HTTP/SSR e arquivos estáticos) -> encaminhado para `apps/web` (porta 3001)
 
-### 1. Variáveis de Ambiente
+### Variáveis de Ambiente
 
 #### `apps/web`
-- `PORT`: Porta HTTP para servir a aplicação Node/Nitro (padrão: `3001`).
-- `HOST`: Interface de rede para bind do servidor (padrão: `0.0.0.0`).
-- `NITRO_PORT` / `NITRO_HOST`: Variáveis alternativas suportadas nativamente pelo runtime Nitro.
+- `PORT`: Porta HTTP do servidor web/SSR (padrão: `3001`).
+- `HOST`: Interface de rede para bind (padrão: `0.0.0.0`).
+- `NITRO_PORT` / `NITRO_HOST`: Variáveis alternativas suportadas pelo runtime Nitro.
 
 #### `apps/signaling`
-- `PORT`: Porta HTTP/WebSocket para o servidor (padrão: `3000`).
-- `HOST`: Interface de rede (padrão: `0.0.0.0`).
-- `ALLOWED_ORIGINS`: Lista explícita de origens públicas autorizadas a acessar `/turn-credentials` e estabelecer WebSocket em `/signal`.
-  - **Em desenvolvimento local:** Fallback automático para `http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:3001`, `http://127.0.0.1:3001`.
-  - **Em produção:** Configure explicitamente com a URL da sua aplicação (ex.: `ALLOWED_ORIGINS=https://screen.example.com` ou valores separados por vírgula se houver múltiplos domínios).
-  - *Validação:* Conexões cujo cabeçalho `Origin` coincida com `http://${Host}` ou `https://${Host}` (quando o proxy repassa o header `Host` intacto) também são aceitas, mas em qualquer topologia com terminação TLS ou reescrita de cabeçalhos pelo proxy, defina `ALLOWED_ORIGINS` obrigatoriamente para evitar bloqueio `403 Forbidden`.
+- `PORT`: Porta do servidor de sinalização (padrão: `3000`).
+- `HOST`: Interface de rede para bind (padrão: `0.0.0.0`).
+- `ALLOWED_ORIGINS`: Lista separada por vírgula de origens autorizadas (ex.: `https://screen.example.com`). Em desenvolvimento, inclui fallbacks para localhost. Em produção, defina explicitamente o domínio público para evitar recusas `403 Forbidden`.
+- `TURN_SECRET`: Chave secreta compartilhada para geração de credenciais temporárias do coturn.
+- `TURN_SECRET_FILE`: Caminho para arquivo no disco contendo a chave secreta (padrão: `/etc/screen-room/turn-secret`).
+- `TURN_HOST`: Endereço IP ou hostname público do servidor coturn.
 
 ---
 
 ## Execução em Produção
 
-### Via Node / pnpm
+### Via Node.js / pnpm
 
 ```bash
-# 1. Compilar todo o projeto (gera o bundle do signaling e .output/server/index.mjs no web)
+# 1. Compilar todo o projeto
 pnpm build
 
 # 2. Iniciar o serviço de sinalização (Terminal 1)
 PORT=3000 ALLOWED_ORIGINS="https://screen.example.com" pnpm start:signaling
 
-# 3. Iniciar a aplicação web (Terminal 2 - runtime Node.js oficial via Nitro)
+# 3. Iniciar o frontend web (Terminal 2)
 PORT=3001 pnpm start:web
 ```
 
-### Via Docker / Contêineres
+### Via Docker
 
 Cada serviço possui seu próprio `Dockerfile`:
 
@@ -122,7 +149,10 @@ docker build -f apps/signaling/Dockerfile -t screen-room-signaling .
 docker build -f apps/web/Dockerfile -t screen-room-web .
 
 # Executar os contêineres
-docker run -d --name signaling -p 3000:3000 screen-room-signaling
+docker run -d --name signaling -p 3000:3000 \
+  -e ALLOWED_ORIGINS="https://screen.example.com" \
+  screen-room-signaling
+
 docker run -d --name web -p 3001:3001 screen-room-web
 ```
 
@@ -134,11 +164,14 @@ docker run -d --name web -p 3001:3001 screen-room-web
 
 ```caddy
 screen.example.com {
-    # Sinalização e credenciais TURN -> apps/signaling
+    # Sinalização WebSocket e credenciais TURN -> apps/signaling
     handle /signal* {
         reverse_proxy localhost:3000
     }
     handle /turn-credentials* {
+        reverse_proxy localhost:3000
+    }
+    handle /healthz* {
         reverse_proxy localhost:3000
     }
 
@@ -174,8 +207,8 @@ server {
         proxy_read_timeout 86400s;
     }
 
-    # Endpoint de Credenciais TURN
-    location /turn-credentials {
+    # Credenciais TURN e Health Check
+    location ~ ^/(turn-credentials|healthz) {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -183,7 +216,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Frontend TanStack Start
+    # Frontend TanStack Start (SSR e Assets)
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
@@ -196,9 +229,9 @@ server {
 
 ---
 
-## Documentação Adicional
+## Documentação Técnica Complementar
 
-- [TURN.md](./TURN.md) — Configuração do relay de conectividade coturn e liberação de portas de firewall.
-- [DEBUG.md](./DEBUG.md) — Guia de diagnóstico da negociação WebRTC e ciclo de vida de conexões.
-- [PERFORMANCE.md](./PERFORMANCE.md) — Perfis de qualidade (bitrate, fps, resolução) e adaptação automática.
-- [SLIPLANE.md](./SLIPLANE.md) — Instruções para deploy conteinerizado na plataforma Sliplane.
+- [DEBUG.md](./DEBUG.md) — Procedimentos de diagnóstico na interface e ciclo de vida de sinalização e WebRTC.
+- [PERFORMANCE.md](./PERFORMANCE.md) — Perfis de qualidade de vídeo, adaptação conservadora e limites da arquitetura mesh.
+- [TURN.md](./TURN.md) — Mecanismos de credenciais temporárias TURN, configuração de firewall e comportamento de fallback.
+- [SLIPLANE.md](./SLIPLANE.md) — Guia de deploy conteinerizado para o ambiente Sliplane.
