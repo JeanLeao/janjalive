@@ -9,7 +9,7 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 ## Características Principais
 
 - **Streaming-first:** O foco central é a visualização nítida de telas em tempo real, sem elementos dispensáveis de redes sociais.
-- **Salas efêmeras por link:** Crie uma sala instantaneamente e compartilhe o link ou código (`/room/:roomId`). As salas duram apenas enquanto houver participantes conectados.
+- **Salas efêmeras por link:** Crie uma sala instantaneamente e compartilhe o link ou código (`/room/:roomId`). Capacidade padrão de 10 participantes por sala (configurável via `MAX_PARTICIPANTS_PER_ROOM`). Em desconexões involuntárias, a identidade e a vaga permanecem reservadas por 30 segundos para permitir reconexão transparente; saídas voluntárias liberam a vaga imediatamente, e salas sem participantes nem reservas ativas são destruídas da memória.
 - **Acesso direto sem cadastro:** Visitantes entram imediatamente no navegador sem formulários de registro ou login.
 - **Nicknames temporários opcionais:** Participantes podem definir ou atualizar um nome de exibição durante a sessão (mantido em `sessionStorage`), permanecendo como visitantes neutros caso prefiram.
 - **Tela e áudio em sincronia:** Suporte a transmissão de vídeo e áudio da aba ou sistema com controle de mudo direto na interface.
@@ -33,7 +33,7 @@ O projeto é estruturado como um monorepo gerenciado por `pnpm`:
     └── protocol/      # Contratos de mensagens, schemas Zod, tipos, perfis de qualidade e validações
 ```
 
-- **`apps/web`**: Interface web moderna com renderização híbrida/SSR via TanStack Start, componentes de interface Mantine, gerenciamento modular de conexões WebRTC (`PeerManager`), captura de mídia de exibição, métricas em tempo real e painel de configurações.
+- **`apps/web`**: Interface web moderna com renderização híbrida/SSR via TanStack Start, componentes de interface Mantine, gerenciamento modular de conexões WebRTC (`PeerManager`), captura de mídia de exibição, métricas em tempo real, endpoint de verificação de integridade (`/healthz-web`) e painel de configurações.
 - **`apps/signaling`**: Servidor de sinalização leve em Node.js com WebSocket em `/signal`, geração de credenciais temporárias TURN em `/turn-credentials`, validação rigorosa de origens (`ALLOWED_ORIGINS`) e endpoint de verificação de integridade (`/healthz`).
 - **`packages/protocol`**: Biblioteca compartilhada de tipagens TypeScript, esquemas de validação Zod, regras de identificação de salas e perfis de qualidade de vídeo, garantindo compatibilidade entre cliente e servidor.
 
@@ -104,7 +104,8 @@ Em produção, `apps/web` e `apps/signaling` operam como processos desacoplados 
 O frontend comunica-se exclusivamente através de rotas relativas sob a mesma origem:
 - `/signal` (WebSocket) -> encaminhado para `apps/signaling` (porta 3000)
 - `/turn-credentials` (HTTP GET) -> encaminhado para `apps/signaling` (porta 3000)
-- `/healthz` (HTTP GET) -> verificação de saúde do signaling
+- `/healthz` (HTTP GET) -> verificação de saúde do signaling (porta 3000)
+- `/healthz-web` (HTTP GET) -> verificação de saúde do serviço web (porta 3001)
 - `/*` (HTTP/SSR e arquivos estáticos) -> encaminhado para `apps/web` (porta 3001)
 
 ### Variáveis de Ambiente
@@ -118,6 +119,7 @@ O frontend comunica-se exclusivamente através de rotas relativas sob a mesma or
 - `PORT`: Porta do servidor de sinalização (padrão: `3000`).
 - `HOST`: Interface de rede para bind (padrão: `0.0.0.0`).
 - `ALLOWED_ORIGINS`: Lista separada por vírgula de origens autorizadas (ex.: `https://screen.example.com`). Em desenvolvimento, inclui fallbacks para localhost. Em produção, defina explicitamente o domínio público para evitar recusas `403 Forbidden`.
+- `MAX_PARTICIPANTS_PER_ROOM`: Capacidade máxima de participantes simultâneos por sala (padrão: `10`).
 - `TURN_SECRET`: Chave secreta compartilhada para geração de credenciais temporárias do coturn.
 - `TURN_SECRET_FILE`: Caminho para arquivo no disco contendo a chave secreta (padrão: `/etc/screen-room/turn-secret`).
 - `TURN_HOST`: Endereço IP ou hostname público do servidor coturn.
@@ -141,19 +143,24 @@ PORT=3001 pnpm start:web
 
 ### Via Docker
 
-Cada serviço possui seu próprio `Dockerfile`:
+Cada serviço possui seu próprio `Dockerfile`. Para proteger as portas internas e garantir acesso exclusivo via proxy reverso, os contêineres devem executar com `HOST=0.0.0.0` internamente (permitindo que recebam o tráfego encaminhado pela ponte do Docker), mas suas portas devem ser publicadas no host **estritamente na interface de loopback (`127.0.0.1`)**:
 
 ```bash
 # Construir as imagens a partir da raiz do monorepo
 docker build -f apps/signaling/Dockerfile -t screen-room-signaling .
 docker build -f apps/web/Dockerfile -t screen-room-web .
 
-# Executar os contêineres
-docker run -d --name signaling -p 3000:3000 \
+# Executar os contêineres vinculados ao loopback do host (127.0.0.1)
+docker run -d --name signaling \
+  -p 127.0.0.1:3000:3000 \
+  -e HOST=0.0.0.0 \
   -e ALLOWED_ORIGINS="https://screen.example.com" \
   screen-room-signaling
 
-docker run -d --name web -p 3001:3001 screen-room-web
+docker run -d --name web \
+  -p 127.0.0.1:3001:3001 \
+  -e HOST=0.0.0.0 \
+  screen-room-web
 ```
 
 ---
@@ -166,18 +173,20 @@ docker run -d --name web -p 3001:3001 screen-room-web
 screen.example.com {
     # Sinalização WebSocket e credenciais TURN -> apps/signaling
     handle /signal* {
-        reverse_proxy localhost:3000
+        reverse_proxy 127.0.0.1:3000
     }
     handle /turn-credentials* {
-        reverse_proxy localhost:3000
+        reverse_proxy 127.0.0.1:3000
     }
-    handle /healthz* {
-        reverse_proxy localhost:3000
+    # Verificação de integridade do signaling (sem interceptar /healthz-web)
+    @signaling_health path /healthz /health
+    handle @signaling_health {
+        reverse_proxy 127.0.0.1:3000
     }
 
-    # Aplicação web e SSR -> apps/web
+    # Aplicação web, SSR e health check (/healthz-web) -> apps/web
     handle {
-        reverse_proxy localhost:3001
+        reverse_proxy 127.0.0.1:3001
     }
 }
 ```
@@ -207,8 +216,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
-    # Credenciais TURN e Health Check
-    location ~ ^/(turn-credentials|healthz) {
+    # Credenciais TURN e Health Check do Signaling
+    # Delimitador (/|$) impede captura indevida de /healthz-web ou /health-web do serviço web
+    location ~ ^/(turn-credentials|healthz|health)(/|$) {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -216,7 +226,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Frontend TanStack Start (SSR e Assets)
+    # Frontend TanStack Start (SSR, Assets estáticos e /healthz-web)
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;

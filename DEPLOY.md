@@ -18,6 +18,7 @@ flowchart TD
 
     Client -->|"HTTPS / WSS"| Proxy
     Proxy -->|"/* (HTTP / SSR / Estáticos)"| Web
+    Proxy -->|"/healthz-web (HTTP GET)"| Web
     Proxy -->|"/signal (WebSocket Upgrade)"| Signaling
     Proxy -->|"/turn-credentials (HTTP GET)"| Signaling
     Proxy -->|"/healthz (HTTP GET)"| Signaling
@@ -33,7 +34,7 @@ Para que as chamadas relativas do frontend funcionem sem erros de CORS, incompat
 | `/signal*` | WebSocket (`Upgrade: websocket`) | `apps/signaling` | `127.0.0.1:3000` |
 | `/turn-credentials*` | HTTP GET | `apps/signaling` | `127.0.0.1:3000` |
 | `/healthz` ou `/health` | HTTP GET | `apps/signaling` | `127.0.0.1:3000` |
-| `/healthz-web` | HTTP GET | `apps/web` | `127.0.0.1:3001` |
+| `/healthz-web` ou `/health-web` | HTTP GET | `apps/web` | `127.0.0.1:3001` |
 | `/*` (todas as demais rotas) | HTTP GET / POST (SSR e estáticos) | `apps/web` | `127.0.0.1:3001` |
 
 > [!IMPORTANT]
@@ -195,12 +196,14 @@ screen.exemplo.com {
         }
     }
 
-    # 3. Verificação de integridade -> apps/signaling
-    handle /healthz* {
+    # 3. Verificação de integridade do signaling (/healthz e /health) -> apps/signaling
+    # Utiliza matcher exato de paths para evitar interceptar /healthz-web do serviço web
+    @signaling_health path /healthz /health
+    handle @signaling_health {
         reverse_proxy 127.0.0.1:3000
     }
 
-    # 4. Interface Web e SSR -> apps/web
+    # 4. Interface Web, SSR e Health Check do Web (/healthz-web) -> apps/web
     handle {
         reverse_proxy 127.0.0.1:3001 {
             header_up X-Real-IP {remote_host}
@@ -270,7 +273,8 @@ server {
     }
 
     # 2. Credenciais TURN e Health Check do Signaling
-    location ~ ^/(turn-credentials|healthz|health) {
+    # Delimitador (/|$) evita captura indevida de /healthz-web ou /health-web do serviço web
+    location ~ ^/(turn-credentials|healthz|health)(/|$) {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -279,7 +283,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # 3. Frontend Web TanStack Start (SSR e Assets estáticos)
+    # 3. Frontend Web TanStack Start (SSR, Assets estáticos e /healthz-web)
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -538,6 +542,10 @@ ss -tulpn | grep -E ':(3000|3001)'
 curl -s http://127.0.0.1:3000/healthz
 # Resposta esperada: {"status":"ok","service":"signaling"}
 
+# Health check do serviço web interno (esperado HTTP 200)
+curl -s http://127.0.0.1:3001/healthz-web
+# Resposta esperada: {"status":"ok","service":"web"}
+
 # Resposta do serviço web interno (esperado HTTP 200 com HTML SSR)
 curl -sI http://127.0.0.1:3001/ | grep "HTTP/"
 # Resposta esperada: HTTP/1.1 200 OK
@@ -551,11 +559,15 @@ Execute estes testes a partir da sua máquina local ou do próprio servidor:
 curl -s https://screen.exemplo.com/healthz
 # Esperado: {"status":"ok","service":"signaling"}
 
-# 2. Requisição de credenciais TURN com cabeçalho Origin autorizado
+# 2. Health check público do serviço web através do proxy
+curl -s https://screen.exemplo.com/healthz-web
+# Esperado: {"status":"ok","service":"web"}
+
+# 3. Requisição de credenciais TURN com cabeçalho Origin autorizado
 curl -s -H "Origin: https://screen.exemplo.com" https://screen.exemplo.com/turn-credentials
 # Esperado: JSON contendo "iceServers" com HTTP 200
 
-# 3. Teste de rejeição de origem não autorizada
+# 4. Teste de rejeição de origem não autorizada
 curl -sI -H "Origin: https://site-malicioso.com" https://screen.exemplo.com/turn-credentials | grep "HTTP/"
 # Esperado: HTTP/1.1 403 Forbidden
 ```
@@ -569,7 +581,9 @@ curl -sI -H "Origin: https://site-malicioso.com" https://screen.exemplo.com/turn
    - Inicie o compartilhamento de tela e confira a transição de `pc-ice` para `connected`.
 
 > [!NOTE]
-> **Health Check do Serviço Web:** O container `apps/web` não possui uma rota `/healthz` dedicada. Se ferramentas de monitoramento externo forem configuradas para monitorar a saúde da interface web, devem realizar requisições na raiz `/` e aguardar `HTTP 200`.
+> **Health Checks Dedicados dos Serviços:**
+> - **Serviço Web (`apps/web`):** Possui o endpoint dedicado `/healthz-web` (e alias `/health-web`), que responde imediatamente com `{"status":"ok","service":"web"}` em HTTP 200 sem renderizar a árvore de componentes SSR do React. Ferramentas de monitoramento externo (uptime probes, load balancers) devem consultar `/healthz-web`.
+> - **Serviço de Sinalização (`apps/signaling`):** Possui o endpoint dedicado `/healthz` (e alias `/health`), que responde com `{"status":"ok","service":"signaling"}` em HTTP 200.
 
 ---
 
