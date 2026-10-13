@@ -44,29 +44,29 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
   t.after(() => [host, viewer, third].forEach((socket) => socket.close()));
 
   host.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'host' }));
-  assert.deepEqual(await nextMessage(host), {
-    type: 'peers',
-    peers: [],
-    count: 1,
-    participants: [{ peerId: 'host' }],
-  });
+  const hostPeers = await nextMessage(host);
+  assert.equal(hostPeers.type, 'peers');
+  assert.deepEqual(hostPeers.peers, []);
+  assert.equal(hostPeers.count, 1);
+  assert.deepEqual(hostPeers.participants, [{ peerId: 'host' }]);
+  assert.ok(typeof hostPeers.reconnectToken === 'string' && hostPeers.reconnectToken.length >= 16);
 
   viewer.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'viewer' }));
-  assert.deepEqual(await nextMessage(viewer), {
-    type: 'peers',
-    peers: ['host'],
-    count: 2,
-    participants: [{ peerId: 'host' }, { peerId: 'viewer' }],
-  });
+  const viewerPeers = await nextMessage(viewer);
+  assert.equal(viewerPeers.type, 'peers');
+  assert.deepEqual(viewerPeers.peers, ['host']);
+  assert.equal(viewerPeers.count, 2);
+  assert.deepEqual(viewerPeers.participants, [{ peerId: 'host' }, { peerId: 'viewer' }]);
+  assert.ok(typeof viewerPeers.reconnectToken === 'string' && viewerPeers.reconnectToken.length >= 16);
   assert.deepEqual(await nextMessage(host), { type: 'peer-joined', peerId: 'viewer', count: 2 });
 
   third.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'third' }));
-  assert.deepEqual(await nextMessage(third), {
-    type: 'peers',
-    peers: ['host', 'viewer'],
-    count: 3,
-    participants: [{ peerId: 'host' }, { peerId: 'viewer' }, { peerId: 'third' }],
-  });
+  const thirdPeers = await nextMessage(third);
+  assert.equal(thirdPeers.type, 'peers');
+  assert.deepEqual(thirdPeers.peers, ['host', 'viewer']);
+  assert.equal(thirdPeers.count, 3);
+  assert.deepEqual(thirdPeers.participants, [{ peerId: 'host' }, { peerId: 'viewer' }, { peerId: 'third' }]);
+  assert.ok(typeof thirdPeers.reconnectToken === 'string' && thirdPeers.reconnectToken.length >= 16);
   assert.deepEqual(await nextMessage(host), { type: 'peer-joined', peerId: 'third', count: 3 });
   assert.deepEqual(await nextMessage(viewer), { type: 'peer-joined', peerId: 'third', count: 3 });
 });
@@ -83,21 +83,19 @@ test('signaling: registers and broadcasts temporary nicknames', async (t) => {
 
   host.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p1', nickname: 'Aldo' }));
   const hostPeers = await nextMessage(host);
-  assert.deepEqual(hostPeers, {
-    type: 'peers',
-    peers: [],
-    count: 1,
-    participants: [{ peerId: 'p1', nickname: 'Aldo' }],
-  });
+  assert.equal(hostPeers.type, 'peers');
+  assert.deepEqual(hostPeers.peers, []);
+  assert.equal(hostPeers.count, 1);
+  assert.deepEqual(hostPeers.participants, [{ peerId: 'p1', nickname: 'Aldo' }]);
+  assert.ok(typeof hostPeers.reconnectToken === 'string');
 
   viewer.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p2', nickname: 'Marina' }));
   const viewerPeers = await nextMessage(viewer);
-  assert.deepEqual(viewerPeers, {
-    type: 'peers',
-    peers: ['p1'],
-    count: 2,
-    participants: [{ peerId: 'p1', nickname: 'Aldo' }, { peerId: 'p2', nickname: 'Marina' }],
-  });
+  assert.equal(viewerPeers.type, 'peers');
+  assert.deepEqual(viewerPeers.peers, ['p1']);
+  assert.equal(viewerPeers.count, 2);
+  assert.deepEqual(viewerPeers.participants, [{ peerId: 'p1', nickname: 'Aldo' }, { peerId: 'p2', nickname: 'Marina' }]);
+  assert.ok(typeof viewerPeers.reconnectToken === 'string');
 
   const broadcastedToHost = await nextMessage(host);
   assert.deepEqual(broadcastedToHost, {

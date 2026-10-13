@@ -25,7 +25,12 @@ O serviço de sinalização expõe o endpoint `GET /turn-credentials`, que gera 
 |---|---|---|
 | `TURN_SECRET_FILE` | Caminho no sistema de arquivos para o arquivo contendo a chave secreta compartilhada do coturn | `/etc/screen-room/turn-secret` |
 | `TURN_SECRET` | Chave secreta em string (utilizada caso o arquivo especificado não exista) | `""` (vazio) |
-| `TURN_HOST` | Endereço IP público ou hostname do servidor coturn | `169.58.238.52` (endereço de exemplo do baseline) |
+| `TURN_HOST` | Endereço IP público ou hostname do servidor coturn | Obrigatório quando TURN estiver configurado (sem fallback hardcoded) |
+
+> [!IMPORTANT]
+> - O segredo TURN é validado e carregado em cache na inicialização do serviço (PERF-01). A substituição ou rotação do segredo exige reinicialização do serviço de sinalização.
+> - Se houver segredo TURN configurado (`TURN_SECRET` ou `TURN_SECRET_FILE`) sem a definição de `TURN_HOST`, o servidor de sinalização falhará explicitamente na inicialização (CFG-01), evitando o anúncio silencioso de relays inexistentes.
+> - Nenhum endereço IP público é fixado no código-fonte. Quando nenhum segredo for fornecido, o serviço opera em modo STUN-only com servidores públicos.
 
 ### Algoritmo de Geração de Credenciais
 

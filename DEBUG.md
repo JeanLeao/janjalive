@@ -39,6 +39,8 @@ Abaixo estão os eventos técnicos realmente emitidos pelos módulos do cliente 
 - `signal-receive`: Mensagem recebida do servidor (`peers`, `peer-joined`, `peer-left`, `peer-updated`, `signal`, `error`).
 - `signal-close`: Conexão WebSocket fechada (com código e indicação de fechamento limpo).
 - `signal-error`: Erro no canal WebSocket.
+- `signal-schedule-reconnect`: Reagendamento automático de conexão com backoff exponencial e jitter após desconexão inesperada (informa tentativa e atraso em ms).
+- `signal-server-error`: Mensagem de erro informada pelo servidor de sinalização.
 - `signal-skip`: Mensagem ignorada por socket ainda não aberto.
 - `signal-malformed` / `signal-parse-error`: Mensagens de sinalização inválidas ou com erro de decodificação JSON.
 - `nickname-updated`: Notificação local de alteração de nickname do participante.
@@ -95,8 +97,25 @@ Eventos emitidos pelo servidor:
 - `leave`: Participante desconectou-se da sala (`roomId`, `peerId`, `count`).
 - `relay`: Encaminhamento de sinalização entre peers (`roomId`, `from`, `to`, `type`, `delivered`).
 - `update-nickname`: Alteração de nickname de participante propagada para a sala.
+- `rejected-room-full`: Ingresso rejeitado por capacidade de participantes esgotada (`count`, `occupiedSlots`, `maxParticipants`).
+- `unauthorized-reconnect`: Tentativa de usurpação de `peerId` ativo bloqueada (`roomId`, `peerId`, `hasToken`).
+- `unauthorized-reconnect-reserved`: Tentativa de usurpação de `peerId` em período de recuperação efêmera sem a credencial válida.
+- `superseding-existing-socket`: Socket anterior substituído de forma limpa por nova conexão com credencial válida.
+- `rate-limit-turn`: IP atingiu o limite de requisições de credenciais TURN (60 req/min).
 - `rejected-ws-origin`: Conexão WebSocket rejeitada por violação da política de origens (`ALLOWED_ORIGINS`).
 - `rejected-http-origin`: Requisição HTTP a `/turn-credentials` rejeitada por origem não autorizada.
+
+### Códigos de Fechamento WebSocket (`WS_CLOSE_CODES`)
+
+| Código | Identificador | Tipo | Comportamento no Cliente |
+|---|---|---|---|
+| `1000` | `NORMAL` | Normal | Encerramento limpo e intencional. Estado idle. Libera vaga e credenciais imediatamente. |
+| `1008` | `POLICY_VIOLATION` | Terminal | Violação de política geral. Inibe reconexão automática. |
+| `4000` | `SUPERSEDED` | Terminal | Socket substituído por conexão mais recente com token válido. Inibe reconexão para evitar loops entre abas. |
+| `4009` | `ROOM_FULL` | Terminal | Sala na capacidade máxima (padrão 10, considerando participantes conectados e vagas reservadas por 30s). Inibe reconexão automática e exibe feedback de sala cheia. |
+| `4401` | `UNAUTHORIZED_RECONNECT` | Terminal | Tentativa de ingresso usando `peerId` ativo ou em recuperação efêmera de 30s sem a credencial válida. Inibe reconexão e preserva a sessão legítima. |
+| `4403` | `FORBIDDEN_ORIGIN` | Terminal | Origem não autorizada por `ALLOWED_ORIGINS`. Inibe reconexão. |
+| `1006` | *Abnormal Closure* | Transitório | Queda abrupta de rede ou socket derrubado. **Aciona reconexão automática** com backoff exponencial e jitter (reserva vaga e identidade por 30s). |
 
 ---
 
@@ -106,9 +125,9 @@ Ao testar a aplicação com dois navegadores (Cliente A = Apresentador, Cliente 
 
 1. **Entrada na Sala:**
    - Ambos conectam via WebSocket: `signal-connecting` -> `signal-open`.
-   - Cliente A envia `join` e recebe `signal-receive (type=peers, count=1)`.
-   - Cliente B entra na mesma sala e recebe `signal-receive (type=peers, count=2)`.
-   - Cliente A recebe `signal-receive (type=peer-joined, count=2)`.
+   - Cliente A envia `join` e recebe `signal-receive (type=peers, count=1, reconnectToken)`.
+   - Cliente B entra na mesma sala e recebe `signal-receive (type=peers, count=2, reconnectToken)`.
+   - Cliente A recebe `signal-receive (type=peer-joined, count=2)` (sem vazamento de token).
 2. **Início do Compartilhamento (Cliente A):**
    - Cliente A inicia o compartilhamento: `screen-capture-request` -> `screen-captured`.
    - Cliente A gera a oferta: `pc-created` -> `offer-created` -> `signal-send (type=offer)`.
@@ -130,6 +149,12 @@ Ao testar a aplicação com dois navegadores (Cliente A = Apresentador, Cliente 
 
 - **`signal-error` ou desconexão imediata:**
   Verifique se o servidor de sinalização está acessível e se a origem pública da página está contemplada em `ALLOWED_ORIGINS`.
+- **Close code `4401` (`UNAUTHORIZED_RECONNECT`):**
+  Indica colisão de `peerId` com uma sessão ativa na sala sem o token efêmero correto. Se o usuário estiver trocando de rede ou reconectando legitimamente, certifique-se de que o cliente enviou o `reconnectToken` recebido no join original.
+- **Close code `4009` (`ROOM_FULL`):**
+  A sala atingiu o limite configurado (padrão 10 participantes). Aguarde a saída de um participante para que a vaga seja liberada.
+- **HTTP `429 Too Many Requests` em `/turn-credentials`:**
+  A taxa limite de 60 requisições por minuto por IP foi atingida. Se estiver atrás de Caddy/Nginx, certifique-se de que `TRUSTED_PROXIES` está configurado corretamente para que os usuários não colapsem no IP do proxy local (`127.0.0.1`).
 - **`offer-created` não é emitido:**
   O compartilhamento de tela não foi concedido pelo usuário ou não havia outro participante registrado na sala no momento.
 - **`offer-created` aparece no apresentador mas `offer-received` não chega no espectador:**

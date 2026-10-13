@@ -21,7 +21,7 @@ async function runValidation() {
 
   // 1. Iniciar servidor de signaling real
   console.log('1. Iniciando servidor de signaling...');
-  const server = createSignalServer({ port: 3000, host: '127.0.0.1' });
+  const server = createSignalServer({ port: 0, host: '127.0.0.1' });
   await server.ready;
   console.log(`✓ Servidor de signaling ativo na porta ${server.port}`);
 

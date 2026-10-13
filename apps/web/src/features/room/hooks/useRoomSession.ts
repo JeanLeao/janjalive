@@ -62,6 +62,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const localStreamRef = useRef<MediaStream | null>(null);
   const qualityRef = useRef<QualityProfileKey>('balanced');
   const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
+  const nicknameRef = useRef<string | undefined>(displayName?.trim() || undefined);
+  const reconnectTokenRef = useRef<string | undefined>(undefined);
 
   localStreamRef.current = localStream;
   qualityRef.current = quality;
@@ -163,17 +165,20 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state === 'connected') {
-          signaling.join(roomId, peerId, initialNick);
+          signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current);
         }
       },
       onMessage: (message) => {
         if (isDisposed) return;
         if (message.type === 'peers') {
+          if (message.reconnectToken) {
+            reconnectTokenRef.current = message.reconnectToken;
+          }
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const local = prev.find((p) => p.isLocal) || {
               peerId,
-              nickname: initialNick,
+              nickname: nicknameRef.current,
               isLocal: true,
               isSharing: false,
             };
@@ -200,6 +205,19 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             }
             return [local, ...remoteList];
           });
+
+          // Recover WebRTC screen share negotiation upon reconnect
+          if (localStreamRef.current) {
+            const targetPeers = message.participants
+              ? message.participants.map((p) => p.peerId).filter((id) => id !== peerId)
+              : (message.peers || []).filter((id) => id !== peerId);
+
+            targetPeers.forEach((targetId) => {
+              peerManager.createAndSendOffer(targetId).catch((err) => {
+                logger.log('offer-error', { peer: targetId, message: err?.message });
+              });
+            });
+          }
         } else if (message.type === 'peer-joined') {
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
@@ -265,8 +283,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             peerManager.handleRemoteIce(from, data.candidate as RTCIceCandidateInit);
           }
         } else if (message.type === 'error') {
-          setErrorMessage(message.message);
-          showToast(message.message);
+          logger.log('signal-server-error', { message: message.message });
+          if (!message.message.includes('não encontrado')) {
+            setErrorMessage(message.message);
+            showToast(message.message);
+          }
         }
       },
       onError: (err) => {
@@ -290,6 +311,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     return () => {
       isDisposed = true;
+      reconnectTokenRef.current = undefined;
       unsubscribeLogger();
       stopAllTracks(localStreamRef.current);
       statsCollector.stop();
@@ -379,6 +401,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (trimmed === (currentNickname || '')) {
         return;
       }
+      nicknameRef.current = trimmed || undefined;
       setCurrentNickname(trimmed);
       if (typeof window !== 'undefined') {
         if (trimmed) {

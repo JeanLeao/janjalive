@@ -20,5 +20,8 @@
     "@types/ws": "^8.5.14",
     "typescript": "^5.8.2",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "source-map-js": "1.2.2"
   }
 }

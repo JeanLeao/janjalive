@@ -33,6 +33,7 @@ Para que as chamadas relativas do frontend funcionem sem erros de CORS, incompat
 | `/signal*` | WebSocket (`Upgrade: websocket`) | `apps/signaling` | `127.0.0.1:3000` |
 | `/turn-credentials*` | HTTP GET | `apps/signaling` | `127.0.0.1:3000` |
 | `/healthz` ou `/health` | HTTP GET | `apps/signaling` | `127.0.0.1:3000` |
+| `/healthz-web` | HTTP GET | `apps/web` | `127.0.0.1:3001` |
 | `/*` (todas as demais rotas) | HTTP GET / POST (SSR e estáticos) | `apps/web` | `127.0.0.1:3001` |
 
 > [!IMPORTANT]
@@ -143,11 +144,13 @@ Configure as variáveis de ambiente antes de inicializar os serviços.
 | `ALLOWED_ORIGINS` | **Sim (em produção)** | Fallback para localhost | Lista separada por vírgulas de origens autorizadas (ex.: `https://screen.exemplo.com`). |
 | `TURN_SECRET` | Opcional | `""` (vazio) | Segredo compartilhado HMAC-SHA1 compatível com coturn (`use-auth-secret`). |
 | `TURN_SECRET_FILE` | Opcional | `/etc/screen-room/turn-secret` | Caminho no filesystem para o arquivo contendo a chave secreta. |
-| `TURN_HOST` | Condicional | `169.58.238.52` | Hostname ou IP público do servidor coturn. **Obrigatório definir caso `TURN_SECRET` seja preenchido.** |
+| `TURN_HOST` | Condicional | Obrigatório se TURN ativo | Hostname ou IP público do servidor coturn. **Obrigatório definir caso `TURN_SECRET` seja preenchido.** |
+| `MAX_PARTICIPANTS_PER_ROOM` | Opcional | `10` | Limite operacional máximo de participantes simultâneos por sala (incluindo o apresentador). Fallback para `10`. |
+| `TRUSTED_PROXIES` | Opcional | `127.0.0.1,::1,127.0.0.0/8` | Lista separada por vírgula de IPs ou faixas CIDR de proxies reversos confiáveis (ex.: `127.0.0.1,172.17.0.1,172.16.0.0/12`). Essencial em contêineres Docker atrás de proxy no host. |
 
 > [!WARNING]
 > - **Formatação de `ALLOWED_ORIGINS`:** Nunca insira barra no final (`/`). O navegador envia `Origin: https://screen.exemplo.com`. Se a variável for configurada como `https://screen.exemplo.com/`, o teste de igualdade falhará e as conexões retornarão `403 Forbidden`.
-> - **Definição de `TURN_HOST`:** Se `TURN_SECRET` estiver configurado, sempre forneça `TURN_HOST` explicitamente com o endereço do seu coturn. O valor padrão no código (`169.58.238.52`) é um endereço arbitrário do baseline e não deve ser utilizado.
+> - **Definição de `TURN_HOST`:** Se `TURN_SECRET` estiver configurado, sempre forneça `TURN_HOST` explicitamente com o endereço do seu coturn. Caso ausente quando um segredo for definido, o servidor de sinalização falhará imediatamente na inicialização (CFG-01).
 
 ### 2. Serviço Web e SSR (`apps/web`)
 
@@ -180,12 +183,16 @@ Arquivo de configuração `/etc/caddy/Caddyfile`:
 screen.exemplo.com {
     # 1. Sinalização WebSocket (/signal) -> apps/signaling
     handle /signal* {
-        reverse_proxy 127.0.0.1:3000
+        reverse_proxy 127.0.0.1:3000 {
+            header_up X-Real-IP {remote_host}
+        }
     }
 
     # 2. Credenciais efêmeras TURN -> apps/signaling
     handle /turn-credentials* {
-        reverse_proxy 127.0.0.1:3000
+        reverse_proxy 127.0.0.1:3000 {
+            header_up X-Real-IP {remote_host}
+        }
     }
 
     # 3. Verificação de integridade -> apps/signaling
@@ -195,7 +202,9 @@ screen.exemplo.com {
 
     # 4. Interface Web e SSR -> apps/web
     handle {
-        reverse_proxy 127.0.0.1:3001
+        reverse_proxy 127.0.0.1:3001 {
+            header_up X-Real-IP {remote_host}
+        }
     }
 }
 ```
@@ -292,6 +301,44 @@ sudo systemctl reload nginx
 
 > [!TIP]
 > A diretiva `proxy_read_timeout 86400s;` no bloco `/signal` é fundamental para evitar que o Nginx encerre silenciosamente o WebSocket de participantes inativos após o timeout padrão de 60 segundos.
+
+### 5.3. Resolução Segura de IP e Contrato de Proxy (OPS-02)
+
+Para proteger a obtenção de credenciais TURN (`/turn-credentials`) contra esgotamento de taxa (rate limiting de 60 req/min por IP), o servidor de sinalização implementa resolução determinística de IP cliente:
+
+1. **Validação da Origem TCP (`TRUSTED_PROXIES`):**
+   - O servidor inspeciona a conexão TCP física (`req.socket.remoteAddress`).
+   - Se a conexão física **NÃO pertencer** à lista de proxies confiáveis (`TRUSTED_PROXIES`, por padrão `127.0.0.1,::1,127.0.0.0/8`), quaisquer cabeçalhos `X-Forwarded-For` ou `X-Real-IP` são **completamente ignorados**, utilizando-se estritamente o endereço TCP. Isso neutraliza tentativas externas de forjar cabeçalhos para manipular buckets de rate limit.
+   - Em contêineres Docker atrás de um proxy no host ou em outro contêiner, o operador deve configurar `TRUSTED_PROXIES` com o IP do gateway ou faixa da rede Docker (ex.: `TRUSTED_PROXIES=127.0.0.1,172.17.0.1,172.16.0.0/12`). O servidor **não confia automaticamente em todas as redes privadas** para evitar aberturas indevidas.
+
+2. **Cadeia de Encaminhamento e Precedência:**
+   - **Contrato A (`X-Real-IP`):** Quando a conexão TCP provém de um proxy confiável e `X-Real-IP` está presente, seu valor é validado (`net.isIP`) e adotado com precedência. O Caddy (`header_up X-Real-IP {remote_host}`) e o Nginx (`proxy_set_header X-Real-IP $remote_addr;`) sobrescrevem esse cabeçalho na borda, garantindo imunidade a spoofing.
+   - **Contrato B (`X-Forwarded-For`):** O servidor percorre a cadeia da direita para a esquerda (do hop mais próximo ao servidor em direção à origem) e seleciona o primeiro endereço que não seja um proxy confiável. Isso impede que atacantes que injetam valores falsos à esquerda consigam burlar a identificação de IP.
+
+> [!NOTE]
+> **Compartilhamento de IP em Redes Locais (NAT):**
+> Clientes corporativos ou em uma mesma rede Wi-Fi que compartilham o mesmo IP público de saída compartilharão a mesma cota de 60 req/min de `/turn-credentials`. Em salas com até 10 participantes, isso é perfeitamente suficiente (10 requisições simultâneas consomem apenas 16% da cota por minuto).
+
+---
+
+### 5.4. Identidade de Reconexão e Credencial Efêmera (SEC-03)
+
+Para evitar substituições indevidas de participantes e negações de serviço direcionadas em salas de até 10 pessoas, o protocolo adota credenciais efêmeras de sessão:
+
+1. **Geração e Entrega Confidencial:**
+   - No primeiro ingresso válido (`join`), o servidor gera um `reconnectToken` criptograficamente imprevisível (`crypto.randomUUID()`) e o associa em memória ao participante na sala (`RoomRegistry`).
+   - O token é entregue exclusivamente ao próprio cliente na mensagem privada `{ type: 'peers', ..., reconnectToken }`.
+   - As mensagens de presença (`peer-joined`, `peer-left`, `peer-updated`) e os logs de sinalização **nunca divulgam** o token.
+
+2. **Substituição e Proteção de Sessão Ativa:**
+   - Quando uma nova conexão WebSocket envia `join` para um `peerId` que já possui sessão ativa na sala:
+     - **Com token válido:** A nova conexão substitui o socket anterior, que é fechado de forma limpa com código `4000` (`WS_CLOSE_CODES.SUPERSEDED`).
+     - **Sem token ou com token inválido:** A conexão concorrente ou hostil é rejeitada com erro `{ type: 'error', code: 'UNAUTHORIZED_RECONNECT' }` e seu socket é encerrado com código terminal `4401` (`WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT`). A sessão legítima do participante permanece conectada e inalterada.
+
+3. **Ciclo de Vida Efêmero e Códigos de Fechamento:**
+   - O token é mantido estritamente em memória RAM (no cliente e no servidor). Não é armazenado em `localStorage`, cookies ou banco de dados.
+   - Quando o participante sai definitivamente (`signaling.disconnect()`) ou a sala é encerrada, o registro e o token são destruídos imediatamente, liberando a vaga.
+   - Ambos os códigos `4000` (`SUPERSEDED`), `4401` (`UNAUTHORIZED_RECONNECT`), `4009` (`ROOM_FULL`) e `4403` (`FORBIDDEN_ORIGIN`) são códigos de encerramento terminais (`isTerminalCloseCode`). Quando recebidos, o cliente desativa o reagendamento automático de conexão, evitando loops infinitos de reconexão.
 
 ---
 
@@ -576,16 +623,53 @@ docker run -d --name screen-room-web --restart unless-stopped \
 
 ---
 
-## 10. Pendências Técnicas e Riscos de Produção (Auditoria)
+## 10. Hardening Técnico e Mitigações Concluídas (Pré-MVP)
 
-Durante a auditoria técnica do baseline (`96bcac27`), foram identificados pontos de atenção que a infraestrutura de deploy deve observar:
+Todas as recomendações da auditoria técnica do MVP de produção foram implementadas e validadas:
 
-1. **Ausência de Heartbeat no WebSocket (Risco de Queda por Idle Timeout):**
-   - O servidor e o cliente ainda não possuem rotina nativa de `ping`/`pong`. Em proxies com timeout curto para conexões ociosas, participantes que ficarem apenas assistindo podem sofrer desconexão após 60s.
-   - *Mitigação temporária na infraestrutura:* Manter `proxy_read_timeout` estendido no Nginx (ex.: `86400s`) ou timeouts longos no proxy adotado.
-2. **Validação de Host no Signaling:**
-   - A função `isAllowedOrigin` do servidor aceita requisições se o cabeçalho `Origin` coincidir com o cabeçalho `Host`. O proxy reverso deve garantir que o cabeçalho `Host` encaminhado para o backend seja sempre fixado com o domínio real autorizado da aplicação (`proxy_set_header Host $host`).
-3. **Privilégios dos Contêineres Docker:**
-   - As imagens Docker atuais executam o processo Node.js como usuário `root` (UID 0) e não possuem instrução `HEALTHCHECK` embutida no Dockerfile.
-4. **Tamanho da Imagem do Signaling:**
-   - A imagem Docker do `apps/signaling` possui aproximadamente 480 MB devido à cópia de dependências de desenvolvimento do monorepo no estágio builder. O funcionamento, contudo, é estável.
+1. **Heartbeat WebSocket e Reconexão Resiliente (REL-01):**
+   - O servidor executa ping/pong a cada 30 segundos, detecta sockets inativos e encerra conexões zumbis, notificando os participantes da sala.
+   - O cliente reconecta automaticamente após quedas inesperadas usando backoff exponencial com jitter e teto, preservando o nickname e `peerId`, renegociando conexões WebRTC e restaurando streams sem requerer novamente permissão de captura de tela.
+   - Timers e reconexões são cancelados deterministicamente na saída voluntária da sala ou desmontagem de componentes.
+
+2. **Segurança de Origens e Eliminação de Bypass via Host (SEC-01 & CFG-02):**
+   - O bypass de autorização originado na comparação entre `Origin` e `Host` foi totalmente eliminado.
+   - Origens são normalizadas (esquema, porta, remoção de trailing slashes) e validadas estritamente contra `ALLOWED_ORIGINS`.
+   - Cabeçalhos `Host`, `X-Forwarded-Host` e `X-Forwarded-For` não são mais utilizados como autenticadores de origem.
+   - Requisições sem cabeçalho `Origin` são tratadas explicitamente como requisições internas/mesma-origem.
+
+3. **Validação de Payloads e Proteção Contra DoS (DOS-01):**
+   - Limite de mensagem recebida no WebSocketServer fixado em 64 KiB (`maxPayload`).
+   - Validação estrita de contratos via Zod (`ClientMessageSchema`), rejeição de mensagens antes de `join`, mensagens malformadas e relays para participantes inexistentes.
+   - Proteção proporcional de taxa de requisições em `/turn-credentials` e mensagens WebSocket.
+
+4. **Resolução Determinística de Colisões de peerId (BUG-01):**
+   - WebSockets que assumem o mesmo par `roomId:peerId` têm a conexão anterior substituída de forma determinística com dissociação de metadados, impedindo eventos falsos de saída (`peer-left`) ou corrupção do registro da sala.
+
+5. **Configuração TURN Segura e Alta Performance (CFG-01 & PERF-01):**
+   - Fallback de IP hardcoded (`169.58.238.52`) removido do código.
+   - A configuração de `TURN_HOST` é estritamente obrigatória quando o segredo TURN estiver configurado, falhando na inicialização caso ausente.
+   - Modo STUN-only preservado quando nenhum segredo for fornecido.
+   - Segredo carregado e mantido em cache de memória na inicialização, eliminando leituras repetitivas do disco.
+
+6. **Health Check Dedicado do Web (OPS-01):**
+   - Endpoint `/healthz-web` (e alias `/health-web`) implementado no serviço web, retornando HTTP 200 JSON imediatamente sem renderizar árvores React/SSR, sem conflito com o `/healthz` do signaling.
+
+7. **Docker Hardening e Otimização de Imagens (DOCKER-01 & DOCKER-02):**
+   - Ambos os contêineres (`signaling` e `web`) executam com usuário não-privilegiado (`USER node`, UID 1000).
+   - Health checks embutidos nos Dockerfiles usando `node -e fetch(...)`, sem dependência de `curl`.
+   - A imagem Docker do `apps/signaling` foi otimizada via `pnpm deploy --prod`, reduzindo de 480 MB para 244 MB em disco.
+
+8. **Correção de Dependência Vulnerável (SEC-02):**
+   - A vulnerabilidade de negação de serviço no `source-map-js` (<1.2.2) foi resolvida com override fixo para a versão `1.2.2`. Auditoria (`pnpm audit`) zerada.
+
+9. **Regra de Capacidade de 10 Participantes e Reserva Efêmera de Vaga por 30s — Política A (CAP-01):**
+   - Limite operacional padrão de **10 participantes simultâneos por sala** (incluindo o apresentador), aplicado diretamente no servidor de sinalização e não apenas na interface.
+   - Configurável operacionalmente via variável de ambiente `MAX_PARTICIPANTS_PER_ROOM` sem requerer alteração de código.
+   - **Reserva simultânea de identidade e vaga por 30 segundos (Política A):** ao ocorrer uma desconexão involuntária (queda abrupta de rede, terminação de socket ou timeout de heartbeat), a identidade (`peerId` + `reconnectToken`) e a vaga física do participante permanecem estritamente reservadas por até 30 segundos.
+   - **Invariante obrigatório de capacidade:** $\text{participantes ativos} + \text{reservas de vaga válidas} \le \text{capacidade máxima}$.
+   - **Distinção entre presença e controle de admissão:** a contagem de presença exibida aos usuários (`count`) contabiliza apenas participantes efetivamente conectados no momento. Já o controle de admissão (`occupiedSlots`) contabiliza a soma de participantes conectados e reservas ativas de vaga.
+   - **Rejeição atômica de novos entrantes:** enquanto a soma de ativos e reservas atingir a capacidade (ex.: 9 ativos + 1 reserva em sala de 10), novos visitantes são rejeitados imediatamente com mensagem clara (`Sala cheia: capacidade máxima de 10 participantes atingida.`, code: `ROOM_FULL`) e fechamento com código terminal `4009`, impedindo que terceiros ocupem a vaga de quem está reconectando.
+   - **Recuperação garantida:** o participante original reconectando com `reconnectToken` válido dentro da janela de 30 segundos recupera sua própria vaga reservada sem consumir espaço adicional e sem risco de encontrar a sala lotada.
+   - **Expiração da reserva:** se o participante não reconectar dentro do prazo de 30 segundos, a reserva expira automaticamente, liberando a vaga para novos participantes. Salas vazias sem participantes nem reservas ativas são eliminadas da memória.
+   - **Saída voluntária:** o envio de mensagem explícita `leave` ou o encerramento limpo do WebSocket (códigos `1000` ou `1005`) destrói o `reconnectToken` e libera a vaga e a identidade imediatamente para novos entrantes, sem reter reserva de 30 segundos.

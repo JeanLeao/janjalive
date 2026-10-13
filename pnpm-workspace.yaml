@@ -6,3 +6,5 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@mantine/core@9.6.3'
   - '@mantine/hooks@9.6.3'
+overrides:
+  source-map-js: '1.2.2'

@@ -12,6 +12,9 @@ import {
   isOfferSignal,
   isAnswerSignal,
   isIceSignal,
+  WS_CLOSE_CODES,
+  isTerminalCloseCode,
+  ErrorMessageSchema,
 } from '../dist/index.js';
 
 test('protocol: normalizeRoom normalizes valid names and rejects invalid ones', () => {
@@ -97,6 +100,9 @@ test('protocol: validates client and server messages correctly', () => {
     peerId: 'p1',
   });
   assert.equal(peerUpdatedRemovedNick.success, true);
+
+  const leaveParsed = ClientMessageSchema.safeParse({ type: 'leave' });
+  assert.equal(leaveParsed.success, true);
 });
 
 test('protocol: validates typed signal payloads', () => {
@@ -138,4 +144,57 @@ test('protocol: generateSecureRoomId generates high-entropy, valid and unique ro
     set.add(id);
   }
   assert.equal(set.size, 200, 'All 200 generated room IDs must be unique');
+});
+
+test('protocol: identifies terminal WebSocket close codes and validates ErrorMessage with code', () => {
+  assert.equal(WS_CLOSE_CODES.NORMAL, 1000);
+  assert.equal(WS_CLOSE_CODES.SUPERSEDED, 4000);
+  assert.equal(WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT, 4401);
+  assert.equal(WS_CLOSE_CODES.ROOM_FULL, 4009);
+  assert.equal(WS_CLOSE_CODES.FORBIDDEN_ORIGIN, 4403);
+
+  // Terminal codes
+  assert.equal(isTerminalCloseCode(1000), true);
+  assert.equal(isTerminalCloseCode(1008), true);
+  assert.equal(isTerminalCloseCode(4000), true);
+  assert.equal(isTerminalCloseCode(4401), true);
+  assert.equal(isTerminalCloseCode(4009), true);
+  assert.equal(isTerminalCloseCode(4403), true);
+
+  // Non-terminal codes (must trigger reconnect)
+  assert.equal(isTerminalCloseCode(1006), false); // Abnormal closure / network drop
+  assert.equal(isTerminalCloseCode(1001), false); // Going away
+  assert.equal(isTerminalCloseCode(1011), false); // Server error
+
+  // Error message schema with and without code
+  const errNoCode = ErrorMessageSchema.safeParse({ type: 'error', message: 'Falha genérica' });
+  assert.equal(errNoCode.success, true);
+
+  const errWithCode = ErrorMessageSchema.safeParse({
+    type: 'error',
+    message: 'Sala cheia: capacidade máxima de 10 participantes atingida.',
+    code: 'ROOM_FULL',
+  });
+  assert.equal(errWithCode.success, true);
+  if (errWithCode.success) {
+    assert.equal(errWithCode.data.code, 'ROOM_FULL');
+  }
+
+  // Join message with reconnectToken
+  const joinWithToken = ClientMessageSchema.safeParse({
+    type: 'join',
+    roomId: 'room-1',
+    peerId: 'peer-1',
+    reconnectToken: 'sec-token-12345',
+  });
+  assert.equal(joinWithToken.success, true);
+
+  // Peers message with reconnectToken
+  const peersWithToken = ServerMessageSchema.safeParse({
+    type: 'peers',
+    peers: ['p1'],
+    count: 2,
+    reconnectToken: 'sec-token-12345',
+  });
+  assert.equal(peersWithToken.success, true);
 });

@@ -13,13 +13,14 @@ export const JoinMessageSchema = z.object({
   roomId: z.string().min(1),
   peerId: z.string().min(1),
   nickname: z.string().trim().min(1).max(32).optional(),
+  reconnectToken: z.string().trim().min(1).max(128).optional(),
 });
 export type JoinMessage = z.infer<typeof JoinMessageSchema>;
 
 export const SignalRelayMessageSchema = z.object({
   type: z.literal('signal'),
   target: z.string().min(1),
-  data: z.record(z.unknown()).or(z.any()),
+  data: z.record(z.string(), z.unknown()),
 });
 export type SignalRelayMessage = z.infer<typeof SignalRelayMessageSchema>;
 
@@ -29,10 +30,16 @@ export const UpdateNicknameMessageSchema = z.object({
 });
 export type UpdateNicknameMessage = z.infer<typeof UpdateNicknameMessageSchema>;
 
+export const LeaveMessageSchema = z.object({
+  type: z.literal('leave'),
+});
+export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   JoinMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
+  LeaveMessageSchema,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -42,6 +49,7 @@ export const PeersMessageSchema = z.object({
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
+  reconnectToken: z.string().trim().min(1).max(128).optional(),
 });
 export type PeersMessage = z.infer<typeof PeersMessageSchema>;
 
@@ -74,9 +82,32 @@ export const RelayedSignalMessageSchema = z.object({
 });
 export type RelayedSignalMessage = z.infer<typeof RelayedSignalMessageSchema>;
 
+export const WS_CLOSE_CODES = {
+  NORMAL: 1000,
+  POLICY_VIOLATION: 1008,
+  SUPERSEDED: 4000,
+  UNAUTHORIZED_RECONNECT: 4401,
+  ROOM_FULL: 4009,
+  FORBIDDEN_ORIGIN: 4403,
+} as const;
+
+export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([
+  WS_CLOSE_CODES.NORMAL,
+  WS_CLOSE_CODES.POLICY_VIOLATION,
+  WS_CLOSE_CODES.SUPERSEDED,
+  WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT,
+  WS_CLOSE_CODES.ROOM_FULL,
+  WS_CLOSE_CODES.FORBIDDEN_ORIGIN,
+]);
+
+export function isTerminalCloseCode(code: number): boolean {
+  return TERMINAL_CLOSE_CODES.has(code);
+}
+
 export const ErrorMessageSchema = z.object({
   type: z.literal('error'),
   message: z.string(),
+  code: z.string().optional(),
 });
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
