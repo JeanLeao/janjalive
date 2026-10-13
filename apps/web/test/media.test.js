@@ -14,7 +14,7 @@ test('media: canShareScreen detects presence of getDisplayMedia', () => {
   // In node environment without navigator
   assert.equal(canShareScreen(), false);
 
-  // With mocked navigator
+  // In secure context with mocked navigator and getDisplayMedia
   globalThis.window = { isSecureContext: true };
   const origNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', {
@@ -27,6 +27,19 @@ test('media: canShareScreen detects presence of getDisplayMedia', () => {
     writable: true,
   });
   assert.equal(canShareScreen(), true);
+
+  // In insecure context (HTTP or non-secure), must return false
+  globalThis.window = { isSecureContext: false };
+  assert.equal(canShareScreen(), false, 'Insecure context must not allow screen share');
+
+  // Without getDisplayMedia function
+  globalThis.window = { isSecureContext: true };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { mediaDevices: {} },
+    configurable: true,
+    writable: true,
+  });
+  assert.equal(canShareScreen(), false, 'Missing getDisplayMedia must return false');
 
   delete globalThis.window;
   if (origNavigator) Object.defineProperty(globalThis, 'navigator', origNavigator);

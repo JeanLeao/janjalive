@@ -124,3 +124,60 @@ test('signaling-client: receives and validates server messages', async () => {
   client.disconnect();
   globalThis.WebSocket = originalWs;
 });
+
+test('signaling-client: sends update-nickname and receives peer-updated messages', async () => {
+  let createdSocket = null;
+  const originalWs = globalThis.WebSocket;
+  globalThis.WebSocket = class extends MockWebSocket {
+    constructor(url) {
+      super(url);
+      createdSocket = this;
+    }
+  };
+
+  const received = [];
+  const client = new SignalingClient({
+    url: 'ws://mock-server/signal',
+    onStateChange: () => {},
+    onMessage: (msg) => received.push(msg),
+  });
+
+  client.connect();
+  await new Promise((r) => setTimeout(r, 20));
+
+  client.updateNickname('NovoNome');
+  assert.deepEqual(createdSocket.sent[0], {
+    type: 'update-nickname',
+    nickname: 'NovoNome',
+  });
+
+  client.updateNickname('');
+  assert.deepEqual(createdSocket.sent[1], {
+    type: 'update-nickname',
+    nickname: '',
+  });
+
+  createdSocket.simulateServerMessage({
+    type: 'peer-updated',
+    peerId: 'p3',
+    nickname: 'Ana',
+  });
+  createdSocket.simulateServerMessage({
+    type: 'peer-updated',
+    peerId: 'p3',
+  });
+
+  assert.equal(received.length, 2);
+  assert.deepEqual(received[0], {
+    type: 'peer-updated',
+    peerId: 'p3',
+    nickname: 'Ana',
+  });
+  assert.deepEqual(received[1], {
+    type: 'peer-updated',
+    peerId: 'p3',
+  });
+
+  client.disconnect();
+  globalThis.WebSocket = originalWs;
+});

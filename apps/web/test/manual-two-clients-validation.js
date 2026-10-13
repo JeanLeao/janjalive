@@ -37,6 +37,7 @@ async function runValidation() {
   // 3. Cliente A (Host) conecta e entra na sala
   console.log('\n3. Conectando Cliente A (Host)...');
   let hostPresence = 0;
+  let hostLastPeerUpdate = null;
   const hostSignaling = new SignalingClient({
     url: serverUrl,
     onStateChange: (st) => console.log(`   [Host] Estado de conexão: ${st}`),
@@ -51,6 +52,10 @@ async function runValidation() {
       if (msg.type === 'peer-left') {
         console.log(`   [Host] Participante saiu (${msg.peerId})`);
         hostPeerManager.removePeer(msg.peerId);
+      }
+      if (msg.type === 'peer-updated') {
+        console.log(`   [Host] Atualização de nickname recebida para ${msg.peerId}: ${msg.nickname || '(removido)'}`);
+        hostLastPeerUpdate = msg;
       }
       if (msg.type === 'signal') {
         if (msg.data.type === 'answer') {
@@ -83,6 +88,7 @@ async function runValidation() {
   console.log('\n4. Conectando Cliente B (Viewer) na mesma sala...');
   let viewerPresence = 0;
   let viewerReceivedStream = null;
+  let viewerLastPeerUpdate = null;
 
   const viewerSignaling = new SignalingClient({
     url: serverUrl,
@@ -90,6 +96,10 @@ async function runValidation() {
     onMessage: async (msg) => {
       if (msg.type === 'peers' || msg.type === 'peer-joined' || msg.type === 'peer-left') {
         viewerPresence = msg.count;
+      }
+      if (msg.type === 'peer-updated') {
+        console.log(`   [Viewer] Atualização de nickname recebida para ${msg.peerId}: ${msg.nickname || '(removido)'}`);
+        viewerLastPeerUpdate = msg;
       }
       if (msg.type === 'signal') {
         if (msg.data.type === 'offer') {
@@ -123,6 +133,41 @@ async function runValidation() {
   await new Promise((r) => setTimeout(r, 50));
   console.log(`✓ Viewer entrou. Presença no Viewer: ${viewerPresence}, Presença no Host: ${hostPresence}`);
   if (viewerPresence !== 2 || hostPresence !== 2) throw new Error('Falha na presença síncrona');
+
+  // 4.1. Sincronização e propagação de nicknames
+  console.log('\n4.1. Testando sincronização e propagação de nicknames entre clientes...');
+  // Viewer altera nickname para Marina
+  viewerSignaling.updateNickname('Marina');
+  await new Promise((r) => setTimeout(r, 50));
+  if (!hostLastPeerUpdate || hostLastPeerUpdate.nickname !== 'Marina') {
+    throw new Error('Host não recebeu atualização de nickname do Viewer');
+  }
+  console.log('✓ Host recebeu alteração de nickname do Viewer: Marina');
+
+  // Viewer envia atualização redundante
+  hostLastPeerUpdate = null;
+  viewerSignaling.updateNickname('Marina');
+  await new Promise((r) => setTimeout(r, 50));
+  if (hostLastPeerUpdate !== null) {
+    throw new Error('Atualização redundante não deveria ser propagada');
+  }
+  console.log('✓ Atualização redundante de nickname foi ignorada corretamente');
+
+  // Viewer remove nickname (retorna a visitante neutro)
+  viewerSignaling.updateNickname('');
+  await new Promise((r) => setTimeout(r, 50));
+  if (!hostLastPeerUpdate || hostLastPeerUpdate.nickname !== undefined) {
+    throw new Error('Host não recebeu remoção de nickname do Viewer');
+  }
+  console.log('✓ Host recebeu remoção de nickname do Viewer (identificação neutra)');
+
+  // Host define nickname para Aldo
+  hostSignaling.updateNickname('Aldo');
+  await new Promise((r) => setTimeout(r, 50));
+  if (!viewerLastPeerUpdate || viewerLastPeerUpdate.nickname !== 'Aldo') {
+    throw new Error('Viewer não recebeu atualização de nickname do Host');
+  }
+  console.log('✓ Viewer recebeu alteração de nickname do Host: Aldo');
 
   // 5. Host compartilha tela (com áudio da tela/aba, NUNCA microfone)
   console.log('\n5. Host iniciando compartilhamento de tela com áudio de aba...');

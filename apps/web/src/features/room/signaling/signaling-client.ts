@@ -118,8 +118,20 @@ export class SignalingClient {
     }
   }
 
-  join(roomId: string, peerId: string): boolean {
-    return this.send({ type: 'join', roomId, peerId });
+  join(roomId: string, peerId: string, nickname?: string): boolean {
+    return this.send({
+      type: 'join',
+      roomId,
+      peerId,
+      ...(nickname ? { nickname } : {}),
+    });
+  }
+
+  updateNickname(nickname?: string): boolean {
+    return this.send({
+      type: 'update-nickname',
+      ...(nickname !== undefined ? { nickname } : {}),
+    });
   }
 
   relaySignal(target: string, data: Record<string, unknown> | any): boolean {

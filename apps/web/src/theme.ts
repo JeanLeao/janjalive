@@ -1,21 +1,22 @@
 import { createTheme } from '@mantine/core';
 
 export const theme = createTheme({
-  primaryColor: 'teal',
+  primaryColor: 'blue',
   defaultRadius: 'md',
-  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   colors: {
-    forest: [
-      '#eefcf2',
-      '#d7f7e0',
-      '#aef0c3',
-      '#7fe7a0',
-      '#57de81',
-      '#3dd86e',
-      '#2bd563',
-      '#1dbd53',
-      '#12a747',
-      '#122218',
+    dark: [
+      '#f0f3f6', // 0
+      '#d0d7de', // 1
+      '#afb8c1', // 2
+      '#8c959f', // 3
+      '#6e7781', // 4
+      '#30363d', // 5 - borders
+      '#21262d', // 6 - elevated surfaces
+      '#161b22', // 7 - cards / sidebars
+      '#0d1117', // 8 - deep panels
+      '#080a0f', // 9 - page background
     ],
   },
 });

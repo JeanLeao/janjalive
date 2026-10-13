@@ -7,6 +7,13 @@ export interface RemoteStreamEntry {
   stream: MediaStream;
 }
 
+export interface RoomParticipant {
+  peerId: string;
+  nickname?: string;
+  isLocal: boolean;
+  isSharing: boolean;
+}
+
 export interface NetworkMetrics {
   bitrateKbps: number;
   lossPercent: number;

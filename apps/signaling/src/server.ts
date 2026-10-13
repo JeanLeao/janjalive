@@ -179,16 +179,40 @@ export function createSignalServer({
       try {
         if (message.type === 'join') {
           depart(socket);
-          const peers = rooms.join(message.roomId, message.peerId);
+          const rawNick =
+            typeof message.nickname === 'string' && message.nickname.trim()
+              ? message.nickname.trim().slice(0, 32)
+              : undefined;
+          const peers = rooms.join(message.roomId, message.peerId, rawNick);
           socket.meta = {
             roomId: String(message.roomId).trim().toLowerCase(),
             peerId: String(message.peerId).trim(),
           };
           clients.set(`${socket.meta.roomId}:${socket.meta.peerId}`, socket);
           const count = rooms.peers(socket.meta.roomId).length;
-          signalLog('join', { roomId: socket.meta.roomId, peerId: socket.meta.peerId, count });
-          send(socket, { type: 'peers', peers, count });
-          broadcast(socket.meta.roomId, { type: 'peer-joined', peerId: socket.meta.peerId, count }, socket.meta.peerId);
+          const participants = rooms.getParticipants(socket.meta.roomId);
+          signalLog('join', {
+            roomId: socket.meta.roomId,
+            peerId: socket.meta.peerId,
+            nickname: rawNick,
+            count,
+          });
+          send(socket, {
+            type: 'peers',
+            peers,
+            count,
+            participants,
+          });
+          broadcast(
+            socket.meta.roomId,
+            {
+              type: 'peer-joined',
+              peerId: socket.meta.peerId,
+              count,
+              ...(rawNick ? { nickname: rawNick } : {}),
+            },
+            socket.meta.peerId
+          );
           return;
         }
 
@@ -203,6 +227,32 @@ export function createSignalServer({
           });
           if (target) {
             send(target, { type: 'signal', from: socket.meta.peerId, data: message.data });
+          }
+          return;
+        }
+
+        if (message.type === 'update-nickname') {
+          if (!socket.meta) {
+            send(socket, { type: 'error', message: 'Socket não associado a uma sala.' });
+            return;
+          }
+          const { roomId, peerId } = socket.meta;
+          const result = rooms.updateNickname(roomId, peerId, message.nickname);
+          if (result.changed) {
+            signalLog('update-nickname', {
+              roomId,
+              peerId,
+              nickname: result.nickname,
+            });
+            broadcast(
+              roomId,
+              {
+                type: 'peer-updated',
+                peerId,
+                ...(result.nickname ? { nickname: result.nickname } : {}),
+              },
+              peerId
+            );
           }
           return;
         }

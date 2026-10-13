@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   type QualityProfileKey,
   isOfferSignal,
@@ -11,6 +11,7 @@ import type {
   DiagnosticEntry,
   NetworkMetrics,
   RemoteStreamEntry,
+  RoomParticipant,
 } from '../types';
 import { DiagnosticsLogger } from '../diagnostics/diagnostics-logger';
 import { SignalingClient } from '../signaling/signaling-client';
@@ -27,9 +28,10 @@ import {
 export interface UseRoomSessionOptions {
   roomId: string;
   displayName?: string;
+  enabled?: boolean;
 }
 
-export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
+export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomSessionOptions) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('connecting');
   const [participantCount, setParticipantCount] = useState<number>(1);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -43,15 +45,27 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const [participants, setParticipants] = useState<RoomParticipant[]>([]);
+  const [featuredStreamId, setFeaturedStreamId] = useState<string | null>(null);
+  const [currentNickname, setCurrentNickname] = useState<string>('');
+
+  useEffect(() => {
+    if (displayName) {
+      setCurrentNickname(displayName);
+    }
+  }, [displayName]);
+
   const loggerRef = useRef<DiagnosticsLogger | null>(null);
   const signalingRef = useRef<SignalingClient | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
   const statsCollectorRef = useRef<StatsCollector | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const qualityRef = useRef<QualityProfileKey>('balanced');
+  const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
 
   localStreamRef.current = localStream;
   qualityRef.current = quality;
+  remoteStreamsRef.current = remoteStreams;
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -64,12 +78,27 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    if (!enabled) {
+      setConnectionStatus('connected');
+      return;
+    }
+
     const logger = new DiagnosticsLogger();
     loggerRef.current = logger;
     const unsubscribeLogger = logger.subscribe(setDiagnostics);
 
     const peerId = `p_${crypto.randomUUID().replace(/-/g, '')}`;
-    logger.log('session-init', { roomId, peerId, displayName: displayName || 'Anonymous' });
+    const initialNick = displayName?.trim() || undefined;
+    logger.log('session-init', { roomId, peerId, displayName: initialNick || 'Anonymous' });
+
+    setParticipants([
+      {
+        peerId,
+        nickname: initialNick,
+        isLocal: true,
+        isSharing: false,
+      },
+    ]);
 
     let isDisposed = false;
 
@@ -84,9 +113,26 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
           const filtered = prev.filter((item) => item.peerId !== remotePeerId);
           return [...filtered, { peerId: remotePeerId, stream }];
         });
+        setFeaturedStreamId((current) => {
+          // If no stream is currently featured, spotlight this incoming stream
+          if (!current) return remotePeerId;
+          // If something is already in spotlight, preserve existing focus without hijacking
+          return current;
+        });
       },
       onRemoteStreamRemove: (remotePeerId) => {
-        setRemoteStreams((prev) => prev.filter((item) => item.peerId !== remotePeerId));
+        setRemoteStreams((prev) => {
+          const remaining = prev.filter((item) => item.peerId !== remotePeerId);
+          setFeaturedStreamId((current) => {
+            if (current === remotePeerId) {
+              if (remaining.length > 0) return remaining[0].peerId;
+              if (localStreamRef.current) return 'local';
+              return null;
+            }
+            return current;
+          });
+          return remaining;
+        });
       },
       logger,
     });
@@ -117,15 +163,69 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state === 'connected') {
-          signaling.join(roomId, peerId);
+          signaling.join(roomId, peerId, initialNick);
         }
       },
       onMessage: (message) => {
         if (isDisposed) return;
         if (message.type === 'peers') {
           setParticipantCount(Math.max(1, message.count));
+          setParticipants((prev) => {
+            const local = prev.find((p) => p.isLocal) || {
+              peerId,
+              nickname: initialNick,
+              isLocal: true,
+              isSharing: false,
+            };
+            const remoteList: RoomParticipant[] = (message.participants || [])
+              .filter((p) => p.peerId !== peerId)
+              .map((p) => ({
+                peerId: p.peerId,
+                nickname: p.nickname,
+                isLocal: false,
+                isSharing: false,
+              }));
+
+            if (!message.participants && message.peers) {
+              message.peers.forEach((pId) => {
+                if (pId !== peerId) {
+                  remoteList.push({
+                    peerId: pId,
+                    nickname: undefined,
+                    isLocal: false,
+                    isSharing: false,
+                  });
+                }
+              });
+            }
+            return [local, ...remoteList];
+          });
         } else if (message.type === 'peer-joined') {
           setParticipantCount(Math.max(1, message.count));
+          setParticipants((prev) => {
+            const exists = prev.some((p) => p.peerId === message.peerId);
+            if (exists) {
+              return prev.map((p) =>
+                p.peerId === message.peerId ? { ...p, nickname: message.nickname || p.nickname } : p
+              );
+            }
+            return [
+              ...prev,
+              {
+                peerId: message.peerId,
+                nickname: message.nickname,
+                isLocal: false,
+                isSharing: false,
+              },
+            ];
+          });
+
+          if (message.nickname) {
+            showToast(`${message.nickname} entrou na sala.`);
+          } else {
+            showToast('Visitante entrou na sala.');
+          }
+
           if (localStreamRef.current) {
             peerManager.createAndSendOffer(message.peerId).catch((err) => {
               logger.log('offer-error', { peer: message.peerId, message: err?.message });
@@ -133,7 +233,28 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
           }
         } else if (message.type === 'peer-left') {
           setParticipantCount(Math.max(1, message.count));
+          setParticipants((prev) => {
+            const leaving = prev.find((p) => p.peerId === message.peerId);
+            if (leaving) {
+              const name = leaving.nickname || 'Visitante';
+              showToast(`${name} saiu da sala.`);
+            }
+            return prev.filter((p) => p.peerId !== message.peerId);
+          });
           peerManager.removePeer(message.peerId);
+        } else if (message.type === 'peer-updated') {
+          setParticipants((prev) => {
+            return prev.map((p) =>
+              p.peerId === message.peerId
+                ? { ...p, nickname: message.nickname || undefined }
+                : p
+            );
+          });
+          if (message.nickname) {
+            showToast(`Participante alterou o nome para ${message.nickname}.`);
+          } else {
+            showToast('Participante removeu o nickname.');
+          }
         } else if (message.type === 'signal') {
           const { from, data } = message;
           if (isOfferSignal(data)) {
@@ -175,7 +296,7 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
       peerManager.closeAll();
       signaling.disconnect();
     };
-  }, [roomId, displayName, showToast]);
+  }, [roomId, displayName, showToast, enabled]);
 
   const stopSharing = useCallback(() => {
     if (localStreamRef.current) {
@@ -186,6 +307,13 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
     setIsSharing(false);
     setIsAudioMuted(false);
     setHasAudioTrack(false);
+
+    setFeaturedStreamId((current) => {
+      if (current === 'local') {
+        return remoteStreamsRef.current.length > 0 ? remoteStreamsRef.current[0].peerId : null;
+      }
+      return current;
+    });
 
     peerManagerRef.current?.detachLocalStream().catch(console.error);
     statsCollectorRef.current?.stop();
@@ -200,6 +328,10 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
       localStreamRef.current = stream;
       setLocalStream(stream);
       setIsSharing(true);
+
+      // Preserve existing spotlight if another participant is already presenting;
+      // otherwise, feature the newly started local stream.
+      setFeaturedStreamId((current) => current || 'local');
 
       const hasAudio = stream.getAudioTracks().length > 0;
       setHasAudioTrack(hasAudio);
@@ -237,6 +369,47 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
     }
   }, [stopSharing, showToast]);
 
+  const selectFeaturedStream = useCallback((streamId: string) => {
+    setFeaturedStreamId(streamId);
+  }, []);
+
+  const updateNickname = useCallback(
+    (nickname: string) => {
+      const trimmed = nickname.trim().slice(0, 32);
+      if (trimmed === (currentNickname || '')) {
+        return;
+      }
+      setCurrentNickname(trimmed);
+      if (typeof window !== 'undefined') {
+        if (trimmed) {
+          sessionStorage.setItem('screen_room_display_name', trimmed);
+        } else {
+          sessionStorage.removeItem('screen_room_display_name');
+        }
+      }
+      setParticipants((prev) =>
+        prev.map((p) => (p.isLocal ? { ...p, nickname: trimmed || undefined } : p))
+      );
+      signalingRef.current?.updateNickname(trimmed);
+      loggerRef.current?.log('nickname-updated', { nickname: trimmed || 'Visitor' });
+      if (trimmed) {
+        showToast(`Seu nickname foi alterado para ${trimmed}.`);
+      } else {
+        showToast('Nickname removido. Você está identificado como visitante.');
+      }
+    },
+    [currentNickname, showToast]
+  );
+
+  const participantsWithSharing = useMemo(() => {
+    return participants.map((p) => ({
+      ...p,
+      isSharing: p.isLocal
+        ? isSharing
+        : remoteStreams.some((r) => r.peerId === p.peerId),
+    }));
+  }, [participants, isSharing, remoteStreams]);
+
   const toggleAudioMute = useCallback(() => {
     if (!localStreamRef.current) return;
     const nextMuted = !isAudioMuted;
@@ -265,11 +438,16 @@ export function useRoomSession({ roomId, displayName }: UseRoomSessionOptions) {
   return {
     connectionStatus,
     participantCount,
+    participants: participantsWithSharing,
     localStream,
     isSharing,
     isAudioMuted,
     hasAudioTrack,
     remoteStreams,
+    featuredStreamId,
+    selectFeaturedStream,
+    updateNickname,
+    currentNickname,
     quality,
     networkStats,
     diagnostics,

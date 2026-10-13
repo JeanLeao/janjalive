@@ -2,7 +2,11 @@ import { QUALITY_PROFILES, type QualityProfileKey } from '@screen-room/protocol'
 
 export function canShareScreen(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
-  return Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function');
+  if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) return false;
+  return Boolean(
+    navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getDisplayMedia === 'function'
+  );
 }
 
 export function getShareSupportMessage(): string {

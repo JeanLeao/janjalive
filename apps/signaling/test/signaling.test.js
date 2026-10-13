@@ -44,16 +44,116 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
   t.after(() => [host, viewer, third].forEach((socket) => socket.close()));
 
   host.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'host' }));
-  assert.deepEqual(await nextMessage(host), { type: 'peers', peers: [], count: 1 });
+  assert.deepEqual(await nextMessage(host), {
+    type: 'peers',
+    peers: [],
+    count: 1,
+    participants: [{ peerId: 'host' }],
+  });
 
   viewer.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'viewer' }));
-  assert.deepEqual(await nextMessage(viewer), { type: 'peers', peers: ['host'], count: 2 });
+  assert.deepEqual(await nextMessage(viewer), {
+    type: 'peers',
+    peers: ['host'],
+    count: 2,
+    participants: [{ peerId: 'host' }, { peerId: 'viewer' }],
+  });
   assert.deepEqual(await nextMessage(host), { type: 'peer-joined', peerId: 'viewer', count: 2 });
 
   third.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'third' }));
-  assert.deepEqual(await nextMessage(third), { type: 'peers', peers: ['host', 'viewer'], count: 3 });
+  assert.deepEqual(await nextMessage(third), {
+    type: 'peers',
+    peers: ['host', 'viewer'],
+    count: 3,
+    participants: [{ peerId: 'host' }, { peerId: 'viewer' }, { peerId: 'third' }],
+  });
   assert.deepEqual(await nextMessage(host), { type: 'peer-joined', peerId: 'third', count: 3 });
   assert.deepEqual(await nextMessage(viewer), { type: 'peer-joined', peerId: 'third', count: 3 });
+});
+
+test('signaling: registers and broadcasts temporary nicknames', async (t) => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  t.after(() => app.close());
+
+  const url = `ws://127.0.0.1:${app.port}/signal`;
+  const host = await connect(url);
+  const viewer = await connect(url);
+  t.after(() => [host, viewer].forEach((socket) => socket.close()));
+
+  host.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p1', nickname: 'Aldo' }));
+  const hostPeers = await nextMessage(host);
+  assert.deepEqual(hostPeers, {
+    type: 'peers',
+    peers: [],
+    count: 1,
+    participants: [{ peerId: 'p1', nickname: 'Aldo' }],
+  });
+
+  viewer.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p2', nickname: 'Marina' }));
+  const viewerPeers = await nextMessage(viewer);
+  assert.deepEqual(viewerPeers, {
+    type: 'peers',
+    peers: ['p1'],
+    count: 2,
+    participants: [{ peerId: 'p1', nickname: 'Aldo' }, { peerId: 'p2', nickname: 'Marina' }],
+  });
+
+  const broadcastedToHost = await nextMessage(host);
+  assert.deepEqual(broadcastedToHost, {
+    type: 'peer-joined',
+    peerId: 'p2',
+    count: 2,
+    nickname: 'Marina',
+  });
+});
+
+test('signaling: propagates nickname updates and removal, avoiding redundant updates', async (t) => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  t.after(() => app.close());
+
+  const url = `ws://127.0.0.1:${app.port}/signal`;
+  const host = await connect(url);
+  const viewer = await connect(url);
+  t.after(() => [host, viewer].forEach((socket) => socket.close()));
+
+  host.send(JSON.stringify({ type: 'join', roomId: 'nick-sync', peerId: 'p1', nickname: 'Aldo' }));
+  await nextMessage(host); // peers message
+
+  viewer.send(JSON.stringify({ type: 'join', roomId: 'nick-sync', peerId: 'p2', nickname: 'Marina' }));
+  await nextMessage(viewer); // peers message
+  await nextMessage(host); // peer-joined message
+
+  // 1. Viewer updates nickname
+  viewer.send(JSON.stringify({ type: 'update-nickname', nickname: '  Marina Silva  ' }));
+  const hostReceivedUpdate = await nextMessage(host);
+  assert.deepEqual(hostReceivedUpdate, {
+    type: 'peer-updated',
+    peerId: 'p2',
+    nickname: 'Marina Silva',
+  });
+
+  // 2. Viewer sends redundant update with same nickname - should NOT be broadcast
+  viewer.send(JSON.stringify({ type: 'update-nickname', nickname: 'Marina Silva' }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  // 3. Viewer removes nickname (empty string)
+  viewer.send(JSON.stringify({ type: 'update-nickname', nickname: '' }));
+  const hostReceivedRemoval = await nextMessage(host);
+  assert.deepEqual(hostReceivedRemoval, {
+    type: 'peer-updated',
+    peerId: 'p2',
+  });
+
+  // 4. Host updates nickname
+  host.send(JSON.stringify({ type: 'update-nickname', nickname: 'Aldo M.' }));
+  const viewerReceivedHostUpdate = await nextMessage(viewer);
+  assert.deepEqual(viewerReceivedHostUpdate, {
+    type: 'peer-updated',
+    peerId: 'p1',
+    nickname: 'Aldo M.',
+  });
 });
 
 test('signaling: relays targeted signaling data', async (t) => {

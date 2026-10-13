@@ -9,11 +9,7 @@ import {
   MantineProvider,
   ColorSchemeScript,
   mantineHtmlProps,
-  AppShell,
-  Group,
-  Text,
-  Badge,
-  Anchor,
+  Box,
 } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { theme } from '../theme';
@@ -23,8 +19,8 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { name: 'theme-color', content: '#122218' },
-      { title: 'Screen Room — tela e áudio, sem microfone' },
+      { name: 'theme-color', content: '#080a0f' },
+      { title: 'Screen Room — compartilhamento em tempo real' },
     ],
     links: [
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
@@ -39,59 +35,43 @@ function RootComponent() {
       <head>
         <HeadContent />
         <ColorSchemeScript defaultColorScheme="dark" />
+        <style>{`
+          :focus-visible {
+            outline: 2px solid #3b82f6 !important;
+            outline-offset: 2px !important;
+          }
+          button:focus-visible,
+          [role="button"]:focus-visible,
+          a:focus-visible,
+          input:focus-visible {
+            outline: 2px solid #3b82f6 !important;
+            outline-offset: 2px !important;
+          }
+        `}</style>
       </head>
-      <body>
+      <body
+        style={{
+          margin: 0,
+          padding: 0,
+          backgroundColor: '#080a0f',
+          color: '#e6edf3',
+          fontFamily:
+            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+          overflowX: 'hidden',
+          minHeight: '100vh',
+        }}
+      >
         <MantineProvider theme={theme} defaultColorScheme="dark">
-          <AppShell
-            header={{ height: 60 }}
-            padding="md"
-            styles={{
-              main: {
-                minHeight: '100vh',
-                backgroundColor: 'var(--mantine-color-dark-8)',
-              },
+          <Box
+            style={{
+              minHeight: '100vh',
+              display: 'flex',
+              flexDirection: 'column',
+              backgroundColor: '#080a0f',
             }}
           >
-            <AppShell.Header
-              style={{
-                backgroundColor: '#122218',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 1.5rem',
-              }}
-            >
-              <Group justify="space-between" style={{ width: '100%' }}>
-                <Anchor
-                  href="/"
-                  underline="never"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '1.15rem',
-                  }}
-                >
-                  <span style={{ color: '#57de81' }}>▣</span> Screen Room
-                </Anchor>
-                <Badge
-                  color="gray"
-                  variant="dot"
-                  size="lg"
-                  styles={{
-                    root: { textTransform: 'none', fontWeight: 600 },
-                  }}
-                >
-                  Pronto para conectar
-                </Badge>
-              </Group>
-            </AppShell.Header>
-            <AppShell.Main>
-              <Outlet />
-            </AppShell.Main>
-          </AppShell>
+            <Outlet />
+          </Box>
         </MantineProvider>
         <ScrollRestoration />
         <Scripts />

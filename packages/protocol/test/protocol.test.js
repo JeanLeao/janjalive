@@ -34,6 +34,9 @@ test('protocol: validates client and server messages correctly', () => {
   const joinParsed = ClientMessageSchema.safeParse({ type: 'join', roomId: 'room1', peerId: 'peer1' });
   assert.equal(joinParsed.success, true);
 
+  const joinWithNick = ClientMessageSchema.safeParse({ type: 'join', roomId: 'room1', peerId: 'peer1', nickname: 'Aldo' });
+  assert.equal(joinWithNick.success, true);
+
   const signalParsed = ClientMessageSchema.safeParse({ type: 'signal', target: 'peer2', data: { sdp: 'fake' } });
   assert.equal(signalParsed.success, true);
 
@@ -42,6 +45,58 @@ test('protocol: validates client and server messages correctly', () => {
 
   const peersMsg = ServerMessageSchema.safeParse({ type: 'peers', peers: ['p1'], count: 2 });
   assert.equal(peersMsg.success, true);
+
+  const peersWithParticipants = ServerMessageSchema.safeParse({
+    type: 'peers',
+    peers: ['p1'],
+    count: 2,
+    participants: [{ peerId: 'p1', nickname: 'Marina' }],
+  });
+  assert.equal(peersWithParticipants.success, true);
+
+  const peerJoinedWithNick = ServerMessageSchema.safeParse({
+    type: 'peer-joined',
+    peerId: 'p2',
+    count: 3,
+    nickname: 'Rafael',
+  });
+  assert.equal(peerJoinedWithNick.success, true);
+
+  const updateNick = ClientMessageSchema.safeParse({
+    type: 'update-nickname',
+    nickname: 'NovoNome',
+  });
+  assert.equal(updateNick.success, true);
+
+  const removeNick = ClientMessageSchema.safeParse({
+    type: 'update-nickname',
+  });
+  assert.equal(removeNick.success, true);
+
+  const removeNickEmpty = ClientMessageSchema.safeParse({
+    type: 'update-nickname',
+    nickname: '',
+  });
+  assert.equal(removeNickEmpty.success, true);
+
+  const updateNickTooLong = ClientMessageSchema.safeParse({
+    type: 'update-nickname',
+    nickname: 'a'.repeat(33),
+  });
+  assert.equal(updateNickTooLong.success, false);
+
+  const peerUpdatedWithNick = ServerMessageSchema.safeParse({
+    type: 'peer-updated',
+    peerId: 'p1',
+    nickname: 'Carlos',
+  });
+  assert.equal(peerUpdatedWithNick.success, true);
+
+  const peerUpdatedRemovedNick = ServerMessageSchema.safeParse({
+    type: 'peer-updated',
+    peerId: 'p1',
+  });
+  assert.equal(peerUpdatedRemovedNick.success, true);
 });
 
 test('protocol: validates typed signal payloads', () => {

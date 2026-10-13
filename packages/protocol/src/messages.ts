@@ -1,10 +1,18 @@
 import { z } from 'zod';
 
+// Participant presence info
+export const ParticipantInfoSchema = z.object({
+  peerId: z.string().min(1),
+  nickname: z.string().trim().min(1).max(32).optional(),
+});
+export type ParticipantInfo = z.infer<typeof ParticipantInfoSchema>;
+
 // Client -> Server
 export const JoinMessageSchema = z.object({
   type: z.literal('join'),
   roomId: z.string().min(1),
   peerId: z.string().min(1),
+  nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type JoinMessage = z.infer<typeof JoinMessageSchema>;
 
@@ -15,9 +23,16 @@ export const SignalRelayMessageSchema = z.object({
 });
 export type SignalRelayMessage = z.infer<typeof SignalRelayMessageSchema>;
 
+export const UpdateNicknameMessageSchema = z.object({
+  type: z.literal('update-nickname'),
+  nickname: z.string().trim().max(32).optional(),
+});
+export type UpdateNicknameMessage = z.infer<typeof UpdateNicknameMessageSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   JoinMessageSchema,
   SignalRelayMessageSchema,
+  UpdateNicknameMessageSchema,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -26,6 +41,7 @@ export const PeersMessageSchema = z.object({
   type: z.literal('peers'),
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
+  participants: z.array(ParticipantInfoSchema).optional(),
 });
 export type PeersMessage = z.infer<typeof PeersMessageSchema>;
 
@@ -33,6 +49,7 @@ export const PeerJoinedMessageSchema = z.object({
   type: z.literal('peer-joined'),
   peerId: z.string(),
   count: z.number().int().positive(),
+  nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type PeerJoinedMessage = z.infer<typeof PeerJoinedMessageSchema>;
 
@@ -42,6 +59,13 @@ export const PeerLeftMessageSchema = z.object({
   count: z.number().int().nonnegative(),
 });
 export type PeerLeftMessage = z.infer<typeof PeerLeftMessageSchema>;
+
+export const PeerUpdatedMessageSchema = z.object({
+  type: z.literal('peer-updated'),
+  peerId: z.string().min(1),
+  nickname: z.string().trim().min(1).max(32).optional(),
+});
+export type PeerUpdatedMessage = z.infer<typeof PeerUpdatedMessageSchema>;
 
 export const RelayedSignalMessageSchema = z.object({
   type: z.literal('signal'),
@@ -60,6 +84,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   PeersMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,
+  PeerUpdatedMessageSchema,
   RelayedSignalMessageSchema,
   ErrorMessageSchema,
 ]);
