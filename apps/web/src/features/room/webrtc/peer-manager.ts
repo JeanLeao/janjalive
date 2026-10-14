@@ -53,6 +53,13 @@ export class PeerManager {
   }
 
   addParticipant(id: string): void {
+    // A repeated peer-joined means the server replaced that participant's socket
+    // without peer-left. Rebuild both generations rather than accepting signals
+    // addressed to a retired connection or relaxing the stale-signal checks.
+    if (this.participants.has(id)) {
+      this.resetPeer(id);
+      return;
+    }
     this.participants.add(id);
     if (this.localStream) void this.createAndSendOffer(id);
   }

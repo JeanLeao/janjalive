@@ -363,3 +363,62 @@ test('quality constraints are bounded by capture capabilities without interrupti
   assert.equal(track.readyState, 'live');
   manager.dispose();
 });
+
+for (const reconnectingId of ['host', 'viewer']) {
+  test(`socket replacement reconciles generations when ${reconnectingId} reconnects`, async () => {
+    const queue = [], managers = {};
+    for (const id of ['host', 'viewer']) {
+      managers[id] = new PeerManager({
+        localPeerId: id, rtcConfig: {},
+        onSendSignal: (target, data) => { queue.push({ from: id, target, data }); return true; },
+        onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+      });
+    }
+    const settle = async () => {
+      for (let i = 0; i < 20; i++) {
+        await new Promise(setImmediate);
+        if (!queue.length) return;
+        for (const { from, target, data } of queue.splice(0)) await managers[target].handleSignal(from, data);
+      }
+      assert.fail('negotiation did not settle');
+    };
+    try {
+      managers.host.setParticipants(['viewer']);
+      managers.viewer.setParticipants(['host']);
+      managers.viewer.setRemoteSharing('host', true);
+      const stream = new MockMediaStream();
+      await managers.host.attachLocalStream(stream);
+      await settle();
+      const oldHost = managers.host.getPeer('viewer');
+      const oldViewer = managers.viewer.getPeer('host');
+      assert.equal(oldHost.remoteGeneration, oldViewer.generation);
+      const remainingId = reconnectingId === 'host' ? 'viewer' : 'host';
+      managers[reconnectingId].closeAll(); // useRoomSession: disconnected
+      managers[reconnectingId].setParticipants([remainingId]); // peers snapshot
+      if (reconnectingId === 'viewer') managers.viewer.setRemoteSharing('host', true);
+      managers[remainingId].addParticipant(reconnectingId); // peer-joined, no peer-left
+      await settle();
+      const host = managers.host.getPeer('viewer'), viewer = managers.viewer.getPeer('host');
+      assert.ok(host && viewer, 'both sides must recreate their local connections');
+      assert.notEqual(host.generation, oldHost.generation);
+      assert.notEqual(viewer.generation, oldViewer.generation);
+      assert.equal(host.remoteGeneration, viewer.generation);
+      assert.equal(viewer.remoteGeneration, host.generation);
+      assert.equal(host.pc.signalingState, 'stable');
+      assert.equal(viewer.pc.signalingState, 'stable');
+      assert.equal(host.videoSender.track, stream.getVideoTracks()[0]);
+      // Retired remote generations and obsolete targets remain rejected, even for offers.
+      for (const data of [
+        { type: 'offer', generation: oldViewer.generation },
+        { type: 'offer', generation: 'unknown', targetGeneration: oldHost.generation },
+        { type: 'answer', generation: oldViewer.generation, targetGeneration: host.generation },
+        { type: 'ice', generation: oldViewer.generation, candidate: { candidate: 'obsolete' } },
+      ]) {
+        const description = host.pc.remoteDescription;
+        await managers.host.handleSignal('viewer', { ...data, sdp: { type: data.type, sdp: 'obsolete' } });
+        assert.equal(host.pc.remoteDescription, description);
+        assert.equal(host.pc.addedIceCandidates.length, 0);
+      }
+    } finally { managers.host.dispose(); managers.viewer.dispose(); }
+  });
+}

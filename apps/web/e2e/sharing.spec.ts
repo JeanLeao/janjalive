@@ -17,6 +17,9 @@ async function syntheticCapture(page: Page) {
       constructor(url: string | URL, protocols?: string | string[]) {
         super(url, protocols);
         (window as any).testSockets.push(this);
+        this.addEventListener('message', event => {
+          ((window as any).testMessages ||= []).push(JSON.parse(event.data));
+        });
       }
     };
     const NativePC = window.RTCPeerConnection;
@@ -249,3 +252,43 @@ test('simultaneous initial offers deliver both directions; one presenter can sto
     await frames(first);
   } finally { await a.close(); await b.close(); }
 });
+
+for (const role of ['viewer', 'presenter']) {
+  test(`active socket replacement resumes frames for ${role} without reload`, async ({ browser }) => {
+    const a = await browser.newContext(), b = await browser.newContext();
+    try {
+      const host = await a.newPage(), viewer = await b.newPage();
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await Promise.all([host.goto(`/room/e2e-replace-${role}`), viewer.goto(`/room/e2e-replace-${role}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+      await frames(viewer);
+      const reconnecting = role === 'viewer' ? viewer : host;
+      const remaining = role === 'viewer' ? host : viewer;
+      await Promise.all([host, viewer].map(page => page.evaluate(() => {
+        (window as any).beforeReplacementPeers = [...(window as any).testPeers];
+      })));
+      await remaining.evaluate(() => { (window as any).testMessages = []; });
+      await reconnecting.evaluate(() => {
+        const socket = (window as any).testSockets.find((s: WebSocket) => s.readyState === WebSocket.OPEN && s.url.includes('/signal')) as WebSocket;
+        // Model a half-open connection: the client detects loss before the server.
+        // Keep the real transport open until the server replaces it on rejoin.
+        const onclose = socket.onclose!;
+        socket.onclose = null; socket.onmessage = null;
+        (window as any).replacementClose = new Promise(resolve => socket.addEventListener('close', event => resolve(event.code)));
+        onclose.call(socket, new CloseEvent('close', { code: 1006 }));
+      });
+      await expect(reconnecting.getByText('Desconectado', { exact: true })).toBeVisible();
+      await expect(reconnecting.getByText('Conectado', { exact: true })).toBeVisible({ timeout: 10000 });
+      expect(await reconnecting.evaluate(() => (window as any).replacementClose)).toBe(4000);
+      const presence = await remaining.evaluate(() => (window as any).testMessages.filter((m: any) => ['peer-joined', 'peer-left'].includes(m.type)).map((m: any) => m.type));
+      expect(presence).toEqual(['peer-joined']);
+      await Promise.all([host, viewer].map(page => expect.poll(() => page.evaluate(() =>
+        (window as any).beforeReplacementPeers.every((pc: RTCPeerConnection) => pc.connectionState === 'closed')
+      ), { timeout: 5000 }).toBe(true)));
+      await frames(viewer);
+      expect(await host.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
+      expect(await reconnecting.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.url.includes('/signal')).length)).toBe(2);
+    } finally { await a.close(); await b.close(); }
+  });
+}
