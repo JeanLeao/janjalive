@@ -65,7 +65,7 @@ function RoomPage() {
         ctx1.fillRect(0, 0, 1920, 1080);
         ctx1.fillStyle = '#38bdf8';
         ctx1.font = 'bold 52px system-ui, -apple-system, sans-serif';
-        ctx1.fillText('Carlos — Apresentação de Arquitetura', 120, 180);
+        ctx1.fillText('Firminha — Apresentação de Arquitetura', 120, 180);
         ctx1.fillStyle = '#94a3b8';
         ctx1.font = '28px system-ui, -apple-system, sans-serif';
         ctx1.fillText('Screen Room • Alta qualidade (1080p) • Áudio da aba ativo', 120, 240);
@@ -96,10 +96,10 @@ function RoomPage() {
 
       const s1 = c1.captureStream(30);
 
-      const streams = [{ peerId: 'peer_carlos', stream: s1 }];
+      const streams = [{ peerId: 'peer_firminha', stream: s1 }];
       const parts = [
         { peerId: 'p_local', nickname: undefined, isLocal: true, isSharing: false },
-        { peerId: 'peer_carlos', nickname: 'Carlos', isLocal: false, isSharing: true },
+        { peerId: 'peer_firminha', nickname: 'Firminha', isLocal: false, isSharing: true },
       ];
 
       let timer2: NodeJS.Timeout | null = null;

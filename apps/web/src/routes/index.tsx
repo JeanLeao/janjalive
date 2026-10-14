@@ -403,10 +403,10 @@ function LobbyPage() {
                         color: '#fff',
                       }}
                     >
-                      C
+                      F
                     </Box>
                     <Text size="xs" fw={600} c="#fff">
-                      Carlos · Transmitindo
+                      Firminha · Transmitindo
                     </Text>
                   </Box>
 
