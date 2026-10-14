@@ -121,7 +121,7 @@ test('media: setStreamAudioMuted toggles only audio track enabled state', () => 
   assert.equal(audioTrack.enabled, true);
 });
 
-test('media: stopAllTracks stops all tracks and triggers ended listeners', () => {
+test('media: stopAllTracks stops all tracks without emitting ended', () => {
   const videoTrack = new MockMediaStreamTrack('video');
   const audioTrack = new MockMediaStreamTrack('audio');
   let endedFired = false;
@@ -134,5 +134,15 @@ test('media: stopAllTracks stops all tracks and triggers ended listeners', () =>
 
   assert.equal(videoTrack.readyState, 'ended');
   assert.equal(audioTrack.readyState, 'ended');
-  assert.equal(endedFired, true);
+  assert.equal(endedFired, false);
+});
+
+test('media: simulated native interruption emits ended once', () => {
+  const track = new MockMediaStreamTrack('video');
+  let events = 0;
+  track.addEventListener('ended', () => { events++; });
+  track.endNatively();
+  track.endNatively();
+  assert.equal(track.readyState, 'ended');
+  assert.equal(events, 1);
 });

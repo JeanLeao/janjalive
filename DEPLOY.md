@@ -687,3 +687,15 @@ Todas as recomendações da auditoria técnica do MVP de produção foram implem
    - **Recuperação garantida:** o participante original reconectando com `reconnectToken` válido dentro da janela de 30 segundos recupera sua própria vaga reservada sem consumir espaço adicional e sem risco de encontrar a sala lotada.
    - **Expiração da reserva:** se o participante não reconectar dentro do prazo de 30 segundos, a reserva expira automaticamente, liberando a vaga para novos participantes. Salas vazias sem participantes nem reservas ativas são eliminadas da memória.
    - **Saída voluntária:** o envio de mensagem explícita `leave` ou o encerramento limpo do WebSocket (códigos `1000` ou `1005`) destrói o `reconnectToken` e libera a vaga e a identidade imediatamente para novos entrantes, sem reter reserva de 30 segundos.
+
+### Atualização do protocolo de compartilhamento
+
+Publique primeiro o servidor com suporte a `update-sharing`/`sharing-updated` e
+estado de transmissão nos snapshots, depois o cliente. Atualize todas as abas
+para validar parada remota, renegociação e recuperação. A atualização do cliente
+não exige aumentar o limite de dez participantes nem adicionar microfone.
+
+Antes de concluir a publicação, execute os testes locais descritos em DEBUG.md,
+depois confirme primeiro frame em até cinco segundos e parada em até um segundo
+no site publicado, em Chrome/Edge, redes distintas e relay obrigatório (TURN.md).
+Faça também uma verificação complementar em Firefox e Safari.

@@ -573,6 +573,18 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'update-sharing') {
+          if (!socket.meta) {
+            send(socket, { type: 'error', message: 'Envie join primeiro.' });
+            return;
+          }
+          const { roomId, peerId } = socket.meta;
+          const { type, ...sharing } = message;
+          rooms.updateSharing(roomId, peerId, sharing);
+          broadcast(roomId, { type: 'sharing-updated', peerId, ...sharing }, peerId);
+          return;
+        }
+
         if (message.type === 'update-nickname') {
           if (!socket.meta) {
             send(socket, { type: 'error', message: 'Socket não associado a uma sala. Envie join primeiro.' });

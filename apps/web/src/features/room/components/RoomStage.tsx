@@ -22,6 +22,8 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
+  onRetryPeer?: (peerId: string) => void;
   localStream: MediaStream | null;
   isSharing: boolean;
   remoteStreams: RemoteStreamEntry[];
@@ -42,6 +44,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  remoteConnectionStates = {},
+  onRetryPeer,
   localStream,
   isSharing,
   remoteStreams,
@@ -158,13 +162,16 @@ export function RoomStage({
           </Box>
 
           <Text size="xl" fw={700} c="#ffffff" mb="xs">
-            Nenhuma transmissão ativa
+            {participants.some((p) => !p.isLocal && p.isSharing) ? 'Conectando à transmissão' : 'Nenhuma transmissão ativa'}
           </Text>
 
           <Text size="sm" c="#8c959f" mb="xl" style={{ lineHeight: 1.5 }}>
             Quando alguém compartilhar a tela, ela aparecerá aqui automaticamente.
           </Text>
 
+          {participants.filter((p) => !p.isLocal && p.isSharing && remoteConnectionStates[p.peerId] === 'failed').map((p) => (
+            <Button key={p.peerId} onClick={() => onRetryPeer?.(p.peerId)}>Tentar novamente</Button>
+          ))}
           <Box
             style={{
               display: 'flex',
@@ -288,6 +295,8 @@ export function RoomStage({
           key={activeStream.id}
           stream={activeStream.stream}
           isLocal={activeStream.isLocal}
+          connectionState={remoteConnectionStates[activeStream.id]}
+          onRetry={() => onRetryPeer?.(activeStream.id)}
         />
 
         {/* Top-Left Streamer Badge */}
@@ -356,7 +365,7 @@ export function RoomStage({
         >
           <IconSignal size={13} style={{ color: '#22c55e' }} />
           <Text size="xs" fw={500} c="#8c959f">
-            {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'} • Ao vivo
+            {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
           </Text>
         </Box>
 
@@ -456,15 +465,27 @@ export function RoomStage({
 function SpotlightVideoPlayer({
   stream,
   isLocal,
+  connectionState,
+  onRetry,
 }: {
   stream: MediaStream;
   isLocal: boolean;
+  connectionState?: RTCPeerConnectionState;
+  onRetry?: () => void;
 }) {
   // CRITICAL: Local video MUST ALWAYS be muted to prevent acoustic feedback loop!
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
-  const videoRef = useMediaStreamVideo(stream, isLocal);
+  const [playback, setPlayback] = useState('Conectando');
+  const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
 
   return (
+    <>
+    <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
+      <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>
+      {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
+      {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
+      {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
+    </Box>
     <video
       ref={videoRef}
       autoPlay
@@ -479,6 +500,7 @@ function SpotlightVideoPlayer({
         display: 'block',
       }}
     />
+    </>
   );
 }
 
