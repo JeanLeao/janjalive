@@ -12,7 +12,7 @@ export class DiagnosticsLogger {
   log(event: string, details: Record<string, unknown> = {}): void {
     const entry: DiagnosticEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }),
       event,
       details,
     };

@@ -161,3 +161,66 @@ Ao testar a aplicação com dois navegadores (Cliente A = Apresentador, Cliente 
   Problema na sinalização intermediária (verifique os logs de `relay` no servidor).
 - **Conexão estagnada em `pc-ice state=checking` ou transitando para `failed`:**
   A conexão direta P2P foi bloqueada por NAT simétrico ou firewall restritivo. Nesse caso, a travessia depende do servidor TURN. Verifique se o evento `turn-config` reportou `relay: true` e se as portas UDP/TCP do coturn estão liberadas.
+
+## Ciclo de transmissão e regressões
+
+A presença é registrada mesmo antes da captura. `update-sharing` publica início,
+parada, identificação da captura e estado do áudio; `sharing-updated` remove a
+apresentação imediatamente, mantendo as trilhas receptoras para um reinício.
+Apenas o participante associado ao socket pode atualizar esse estado.
+
+A negociação usa papéis ordenados por ID: o maior ID aceita uma colisão com
+rollback. SDP e ICE incluem a geração da conexão e a identificação da negociação.
+Os eventos `screen-captured`, `offer-created`, `answer-received`,
+`pc-connection`, `first-frame`, `screen-stopped` e `recovery-start` permitem
+acompanhar o ciclo. `elapsedMs` em conexão e primeiro frame mede o tempo desde a
+criação da conexão; o primeiro frame é observado pelo coletor de stats, em
+intervalos de três segundos. Os testes de navegador medem reprodução diretamente.
+
+A configuração ICE tem prazo de cinco segundos. `turn-config-fallback` registra
+falha ou timeout; o cliente usa STUN nesse caso. Uma desconexão de mídia por cinco
+segundos, ou uma falha imediata, solicita ICE restart com credenciais atualizadas.
+Após duas tentativas, o menor ID coordena a reconstrução. Cada oferta tem prazo
+de dez segundos, e uma reconexão WebSocket reconcilia novamente a presença.
+
+Execute:
+
+```sh
+pnpm test
+pnpm typecheck
+pnpm build
+pnpm --filter @screen-room/web exec playwright install chromium
+pnpm --filter @screen-room/web test:e2e
+```
+
+Playwright utiliza portas 4310/4311, dois ou mais contextos Chromium e sinalização
+real. Só a fonte de captura é substituída por canvas animado (e áudio sintético
+quando necessário); RTCPeerConnection, ICE, RTP e reprodução são reais.
+O cenário de autoplay simula uma recusa de áudio até a interação, mantendo
+reprodução silenciada e reprodução posterior reais.
+A suíte cobre dez ciclos sem recarga, colisão de inícios, parada nativa, entrada
+tardia, nove espectadores, reconexão de espectador/apresentador e saída durante o
+seletor. Exige frames decodificados e vídeo reproduzindo em até cinco segundos,
+e remoção do vídeo em até um segundo após a ação de parada.
+A apresentação de frames é confirmada com `requestVideoFrameCallback()`,
+independentemente da contagem exposta por `getVideoPlaybackQuality()`.
+
+A prévia e as miniaturas ficam silenciadas. Se autoplay com áudio for recusado, o
+vídeo tenta reproduzir silenciado e exibe **Ativar áudio**. A UI mostra conexão,
+reconexão e falha, com uma ação para tentar novamente.
+
+Referências: [perfect negotiation (W3C)](https://www.w3.org/TR/webrtc/#perfect-negotiation-example),
+[`stop()` não emite `ended` (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack/stop),
+[autoplay (MDN)](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay).
+
+Para repetir a verificação complementar no Firefox:
+
+```sh
+pnpm --filter @screen-room/web exec playwright install firefox
+E2E_BROWSER=firefox pnpm --filter @screen-room/web test:e2e
+```
+
+A fonte Web Audio é verificada antes do teste de áudio. Se o contexto não entrar
+em execução, esse cenário é explicitamente pulado. Em Gecko, o evento sintético
+`ended` não substitui uma parada nativa confiável; a suíte usa a parada pelo
+aplicativo e a validação do botão nativo fica para uma captura real.

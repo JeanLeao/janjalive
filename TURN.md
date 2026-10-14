@@ -106,3 +106,22 @@ Para confirmar se as credenciais TURN foram recebidas e se a negociação utiliz
    pc-connection state=connected
    ```
 4. Se a conexão direta P2P entre os navegadores for viável, o navegador utilizará candidatos locais (`host` ou `srflx`). Caso contrário, o ICE automaticamente selecionará os candidatos do tipo `relay` fornecidos pelo servidor TURN.
+
+## Validação do caminho relay
+
+A presença de URLs TURN na resposta não comprova que o relay funciona.
+No build de validação, defina `VITE_ICE_TRANSPORT_POLICY=relay` para exigir TURN.
+Confirme `receiver-stats relay=true`, tráfego recebido e aumento de
+`framesDecoded` nos espectadores. Teste redes distintas, UDP e TCP/TLS, e
+verifique as regras de firewall do coturn. Remova essa variável para voltar à
+seleção automática de candidatos.
+
+`VITE_TURN_URL` permite escolher o endpoint de credenciais; a consulta usa timeout
+de cinco segundos. `VITE_SIGNALING_URL` permite escolher a URL WebSocket.
+Recuperações atualizam as credenciais antes de tentar ICE restart.
+
+Os testes Chromium e Firefox locais usam conexões diretas. O endpoint local
+verificado retornou apenas STUN, sem relay. TURN externo, Chrome/Edge no site
+publicado e Safari precisam de validação no ambiente correspondente. No Firefox,
+áudio e parada nativa precisam de uma captura real quando o ambiente sintético
+não oferecer esses recursos.

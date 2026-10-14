@@ -1,4 +1,5 @@
 import {
+  type SharingState,
   type ClientMessage,
   type ServerMessage,
   isServerMessage,
@@ -200,6 +201,10 @@ export class SignalingClient {
       type: 'update-nickname',
       ...(nickname !== undefined ? { nickname } : {}),
     });
+  }
+
+  updateSharing(sharing: SharingState): boolean {
+    return this.send({ type: 'update-sharing', ...sharing });
   }
 
   relaySignal(target: string, data: Record<string, unknown> | any): boolean {

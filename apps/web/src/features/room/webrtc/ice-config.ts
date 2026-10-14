@@ -10,10 +10,11 @@ export async function fetchIceConfiguration(
   endpoint?: string,
   logger?: DiagnosticsLogger,
 ): Promise<RTCConfiguration> {
+  const iceTransportPolicy: RTCIceTransportPolicy = (import.meta as any).env?.VITE_ICE_TRANSPORT_POLICY === 'relay' ? 'relay' : 'all';
   const url = endpoint || (typeof window !== 'undefined' ? (import.meta as any).env?.VITE_TURN_URL || '/turn-credentials' : '/turn-credentials');
 
   try {
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -24,7 +25,7 @@ export async function fetchIceConfiguration(
     if (parsed.success && parsed.data.iceServers.length > 0) {
       const hasRelay = parsed.data.iceServers.some((s) => {
         const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-        return urls.some((u) => u.startsWith('turn:'));
+        return urls.some((u) => /^turns?:/.test(u));
       });
 
       logger?.log('turn-config', {
@@ -32,12 +33,12 @@ export async function fetchIceConfiguration(
         relay: hasRelay,
       });
 
-      return { iceServers: parsed.data.iceServers as RTCIceServer[] };
+      return { iceServers: parsed.data.iceServers as RTCIceServer[], iceTransportPolicy };
     }
 
     throw new Error('Formato inválido de resposta de servidores ICE');
   } catch (err: any) {
     logger?.log('turn-config-fallback', { message: err?.message || 'Falha ao buscar credenciais TURN' });
-    return { iceServers: DEFAULT_ICE_SERVERS };
+    return { iceServers: DEFAULT_ICE_SERVERS, iceTransportPolicy };
   }
 }

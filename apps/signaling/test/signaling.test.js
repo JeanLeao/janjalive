@@ -259,3 +259,27 @@ test('signaling: returns 200 on /healthz and 404 for unknown HTTP paths', async 
   const unknownRes = await fetch(`http://127.0.0.1:${app.port}/random-path`);
   assert.equal(unknownRes.status, 404);
 });
+
+test('sharing updates belong to socket identity and are included in late join snapshots', async (t) => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  t.after(() => app.close());
+  const url = `ws://127.0.0.1:${app.port}/signal`;
+  const host = await connect(url), viewer = await connect(url), late = await connect(url);
+  t.after(() => [host, viewer, late].forEach(socket => socket.close()));
+  host.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'host' }));
+  await nextMessage(host);
+  viewer.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'viewer' }));
+  await nextMessage(viewer); await nextMessage(host);
+  const sharing = { active: true, streamId: 'screen-1', hasAudio: true, audioMuted: false };
+  host.send(JSON.stringify({ type: 'update-sharing', peerId: 'viewer', ...sharing }));
+  assert.deepEqual(await nextMessage(viewer), { type: 'sharing-updated', peerId: 'host', ...sharing });
+  late.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'late' }));
+  const snapshot = await nextMessage(late);
+  assert.deepEqual(snapshot.participants.find(p => p.peerId === 'host').sharing, sharing);
+  assert.equal(snapshot.participants.find(p => p.peerId === 'viewer').sharing, undefined);
+  await nextMessage(host); await nextMessage(viewer);
+  host.send(JSON.stringify({ type: 'update-sharing', active: false, hasAudio: false, audioMuted: false }));
+  assert.equal((await nextMessage(viewer)).active, false);
+  assert.equal((await nextMessage(late)).active, false);
+});

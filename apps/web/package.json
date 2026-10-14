@@ -9,7 +9,8 @@
     "start": "node .output/server/index.mjs",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@mantine/core": "^9.6.3",
@@ -22,6 +23,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@screen-room/signaling": "workspace:*",
     "@types/node": "^22.13.0",
     "@types/react": "^19.0.0",
