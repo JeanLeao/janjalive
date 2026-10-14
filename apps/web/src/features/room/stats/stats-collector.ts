@@ -13,6 +13,11 @@ export interface StatsCollectorOptions {
 interface PeerHistory {
   now: number;
   bytes: number;
+  sent: number;
+  lost: number;
+  pc: RTCPeerConnection;
+  firstFrame: boolean;
+  sourceId: string;
 }
 
 export class StatsCollector {
@@ -45,6 +50,7 @@ export class StatsCollector {
 
   async collect(): Promise<void> {
     const peers = this.options.peerManager.getPeers();
+    for (const id of this.statsByPeer.keys()) if (!peers.has(id)) this.statsByPeer.delete(id);
     if (peers.size === 0) {
       this.options.onStats(null);
       return;
@@ -62,11 +68,15 @@ export class StatsCollector {
         continue;
       }
 
+      let inbound: any;
       let outbound: any;
       let remoteInbound: any;
       let pair: any;
+      let selectedPairId: string | undefined;
 
       reports.forEach((report) => {
+        if (report.type === 'transport') selectedPairId = report.selectedCandidatePairId;
+        if (report.type === 'inbound-rtp' && report.kind === 'video') inbound = report;
         if (report.type === 'outbound-rtp' && report.kind === 'video' && !report.isRemote) {
           outbound = report;
         }
@@ -75,26 +85,42 @@ export class StatsCollector {
         }
       });
 
+      if (selectedPairId) pair = reports.get(selectedPairId) || pair;
       reports.forEach((report) => {
         if (report.type === 'remote-inbound-rtp' && report.kind === 'video' && report.localId === outbound?.id) {
           remoteInbound = report;
         }
       });
 
-      if (!outbound) continue;
+      if (!outbound && !inbound) continue;
 
-      const previous = this.statsByPeer.get(peerId);
+      const history = this.statsByPeer.get(peerId);
+      const bytes = inbound?.bytesReceived ?? outbound?.bytesSent ?? 0;
+      const sourceId = inbound ? 'inbound:' + (inbound.id || 'video') : 'outbound:' + (outbound.id || 'video');
+      const previous = history?.pc === peer.pc && history.sourceId === sourceId && bytes >= history.bytes ? history : undefined;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const sent = remoteInbound?.packetsReceived ?? outbound.packetsSent ?? 0;
-      const lost = remoteInbound?.packetsLost ?? 0;
-      const bytes = outbound.bytesSent ?? 0;
-
+      const sent = inbound?.packetsReceived ?? remoteInbound?.packetsReceived ?? outbound?.packetsSent ?? 0;
+      const lost = inbound?.packetsLost ?? remoteInbound?.packetsLost ?? 0;
       const elapsed = previous ? Math.max(1, now - previous.now) : 0;
       const bitrate = previous ? Math.round(((bytes - previous.bytes) * 8000) / elapsed) : 0;
-      const loss = sent + lost > 0 ? (lost / (sent + lost)) * 100 : 0;
+      const intervalSent = previous ? Math.max(0, sent - previous.sent) : sent;
+      const intervalLost = previous ? Math.max(0, lost - previous.lost) : lost;
+      const loss = intervalSent + intervalLost > 0 ? (intervalLost / (intervalSent + intervalLost)) * 100 : 0;
+      const candidate: any = pair?.localCandidateId ? reports.get(pair.localCandidateId) : undefined;
+      const remoteCandidate: any = pair?.remoteCandidateId ? reports.get(pair.remoteCandidateId) : undefined;
+      this.options.logger?.log('receiver-stats', {
+        peer: peerId,
+        framesDecoded: inbound?.framesDecoded,
+        candidatePair: selectedPairId || pair?.id,
+        candidateType: candidate?.candidateType,
+        remoteCandidateType: remoteCandidate?.candidateType,
+        relay: candidate?.candidateType === 'relay' || remoteCandidate?.candidateType === 'relay',
+      });
       const rtt = pair?.currentRoundTripTime ? Math.round(pair.currentRoundTripTime * 1000) : 0;
 
-      this.statsByPeer.set(peerId, { now, bytes });
+      const firstFrame = previous?.firstFrame || Boolean(inbound?.framesDecoded);
+      if (firstFrame && !previous?.firstFrame) this.options.logger?.log('first-frame', { peer: peerId, elapsedMs: Math.round(now - peer.createdAt) });
+      this.statsByPeer.set(peerId, { now, bytes, sent, lost, pc: peer.pc, firstFrame, sourceId });
       samples.push({ bitrate, loss, rtt });
     }
 

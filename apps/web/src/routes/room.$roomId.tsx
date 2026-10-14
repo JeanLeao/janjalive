@@ -265,6 +265,8 @@ function RoomPage() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        remoteConnectionStates={session.remoteConnectionStates}
+        onRetryPeer={session.retryPeer}
         localStream={session.localStream}
         isSharing={session.isSharing}
         remoteStreams={isDemo && demoStreams ? demoStreams : session.remoteStreams}

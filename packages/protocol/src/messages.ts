@@ -1,8 +1,19 @@
 import { z } from 'zod';
 
+export const SharingStateSchema = z.object({
+  active: z.boolean(),
+  streamId: z.string().min(1).max(128).optional(),
+  hasAudio: z.boolean(),
+  audioMuted: z.boolean(),
+});
+export type SharingState = z.infer<typeof SharingStateSchema>;
+export const UpdateSharingMessageSchema = SharingStateSchema.extend({ type: z.literal('update-sharing') });
+export const SharingUpdatedMessageSchema = SharingStateSchema.extend({ type: z.literal('sharing-updated'), peerId: z.string().min(1) });
+
 // Participant presence info
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
+  sharing: SharingStateSchema.optional(),
   nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type ParticipantInfo = z.infer<typeof ParticipantInfoSchema>;
@@ -37,6 +48,7 @@ export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   JoinMessageSchema,
+  UpdateSharingMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
   LeaveMessageSchema,
@@ -113,6 +125,7 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   PeersMessageSchema,
+  SharingUpdatedMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,
   PeerUpdatedMessageSchema,

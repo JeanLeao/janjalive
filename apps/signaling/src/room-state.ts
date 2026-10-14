@@ -1,7 +1,8 @@
-import { normalizeRoom, normalizePeer, type ParticipantInfo } from '@screen-room/protocol';
+import { normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
 export interface ParticipantMeta {
+  sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
 }
@@ -89,7 +90,7 @@ export class RoomRegistry {
         ? reconnectToken.trim()
         : crypto.randomUUID());
 
-    participants.set(peer, { nickname: cleanNickname, reconnectToken: token });
+    participants.set(peer, { nickname: cleanNickname, reconnectToken: token, ...(existingMeta?.sharing ? { sharing: existingMeta.sharing } : {}) });
     return existingPeers;
   }
 
@@ -150,8 +151,14 @@ export class RoomRegistry {
     if (!participants) return [];
     return Array.from(participants.entries()).map(([peerId, meta]) => ({
       peerId,
+      ...(meta.sharing ? { sharing: meta.sharing } : {}),
       ...(meta.nickname ? { nickname: meta.nickname } : {}),
     }));
+  }
+
+  updateSharing(roomId: string, peerId: string, sharing: SharingState): void {
+    const meta = this.#rooms.get(roomId)?.get(peerId);
+    if (meta) meta.sharing = sharing;
   }
 
   getNickname(roomId: unknown, peerId: unknown): string | undefined {

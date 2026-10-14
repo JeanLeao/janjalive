@@ -27,13 +27,14 @@ test('stats-collector: computes bitrate, loss percentage and rtt from WebRTC sta
 
   // First sample sets baseline
   await collector.collect();
-  // Second sample after some bytes computes non-zero bitrate
+  assert.equal(latestStats.lossPercent, 2.0);
+  // Unchanged counters produce zero interval loss
   await collector.collect();
 
   assert.ok(latestStats);
   assert.equal(latestStats.activeConnections, 1);
   assert.equal(latestStats.rttMs, 25); // 0.025s * 1000 = 25ms
-  assert.equal(latestStats.lossPercent, 2.0); // 2 lost / (98 received + 2 lost) = 2.0%
+  assert.equal(latestStats.lossPercent, 0);
 });
 
 test('stats-collector: triggers onDegradation when packet loss >= 5% with cooldown', async () => {
@@ -80,4 +81,46 @@ test('stats-collector: triggers onDegradation when packet loss >= 5% with cooldo
   // Immediately collecting again should be blocked by cooldown (20s)
   await collector.collect();
   assert.equal(degradationEvents.length, 1, 'Cooldown should prevent repeated triggers');
+});
+
+test('stats-collector: spectators collect inbound traffic, frames and interval loss', async () => {
+  let metrics;
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => {}, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  const peer = manager.getOrCreatePeer('presenter');
+  let packets = 90, lost = 10, bytes = 100000;
+  peer.pc.getStats = async () => new Map([['inbound', {
+    type: 'inbound-rtp', kind: 'video', packetsReceived: packets, packetsLost: lost,
+    bytesReceived: bytes, framesDecoded: 30,
+  }]]);
+  const collector = new StatsCollector({ peerManager: manager, onStats: value => { metrics = value; } });
+  await collector.collect();
+  assert.equal(metrics.lossPercent, 10);
+  packets += 99; lost += 1; bytes += 100000;
+  await collector.collect();
+  assert.equal(metrics.lossPercent, 1);
+  assert.ok(metrics.bitrateKbps > 0);
+  assert.equal(metrics.activeConnections, 1);
+  manager.dispose();
+});
+
+test('stats-collector: switching RTP sources or resetting counters cannot produce negative bitrate', async () => {
+  let metrics;
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => {}, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  const peer = manager.getOrCreatePeer('presenter');
+  const collector = new StatsCollector({ peerManager: manager, onStats: value => { metrics = value; } });
+  await collector.collect();
+  let bytes = 100;
+  peer.pc.getStats = async () => new Map([['inbound', {
+    id: 'inbound', type: 'inbound-rtp', kind: 'video', packetsReceived: 10, bytesReceived: bytes,
+  }]]);
+  await collector.collect();
+  assert.equal(metrics.bitrateKbps, 0);
+  bytes = 50;
+  await collector.collect();
+  assert.equal(metrics.bitrateKbps, 0);
+  manager.dispose();
 });

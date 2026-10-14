@@ -18,6 +18,11 @@ export class MockMediaStreamTrack {
 
   stop() {
     this.readyState = 'ended';
+  }
+
+  endNatively() {
+    if (this.readyState === 'ended') return;
+    this.readyState = 'ended';
     if (this._listeners['ended']) {
       for (const cb of this._listeners['ended']) cb();
     }
@@ -106,7 +111,7 @@ export class MockRTCPeerConnection {
     this.localDescription = desc;
     if (desc.type === 'offer') {
       this.signalingState = 'have-local-offer';
-    } else if (desc.type === 'answer') {
+    } else if (desc.type === 'answer' || desc.type === 'rollback') {
       this.signalingState = 'stable';
     }
     this.onsignalingstatechange?.();

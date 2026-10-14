@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   type QualityProfileKey,
-  isOfferSignal,
-  isAnswerSignal,
-  isIceSignal,
   QUALITY_PROFILES,
 } from '@screen-room/protocol';
 import type {
@@ -38,6 +35,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [isSharing, setIsSharing] = useState<boolean>(false);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [hasAudioTrack, setHasAudioTrack] = useState<boolean>(false);
+  const [remoteConnectionStates, setRemoteConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({});
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [quality, setQuality] = useState<QualityProfileKey>('balanced');
   const [networkStats, setNetworkStats] = useState<NetworkMetrics | null>(null);
@@ -55,6 +53,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     }
   }, [displayName]);
 
+  const endedHandlerRef = useRef<{ track: MediaStreamTrack; handler: () => void } | null>(null);
+  const captureStateRef = useRef<'idle' | 'requesting' | 'sharing' | 'stopping'>('idle');
+  const captureGenerationRef = useRef(0);
+  const sharingIdRef = useRef<string | undefined>(undefined);
   const loggerRef = useRef<DiagnosticsLogger | null>(null);
   const signalingRef = useRef<SignalingClient | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
@@ -90,9 +92,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     const unsubscribeLogger = logger.subscribe(setDiagnostics);
 
     const peerId = `p_${crypto.randomUUID().replace(/-/g, '')}`;
-    const initialNick = displayName?.trim() || undefined;
+    const initialNick = nicknameRef.current;
     logger.log('session-init', { roomId, peerId, displayName: initialNick || 'Anonymous' });
 
+    setRemoteConnectionStates({});
+    setFeaturedStreamId(null);
+    setErrorMessage(null);
     setParticipants([
       {
         peerId,
@@ -104,12 +109,18 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     let isDisposed = false;
 
+    const iceConfiguration = fetchIceConfiguration(undefined, logger);
+
     // Create PeerManager
     const peerManager = new PeerManager({
+      rtcConfigReady: iceConfiguration,
+      refreshRtcConfig: () => fetchIceConfiguration(undefined, logger),
+      localPeerId: peerId,
       rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
       onSendSignal: (target, data) => {
-        signalingRef.current?.relaySignal(target, data);
+        return signalingRef.current?.relaySignal(target, data) ?? false;
       },
+      onPeerState: (id, state) => { if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state })); },
       onRemoteStreamAdd: (remotePeerId, stream) => {
         setRemoteStreams((prev) => {
           const filtered = prev.filter((item) => item.peerId !== remotePeerId);
@@ -147,6 +158,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         if (!isDisposed) setNetworkStats(metrics);
       },
       onDegradation: (lossPercent) => {
+        if (!localStreamRef.current) return;
         const curQuality = qualityRef.current;
         if (curQuality === 'economy') return;
         const nextQuality: QualityProfileKey = curQuality === 'high' ? 'balanced' : 'economy';
@@ -164,6 +176,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onStateChange: (state) => {
         if (isDisposed) return;
         setConnectionStatus(state);
+        if (state === 'disconnected') peerManager.closeAll();
         if (state === 'connected') {
           signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current);
         }
@@ -174,6 +187,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
           }
+          peerManager.setParticipants((message.participants?.map((p) => p.peerId) || message.peers).filter((id) => id !== peerId));
+          for (const p of message.participants || []) if (p.peerId !== peerId && p.sharing) peerManager.setRemoteSharing(p.peerId, p.sharing.active);
+          signaling.updateSharing({ active: Boolean(localStreamRef.current), streamId: sharingIdRef.current, hasAudio: Boolean(localStreamRef.current?.getAudioTracks().length), audioMuted: localStreamRef.current?.getAudioTracks().some((track) => !track.enabled) || false });
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const local = prev.find((p) => p.isLocal) || {
@@ -188,7 +204,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
                 peerId: p.peerId,
                 nickname: p.nickname,
                 isLocal: false,
-                isSharing: false,
+                isSharing: Boolean(p.sharing?.active),
               }));
 
             if (!message.participants && message.peers) {
@@ -206,19 +222,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             return [local, ...remoteList];
           });
 
-          // Recover WebRTC screen share negotiation upon reconnect
-          if (localStreamRef.current) {
-            const targetPeers = message.participants
-              ? message.participants.map((p) => p.peerId).filter((id) => id !== peerId)
-              : (message.peers || []).filter((id) => id !== peerId);
-
-            targetPeers.forEach((targetId) => {
-              peerManager.createAndSendOffer(targetId).catch((err) => {
-                logger.log('offer-error', { peer: targetId, message: err?.message });
-              });
-            });
-          }
         } else if (message.type === 'peer-joined') {
+          peerManager.addParticipant(message.peerId);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const exists = prev.some((p) => p.peerId === message.peerId);
@@ -244,11 +249,6 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             showToast('Visitante entrou na sala.');
           }
 
-          if (localStreamRef.current) {
-            peerManager.createAndSendOffer(message.peerId).catch((err) => {
-              logger.log('offer-error', { peer: message.peerId, message: err?.message });
-            });
-          }
         } else if (message.type === 'peer-left') {
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
@@ -273,14 +273,17 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           } else {
             showToast('Participante removeu o nickname.');
           }
+        } else if (message.type === 'sharing-updated') {
+          peerManager.setRemoteSharing(message.peerId, message.active);
+          setParticipants((prev) => prev.map((p) => p.peerId === message.peerId ? { ...p, isSharing: message.active } : p));
         } else if (message.type === 'signal') {
           const { from, data } = message;
-          if (isOfferSignal(data)) {
-            peerManager.handleOffer(from, data.sdp as RTCSessionDescriptionInit);
-          } else if (isAnswerSignal(data)) {
-            peerManager.handleAnswer(from, data.sdp as RTCSessionDescriptionInit);
-          } else if (isIceSignal(data)) {
-            peerManager.handleRemoteIce(from, data.candidate as RTCIceCandidateInit);
+          if (data.type === 'reset' && from < peerId) {
+            peerManager.resetPeer(from);
+          } else if (data.type === 'reset-request' && peerId < from) {
+            if (signaling.relaySignal(from, { type: 'reset' })) peerManager.resetPeer(from);
+          } else {
+            void peerManager.handleSignal(from, data);
           }
         } else if (message.type === 'error') {
           logger.log('signal-server-error', { message: message.message });
@@ -300,27 +303,45 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     signalingRef.current = signaling;
 
     // Load ICE configuration asynchronously
-    fetchIceConfiguration(undefined, logger).then((config) => {
+    iceConfiguration.then((config) => {
       if (!isDisposed) {
         peerManager.setRtcConfig(config);
+        signaling.connect();
+        statsCollector.start();
       }
     });
 
-    // Start signaling connection
-    signaling.connect();
-
     return () => {
       isDisposed = true;
+      captureGenerationRef.current++;
+      if (endedHandlerRef.current) {
+        const { track, handler } = endedHandlerRef.current;
+        track.removeEventListener('ended', handler);
+        endedHandlerRef.current = null;
+      }
+      captureStateRef.current = 'idle';
+      stopAllTracks(localStreamRef.current);
+      localStreamRef.current = null;
+      setLocalStream(null);
+      setIsSharing(false);
       reconnectTokenRef.current = undefined;
       unsubscribeLogger();
-      stopAllTracks(localStreamRef.current);
       statsCollector.stop();
-      peerManager.closeAll();
+      peerManager.dispose();
       signaling.disconnect();
     };
-  }, [roomId, displayName, showToast, enabled]);
+  }, [roomId, showToast, enabled]);
 
   const stopSharing = useCallback(() => {
+    captureGenerationRef.current++;
+    if (endedHandlerRef.current) {
+      const { track, handler } = endedHandlerRef.current;
+      track.removeEventListener('ended', handler);
+      endedHandlerRef.current = null;
+    }
+    captureStateRef.current = 'stopping';
+    signalingRef.current?.updateSharing({ active: false, hasAudio: false, audioMuted: false });
+    sharingIdRef.current = undefined;
     if (localStreamRef.current) {
       stopAllTracks(localStreamRef.current);
       localStreamRef.current = null;
@@ -338,15 +359,23 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
 
     peerManagerRef.current?.detachLocalStream().catch(console.error);
-    statsCollectorRef.current?.stop();
+    captureStateRef.current = 'idle';
     loggerRef.current?.log('screen-stopped');
   }, []);
 
   const startSharing = useCallback(async () => {
+    if (captureStateRef.current !== 'idle') return;
+    captureStateRef.current = 'requesting';
+    const generation = ++captureGenerationRef.current;
+    const requestedAt = performance.now();
     setErrorMessage(null);
     try {
       loggerRef.current?.log('screen-capture-request', { quality: qualityRef.current });
       const stream = await captureDisplayMedia(qualityRef.current);
+      if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
+      captureStateRef.current = 'sharing';
+      sharingIdRef.current = crypto.randomUUID();
+      signalingRef.current?.updateSharing({ active: true, streamId: sharingIdRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: false });
       localStreamRef.current = stream;
       setLocalStream(stream);
       setIsSharing(true);
@@ -360,6 +389,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setIsAudioMuted(false);
 
       loggerRef.current?.log('screen-captured', {
+        captureDurationMs: Math.round(performance.now() - requestedAt),
         videoTracks: stream.getVideoTracks().length,
         audioTracks: stream.getAudioTracks().length,
       });
@@ -367,15 +397,16 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       // Listen for browser native stop button
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.addEventListener('ended', () => {
-          stopSharing();
-        });
+        const handler = () => { if (localStreamRef.current === stream) stopSharing(); };
+        endedHandlerRef.current = { track: videoTrack, handler };
+        videoTrack.addEventListener('ended', handler, { once: true });
       }
 
       // Attach to peer manager and start stats
       if (peerManagerRef.current) {
         await peerManagerRef.current.attachLocalStream(stream);
       }
+      if (generation !== captureGenerationRef.current) return;
       statsCollectorRef.current?.start();
 
       showToast(
@@ -384,6 +415,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           : 'Compartilhando somente tela. Para áudio, escolha uma aba com som.',
       );
     } catch (err: any) {
+      if (generation !== captureGenerationRef.current) return;
+      if (localStreamRef.current) stopSharing();
+      else captureStateRef.current = 'idle';
       const msg = formatSharingErrorMessage(err);
       setErrorMessage(msg);
       showToast(msg);
@@ -424,12 +458,20 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     [currentNickname, showToast]
   );
 
+  useEffect(() => {
+    const nickname = displayName?.trim() || undefined;
+    if (nicknameRef.current === nickname) return;
+    nicknameRef.current = nickname;
+    signalingRef.current?.updateNickname(nickname || '');
+    setParticipants((prev) => prev.map((p) => p.isLocal ? { ...p, nickname } : p));
+  }, [displayName]);
+
   const participantsWithSharing = useMemo(() => {
     return participants.map((p) => ({
       ...p,
       isSharing: p.isLocal
         ? isSharing
-        : remoteStreams.some((r) => r.peerId === p.peerId),
+        : p.isSharing || remoteStreams.some((r) => r.peerId === p.peerId),
     }));
   }, [participants, isSharing, remoteStreams]);
 
@@ -438,6 +480,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     const nextMuted = !isAudioMuted;
     setStreamAudioMuted(localStreamRef.current, nextMuted);
     setIsAudioMuted(nextMuted);
+    signalingRef.current?.updateSharing({ active: true, streamId: sharingIdRef.current, hasAudio: true, audioMuted: nextMuted });
     loggerRef.current?.log('screen-audio', { muted: nextMuted });
     showToast(nextMuted ? 'Áudio da tela mutado.' : 'Áudio da tela reativado.');
   }, [isAudioMuted, showToast]);
@@ -459,6 +502,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, []);
 
   return {
+    remoteConnectionStates,
+    retryPeer: (id: string) => peerManagerRef.current?.recoverPeer(id),
     connectionStatus,
     participantCount,
     participants: participantsWithSharing,
