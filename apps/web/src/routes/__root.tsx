@@ -1,6 +1,5 @@
 import {
   Outlet,
-  ScrollRestoration,
   createRootRoute,
   HeadContent,
   Scripts,
@@ -13,6 +12,7 @@ import {
 } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { theme } from '../theme';
+import { NotFound } from '../components/NotFound';
 
 export const Route = createRootRoute({
   head: () => ({
@@ -24,9 +24,11 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+      { rel: 'alternate icon', href: '/favicon.ico' },
     ],
   }),
   component: RootComponent,
+  notFoundComponent: NotFound,
 });
 
 function RootComponent() {
@@ -73,7 +75,6 @@ function RootComponent() {
             <Outlet />
           </Box>
         </MantineProvider>
-        <ScrollRestoration />
         <Scripts />
       </body>
     </html>
