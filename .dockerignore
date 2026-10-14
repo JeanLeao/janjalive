@@ -1,6 +1,11 @@
 node_modules
-npm-debug.log*
+dist
+.tanstack
 .git
 .gitignore
-README.md
- test
+npm-debug.log*
+pnpm-debug.log*
+.output
+.agent
+.impeccable
+screenshots
