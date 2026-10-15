@@ -31,6 +31,7 @@ async function syntheticCapture(page: Page) {
       }
     };
     Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+      configurable: true,
       value: async () => {
         const canvas = document.createElement('canvas');
         canvas.width = 640; canvas.height = 360;
@@ -397,10 +398,10 @@ for (const mobile of [false, true]) {
       await host.goto('/room/e2e-preview-' + mobile);
       await host.evaluate(() => { (window as any).testAudio = true; });
       await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
-      await expect(host.getByRole('dialog')).toContainText('ainda não está ao vivo');
+      await expect(host.getByRole('dialog')).toContainText('Não está ao vivo');
       await expect.poll(() => host.getByRole('dialog').locator('video').evaluate(video => (video as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
       await host.screenshot({ path: test.info().outputPath('preview.png') });
-      const cancel = host.getByRole('button', { name: 'Cancelar prévia' });
+      const cancel = host.getByRole('button', { name: 'Cancelar', exact: true });
       await cancel.focus();
       await expect(cancel).toBeFocused();
       await expect.poll(() => host.locator('video').evaluateAll(videos => videos.every(v => (v as HTMLVideoElement).muted))).toBe(true);
@@ -410,7 +411,7 @@ for (const mobile of [false, true]) {
         pc.connectionState === 'closed' || pc.getSenders().every(sender => !sender.track)));
       await expect.poll(noSenders).toBe(true);
       await expect(viewer.locator('video')).toHaveCount(0);
-      await host.getByRole('button', { name: 'Cancelar prévia' }).click();
+      await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
       await expect.poll(() => host.evaluate(() => (window as any).testCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
       await startLive(host);
       await frames(viewer);
@@ -501,7 +502,7 @@ test('confirm/stop and resume/stop invalidate publication without reloading', as
     await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
     await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).evaluate(button => {
       (button as HTMLButtonElement).click();
-      [...document.querySelectorAll('button')].find(button => button.textContent === 'Cancelar prévia')?.click();
+      [...document.querySelectorAll('button')].find(button => button.textContent === 'Cancelar')?.click();
     });
     const stopped = async () => {
       await expect.poll(() => host.evaluate(() => (window as any).testCapture.getTracks().every((track: MediaStreamTrack) => track.readyState === 'ended'))).toBe(true);
@@ -540,3 +541,137 @@ test('a presenter arriving during local preview keeps the spotlight after confir
     await expect.poll(() => host.getByTestId('zoom-viewport').locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(false);
   } finally { await a.close(); await b.close(); }
 });
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 768, height: 600 }, { width: 390, height: 844 }, { width: 320, height: 568 }, { width: 800, height: 360 }]) {
+  test(`preview and dock visual layout ${viewport.width}x${viewport.height}`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, hasTouch: viewport.width <= 390 });
+    const page = await context.newPage();
+    await syntheticCapture(page);
+    const snapshot = async (name: string) => {
+      await page.mouse.move(0, 0);
+      await page.screenshot({ path: test.info().outputPath(`${name}.png`), animations: 'disabled' });
+    };
+    const dockFits = async () => {
+      const bounds = await page.locator('.floating-dock-bar button').evaluateAll(buttons => buttons.map(button => {
+        const r = button.getBoundingClientRect();
+        const label = button.querySelector<HTMLElement>('.mantine-Button-label');
+        return { x: r.x, right: r.right, y: r.y, bottom: r.bottom, width: r.width, height: r.height, labelFits: !label || label.scrollWidth <= label.clientWidth };
+      }));
+      for (const [i, r] of bounds.entries()) {
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.right).toBeLessThanOrEqual(viewport.width);
+        expect(r.bottom).toBeLessThanOrEqual(viewport.height);
+        expect(r.width).toBeGreaterThanOrEqual(40);
+        expect(r.height).toBe(42);
+        expect(r.labelFits).toBe(true);
+        if (i) { expect(r.x).toBeGreaterThanOrEqual(bounds[i - 1].right); expect(r.y).toBe(bounds[0].y); }
+      }
+    };
+    try {
+      await page.goto(`/room/e2e-layout-${viewport.width}`);
+      const share = page.locator('.floating-dock-bar').getByRole('button', { name: 'Compartilhar tela', exact: true });
+      await expect(share).toBeVisible();
+      await dockFits();
+      await snapshot('dock-idle');
+      for (const audio of [false, true]) {
+        await page.evaluate(value => { (window as any).testAudio = value; }, audio);
+        await share.click();
+        const dialog = page.getByRole('dialog', { name: 'Pré-visualização', exact: true });
+        await expect(dialog).toContainText(audio ? 'Áudio disponível' : 'Sem áudio');
+        await expect.poll(() => dialog.locator('video').evaluate(video => (video as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+        const box = (await dialog.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+        expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+        if (viewport.width === 1280) expect(box.width).toBe(780);
+        const cancel = dialog.getByRole('button', { name: 'Cancelar', exact: true });
+        await cancel.focus();
+        await page.keyboard.press('Tab');
+        await expect(dialog.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(dialog.getByRole('button', { name: 'Cancelar pré-visualização', exact: true })).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await snapshot(audio ? 'preview-audio' : 'preview-no-audio');
+        if (!audio) {
+          await page.keyboard.press('Escape');
+          await expect(dialog).toHaveCount(0);
+          await expect.poll(() => page.evaluate(() => (window as any).testCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
+        }
+      }
+      await page.getByRole('button', { name: 'Entrar ao vivo', exact: true }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await dockFits();
+      await snapshot('dock-live');
+      await page.getByRole('button', { name: 'Mutar áudio da tela', exact: true }).click();
+      await dockFits();
+      await snapshot('dock-muted');
+      const pause = page.getByRole('button', { name: 'Pausar transmissão', exact: true });
+      await pause.focus();
+      await page.keyboard.press('Enter');
+      const resume = page.getByRole('button', { name: 'Retomar transmissão', exact: true });
+      await expect(resume).toBeVisible();
+      await dockFits();
+      await snapshot('dock-paused');
+      if (viewport.width <= 390) await resume.tap(); else await resume.click();
+      await expect(pause).toBeVisible();
+      const stop = page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true });
+      await stop.hover();
+      await expect(page.getByRole('tooltip', { name: 'Parar compartilhamento de tela', exact: true })).toBeVisible();
+      await stop.click();
+      await expect(share).toBeVisible();
+    } finally { await context.close(); }
+  });
+}
+
+for (const mobile of [false, true]) {
+  test(`capture controls pending and unavailable ${mobile ? 'mobile' : 'desktop'}`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, hasTouch: mobile });
+    const page = await context.newPage(), viewer = await context.newPage();
+    await syntheticCapture(page);
+    await page.addInitScript(() => {
+      const setDescription = RTCPeerConnection.prototype.setLocalDescription;
+      RTCPeerConnection.prototype.setLocalDescription = async function (description?: RTCLocalSessionDescriptionInit) {
+        if ((window as any).holdPublication) await new Promise(resolve => { (window as any).releasePublication = resolve; });
+        return setDescription.bind(this)(description);
+      };
+      const replaceTrack = RTCRtpSender.prototype.replaceTrack;
+      RTCRtpSender.prototype.replaceTrack = async function (track) {
+        if ((window as any).holdPause) await new Promise(resolve => { ((window as any).releasePause ||= []).push(resolve); });
+        return replaceTrack.call(this, track);
+      };
+    });
+    try {
+      await Promise.all([page.goto(`/room/e2e-pending-${mobile}`), viewer.goto(`/room/e2e-pending-${mobile}`)]);
+      await expect(page.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+      await page.evaluate(() => { (window as any).holdPublication = true; });
+      const confirm = page.getByRole('button', { name: 'Entrar ao vivo', exact: true });
+      await confirm.click();
+      await expect(page.getByRole('dialog')).toContainText('Entrando ao vivo…');
+      await expect(confirm).toHaveAttribute('data-loading', 'true');
+      await expect(confirm).toBeDisabled();
+      await page.screenshot({ animations: 'disabled', path: test.info().outputPath('preview-publishing.png') });
+      await page.evaluate(() => { (window as any).holdPublication = false; (window as any).releasePublication(); });
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await page.evaluate(() => { (window as any).holdPause = true; });
+      const pause = page.getByRole('button', { name: 'Pausar transmissão', exact: true });
+      await pause.click();
+      await expect(pause).toBeDisabled();
+      await expect(pause).toHaveAttribute('data-loading', 'true');
+      await expect(page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true })).toBeEnabled();
+      await page.screenshot({ animations: 'disabled', path: test.info().outputPath('dock-pausing.png') });
+      await page.evaluate(() => { (window as any).holdPause = false; (window as any).releasePause.forEach((resolve: () => void) => resolve()); });
+      await expect(page.getByRole('button', { name: 'Retomar transmissão', exact: true })).toBeEnabled();
+      await page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+      await page.getByRole('button', { name: 'Cancelar pré-visualização', exact: true }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => (window as any).testCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
+      await page.addInitScript(() => { Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { value: undefined, configurable: true }); });
+      await page.reload();
+      await expect(page.locator('.floating-dock-bar')).toBeVisible();
+      await expect(page.locator('.floating-dock-bar').getByRole('button', { name: 'Compartilhar tela', exact: true })).toHaveCount(0);
+      await page.screenshot({ path: test.info().outputPath('dock-unavailable.png') });
+    } finally { await context.close(); }
+  });
+}
