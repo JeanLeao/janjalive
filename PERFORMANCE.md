@@ -43,7 +43,7 @@ Os eventos técnicos distinguem seleção solicitada, captura verificada e parâ
 
 A gaveta de rede mantém bitrate e perda medidos no intervalo (média das conexões para apresentação), RTT e contagem de conexões. Em peers bidirecionais esse resumo prioriza recepção; ele não é o gatilho de proteção do envio. Eventos técnicos por peer permitem separar as direções.
 
-Resultados e limitações da validação F01/F02 estão em [docs/validation/f01-f02.md](docs/validation/f01-f02.md). Captura sintética e WebRTC local não comprovam áudio nativo, permissões interativas do sistema, conectividade entre redes ou qualidade sob congestionamento real.
+Captura sintética e WebRTC local não comprovam áudio nativo, permissões interativas do sistema, conectividade entre redes ou qualidade sob congestionamento real.
 
 ## Custo em WebRTC mesh P2P
 
