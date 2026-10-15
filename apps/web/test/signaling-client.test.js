@@ -181,3 +181,24 @@ test('signaling-client: sends update-nickname and receives peer-updated messages
   client.disconnect();
   globalThis.WebSocket = originalWs;
 });
+
+test('collaboration drops backpressure without queues and bypasses per-event React diagnostics', async t => {
+  const original = globalThis.WebSocket;
+  let socket;
+  globalThis.WebSocket = class extends MockWebSocket {
+    constructor(url) { super(url); socket = this; this.bufferedAmount = 0; }
+  };
+  t.after(() => { globalThis.WebSocket = original; });
+  const logs = [], received = [];
+  const client = new SignalingClient({ url: 'ws://mock', onStateChange() {}, onMessage: m => received.push(m), logger: { log: (...args) => logs.push(args) } });
+  client.connect(); await new Promise(r => setTimeout(r, 20)); t.after(() => client.disconnect());
+  logs.length = 0;
+  const event = { type: 'laser', seq: 1, eventId: crypto.randomUUID(), streamId: 'capture', point: { x: .5, y: .5 } };
+  assert.ok(client.send(event));
+  socket.simulateServerMessage({ type: 'collaboration', roomId: 'r', peerId: 'p', timestamp: Date.now(), event });
+  assert.equal(received.length, 1); assert.equal(logs.length, 0);
+  socket.bufferedAmount = 32768;
+  assert.equal(client.send({ ...event, seq: 2 }), false); assert.equal(socket.sent.length, 1);
+  assert.ok(client.send({ type: 'send-chat', requestId: crypto.randomUUID(), text: 'chat still usable' }));
+  assert.equal(socket.sent.length, 2); assert.equal(logs.length, 1);
+});

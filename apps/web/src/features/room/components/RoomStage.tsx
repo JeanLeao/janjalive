@@ -1,3 +1,5 @@
+import { COLLABORATION_LIMITS } from '@screen-room/protocol';
+import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
 import React, { useRef, useState, useEffect } from 'react';
 import {
   Box,
@@ -29,6 +31,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  annotations?: AnnotationChannel;
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
@@ -57,6 +60,7 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  annotations,
   interactions,
   interactionAccess,
   isCinema = false,
@@ -345,6 +349,9 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
+          annotations={annotations}
+          annotationPeerId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.peerId}
+          annotationStreamId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.streamId}
           stream={activeStream.paused ? null : activeStream.stream}
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
@@ -499,6 +506,7 @@ export function RoomStage({
 
 // Spotlight Video Player Component
 function SpotlightVideoPlayer({
+  annotations, annotationPeerId, annotationStreamId,
   stream,
   isLocal,
   connectionState,
@@ -511,6 +519,9 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  annotations?: AnnotationChannel;
+  annotationPeerId?: string;
+  annotationStreamId?: string;
   stream: MediaStream | null;
   isLocal: boolean;
   isCinema: boolean;
@@ -527,7 +538,11 @@ function SpotlightVideoPlayer({
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
   const [playback, setPlayback] = useState('Conectando');
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
-  const zoom = useVideoZoom(videoRef, stream);
+  const [tool, setTool] = useState<AnnotationTool>('navigate');
+  const canAnnotate = Boolean(isLocal && stream && annotationStreamId && annotations?.available);
+  const effectiveTool = canAnnotate ? tool : 'navigate';
+  useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available]);
+  const zoom = useVideoZoom(videoRef, stream, effectiveTool !== 'navigate');
   const pip = usePictureInPicture(videoRef, stream);
   const controlsRef = useRef<HTMLDivElement>(null);
 
@@ -562,6 +577,21 @@ function SpotlightVideoPlayer({
   return (
     <>
     <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
+      {isLocal && annotations && annotationStreamId && <Box role="group" aria-label="Anotações temporárias" style={{ display: 'flex', gap: 2 }}>
+        {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} withArrow>
+          <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
+            disabled={!canAnnotate} aria-pressed={effectiveTool === mode} onClick={() => setTool(effectiveTool === mode ? 'navigate' : mode)}
+            aria-label={mode === 'navigate' ? 'Navegar' : mode === 'laser' ? 'Ponteiro laser' : 'Desenhar'} p={8}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {mode === 'navigate' ? <path d="m5 3 14 10-7 1-3 7z" /> : mode === 'laser' ? <><circle cx="12" cy="12" r="3" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3" /></> : <><path d="m4 16-1 5 5-1L20 8l-4-4zM14 6l4 4" /></>}
+            </svg>
+          </Button>
+        </Tooltip>)}
+        <Tooltip label="Limpar minhas anotações" withArrow><Button variant="subtle" color="gray" aria-label="Limpar minhas anotações" p={8}
+          disabled={!annotations.available} onClick={() => annotations.send({ type: 'clear-annotations', streamId: annotationStreamId, eventId: crypto.randomUUID(), seq: 1 })}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 14 9-10 7 6-9 10H7zM9 20h12M9 9l7 6" /></svg>
+        </Button></Tooltip>
+      </Box>}
       {onToggleCinema && (
         <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
           <Button
@@ -576,7 +606,7 @@ function SpotlightVideoPlayer({
           {showStreams ? 'Ocultar' : 'Transmissões'} ({streamCount})
         </Button>
       )}
-      <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP)' : 'Janela flutuante indisponível neste navegador ou vídeo'} withArrow>
+      <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP) · sem anotações' : 'Janela flutuante indisponível neste navegador ou vídeo'} withArrow>
         <span
           tabIndex={!pip.available && !pip.active ? 0 : undefined}
           aria-label={!pip.available && !pip.active ? 'Janela flutuante indisponível neste navegador ou vídeo' : undefined}
@@ -631,11 +661,12 @@ function SpotlightVideoPlayer({
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
-    <Box ref={zoom.viewportRef} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+    <Box ref={zoom.viewportRef} tabIndex={effectiveTool !== 'navigate' ? 0 : undefined} aria-label={effectiveTool === 'draw' ? 'Área de desenho; Escape cancela o gesto' : undefined} onKeyDown={event => { if (event.key === 'Escape') setTool('navigate'); }} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
     {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
       <Text c="white">Transmissão pausada</Text>
       {isLocal && <Text c="dimmed" size="sm">O navegador continua capturando. Retome ou pare pelo controle de compartilhamento.</Text>}
     </Box>}
+    <div ref={zoom.contentRef} style={{ position: 'absolute', inset: 0 }}>
     {stream && <video
       ref={videoRef}
       autoPlay
@@ -650,6 +681,8 @@ function SpotlightVideoPlayer({
         display: 'block',
       }}
     />}
+    {annotations && annotationPeerId && annotationStreamId && <AnnotationOverlay channel={annotations} peerId={annotationPeerId} streamId={annotationStreamId} tool={effectiveTool} zoom={zoom} />}
+    </div>
     </Box>
     </>
   );
