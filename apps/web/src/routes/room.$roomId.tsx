@@ -1,3 +1,4 @@
+import { RoomInteractions } from '../features/room/components/RoomInteractions';
 import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
@@ -269,6 +270,9 @@ function RoomPage() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        interactions={<RoomInteractions key={roomId} messages={session.chatMessages} reactions={session.reactions}
+          error={session.interactionError} pending={session.chatPending} connected={session.connectionStatus === 'connected'}
+          onSendChat={session.sendChat} onSendReaction={session.sendReaction} />}
         isCinema={isCinema}
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}

@@ -1,13 +1,17 @@
 import { normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
+export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
+
 export interface ParticipantMeta {
+  interactions?: InteractionBudget;
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
 }
 
 export interface RecoveryReservation {
+  interactions?: InteractionBudget;
   reconnectToken: string;
   nickname?: string;
   timer: NodeJS.Timeout;
@@ -90,7 +94,7 @@ export class RoomRegistry {
         ? reconnectToken.trim()
         : crypto.randomUUID());
 
-    participants.set(peer, { nickname: cleanNickname, reconnectToken: token, ...(existingMeta?.sharing ? { sharing: existingMeta.sharing } : {}) });
+    participants.set(peer, { interactions: existingMeta?.interactions ?? reservation?.interactions, nickname: cleanNickname, reconnectToken: token, ...(existingMeta?.sharing ? { sharing: existingMeta.sharing } : {}) });
     return existingPeers;
   }
 
@@ -131,6 +135,7 @@ export class RoomRegistry {
       this.#recoveryReservations.set(reservationKey, {
         reconnectToken: existingMeta.reconnectToken,
         nickname: existingMeta.nickname,
+        interactions: existingMeta.interactions,
         timer,
         expiresAt: Date.now() + graceMs,
       });
@@ -159,6 +164,12 @@ export class RoomRegistry {
   updateSharing(roomId: string, peerId: string, sharing: SharingState): void {
     const meta = this.#rooms.get(roomId)?.get(peerId);
     if (meta) meta.sharing = sharing;
+  }
+
+  interactionBudget(roomId: string, peerId: string): InteractionBudget {
+    const meta = this.#rooms.get(roomId)?.get(peerId);
+    if (!meta) throw new Error('Participante ausente.');
+    return meta.interactions ||= { chat: [], reaction: [], ids: [] };
   }
 
   getNickname(roomId: unknown, peerId: unknown): string | undefined {

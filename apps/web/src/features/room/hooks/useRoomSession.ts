@@ -1,3 +1,5 @@
+import { useRoomInteractions } from './useRoomInteractions';
+import type { Reaction } from '@screen-room/protocol';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   type QualitySelection,
@@ -42,6 +44,9 @@ export interface UseRoomSessionOptions {
 }
 
 export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomSessionOptions) {
+  const interactions = useRoomInteractions(roomId);
+  const interactionsRef = useRef(interactions);
+  interactionsRef.current = interactions;
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('connecting');
   const [participantCount, setParticipantCount] = useState<number>(1);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -82,6 +87,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const sharingIdRef = useRef<string | undefined>(undefined);
   const loggerRef = useRef<DiagnosticsLogger | null>(null);
   const signalingRef = useRef<SignalingClient | null>(null);
+  const signalingRoomRef = useRef<string | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
   const statsCollectorRef = useRef<StatsCollector | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -198,6 +204,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onStateChange: (state) => {
         if (isDisposed) return;
         setConnectionStatus(state);
+        if (state !== 'connected') interactionsRef.current.resetConnection();
         if (state === 'disconnected') peerManager.closeAll();
         if (state === 'connected') {
           signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current);
@@ -205,6 +212,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       },
       onMessage: (message) => {
         if (isDisposed) return;
+        interactionsRef.current.receive(message);
         if (message.type === 'peers') {
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
@@ -325,6 +333,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       logger,
     });
     signalingRef.current = signaling;
+    signalingRoomRef.current = roomId;
 
     // Load ICE configuration asynchronously
     iceConfiguration.then((config) => {
@@ -337,6 +346,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     return () => {
       isDisposed = true;
+      signalingRoomRef.current = null;
+      signalingRef.current = null;
+      interactionsRef.current.resetConnection();
       captureGenerationRef.current++;
       qualityOperationRef.current = null;
       setQualityPending(false);
@@ -725,6 +737,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, []);
 
   return {
+    chatMessages: interactions.messages,
+    reactions: interactions.reactions,
+    interactionError: interactions.error,
+    chatPending: interactions.pending,
+    sendChat: (text: string) => interactions.sendChat(signalingRoomRef.current === roomId ? signalingRef.current : null, text),
+    sendReaction: (reaction: Reaction) => interactions.sendReaction(signalingRoomRef.current === roomId ? signalingRef.current : null, reaction),
     captureState,
     pendingStream,
     switchCapture,

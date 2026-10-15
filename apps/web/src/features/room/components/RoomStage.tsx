@@ -29,6 +29,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  interactions?: React.ReactNode;
   isCinema?: boolean;
   onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
@@ -54,6 +55,7 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  interactions,
   isCinema = false,
   onToggleCinema,
   remoteConnectionStates = {},
@@ -157,6 +159,7 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        {interactions}
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -257,6 +260,7 @@ export function RoomStage({
         minHeight: 0,
       }}
     >
+      {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
