@@ -7,6 +7,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
+import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import {
@@ -16,6 +17,8 @@ import {
 } from '../utils/avatar';
 import {
   IconScreen,
+  IconCinema,
+  IconPictureInPicture,
   IconPlus,
   IconMinus,
   IconReset,
@@ -26,6 +29,8 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  isCinema?: boolean;
+  onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
   onRetryPeer?: (peerId: string) => void;
   localStream: MediaStream | null;
@@ -48,6 +53,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  isCinema = false,
+  onToggleCinema,
   remoteConnectionStates = {},
   onRetryPeer,
   localStream,
@@ -60,13 +67,14 @@ export function RoomStage({
   onCopyInvite,
   canShareScreen,
 }: RoomStageProps) {
+  const [showStreams, setShowStreams] = useState(false);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Fullscreen change listener
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      setIsFullscreen(!!stageContainerRef.current && document.fullscreenElement === stageContainerRef.current);
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => {
@@ -139,6 +147,7 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
             maxWidth: '440px',
@@ -240,6 +249,24 @@ export function RoomStage({
     >
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
+        .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+        .stage-view-controls {
+          position: absolute;
+          bottom: max(16px, env(safe-area-inset-bottom, 0px), var(--stage-dock-clearance, 0px));
+          right: max(16px, env(safe-area-inset-right, 0px));
+          max-width: calc(100% - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px)));
+          z-index: 20;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 4px;
+          padding: 4px;
+          background: rgba(13, 17, 23, .9);
+          border: 1px solid rgba(255,255,255,.1);
+          border-radius: 8px;
+        }
+        .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
         }
@@ -278,13 +305,6 @@ export function RoomStage({
             display: none !important;
           }
         }
-        @media (max-width: 600px) {
-          .fullscreen-toggle-wrapper {
-            bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 58px) !important;
-            right: 12px !important;
-          }
-          .zoom-controls.fullscreen-toggle-wrapper { right: calc(16px + var(--stage-control-size)) !important; }
-        }
       `}</style>
       {/* Main Spotlight Canvas */}
       <Box
@@ -306,6 +326,13 @@ export function RoomStage({
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
           onRetry={() => onRetryPeer?.(activeStream.id)}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          isCinema={isCinema}
+          onToggleCinema={onToggleCinema}
+          streamCount={secondaryStreams.length}
+          showStreams={showStreams}
+          onToggleStreams={() => setShowStreams(value => !value)}
         />
 
         {/* Top-Left Streamer Badge */}
@@ -377,44 +404,10 @@ export function RoomStage({
             {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
           </Text>
         </Box>
-
-        {/* Bottom-Right Fullscreen Toggle */}
-        <Box
-          className="fullscreen-toggle-wrapper"
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            right: 16,
-            zIndex: 10,
-          }}
-        >
-          <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
-            <UnstyledButton
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-              style={{
-                width: 'var(--stage-control-size)',
-                height: 'var(--stage-control-size)',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(13, 17, 23, 0.85)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#e6edf3',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isFullscreen ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
-            </UnstyledButton>
-          </Tooltip>
-        </Box>
       </Box>
 
       {/* Multi-Stream Previews (Sidebar on desktop / horizontal carousel on mobile) */}
-      {secondaryStreams.length > 0 && (
+      {secondaryStreams.length > 0 && (!isCinema || showStreams) && (
         <Box
           className="secondary-streams-panel"
           style={{
@@ -476,9 +469,23 @@ function SpotlightVideoPlayer({
   isLocal,
   connectionState,
   onRetry,
+  isCinema,
+  onToggleCinema,
+  streamCount,
+  showStreams,
+  onToggleStreams,
+  isFullscreen,
+  onToggleFullscreen,
 }: {
   stream: MediaStream;
   isLocal: boolean;
+  isCinema: boolean;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onToggleCinema?: () => void;
+  streamCount: number;
+  showStreams: boolean;
+  onToggleStreams: () => void;
   connectionState?: RTCPeerConnectionState;
   onRetry?: () => void;
 }) {
@@ -487,9 +494,103 @@ function SpotlightVideoPlayer({
   const [playback, setPlayback] = useState('Conectando');
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
   const zoom = useVideoZoom(videoRef, stream);
+  const pip = usePictureInPicture(videoRef, stream);
+  const controlsRef = useRef<HTMLDivElement>(null);
+
+  // Lift the bar only when it would overlap the central dock.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const canvas = controls?.parentElement;
+    const dock = controls?.ownerDocument.querySelector<HTMLElement>('.floating-dock-wrapper');
+    if (!controls || !canvas || !dock) return;
+    const positionControls = () => {
+      const bar = controls.getBoundingClientRect();
+      const dockBounds = dock.getBoundingClientRect();
+      const overlapsHorizontally = bar.left < dockBounds.right && bar.right > dockBounds.left;
+      const clearance = !isFullscreen && dockBounds.width > 0 && overlapsHorizontally
+        ? Math.max(0, canvas.getBoundingClientRect().bottom - dockBounds.top + 12)
+        : 0;
+      controls.style.setProperty('--stage-dock-clearance', `${clearance}px`);
+    };
+    const observer = new ResizeObserver(positionControls);
+    observer.observe(controls);
+    observer.observe(canvas);
+    observer.observe(dock);
+    window.addEventListener('resize', positionControls);
+    positionControls();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionControls);
+      controls.style.removeProperty('--stage-dock-clearance');
+    };
+  }, [isFullscreen]);
 
   return (
     <>
+    <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
+      {onToggleCinema && (
+        <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
+          <Button
+            variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
+            aria-pressed={isCinema} aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
+            onClick={onToggleCinema} p={8}
+          ><IconCinema size={18} aria-hidden /></Button>
+        </Tooltip>
+      )}
+      {isCinema && streamCount > 0 && (
+        <Button variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams}>
+          {showStreams ? 'Ocultar' : 'Transmissões'} ({streamCount})
+        </Button>
+      )}
+      <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP)' : 'Janela flutuante indisponível neste navegador ou vídeo'} withArrow>
+        <span
+          tabIndex={!pip.available && !pip.active ? 0 : undefined}
+          aria-label={!pip.available && !pip.active ? 'Janela flutuante indisponível neste navegador ou vídeo' : undefined}
+        >
+          <Button
+            variant={pip.active ? 'filled' : 'subtle'} color={pip.active ? 'blue' : 'gray'}
+            aria-pressed={pip.active} aria-label={pip.active ? 'Fechar janela flutuante' : 'Janela flutuante (PiP)'}
+            disabled={pip.pending || (!pip.available && !pip.active)} aria-busy={pip.pending} loading={pip.pending}
+            onClick={pip.toggle} p={8}
+          ><IconPictureInPicture size={18} aria-hidden /></Button>
+        </span>
+      </Tooltip>
+      <Box
+        className="zoom-controls"
+        role="group"
+        aria-label="Zoom da transmissão"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 2,
+          background: 'rgba(13,17,23,.9)', borderRadius: 8,
+        }}
+      >
+        <Button
+          variant="subtle" color="gray" aria-label="Reduzir zoom"
+          disabled={zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconMinus size={16} aria-hidden /></Button>
+        <Text size="xs" aria-live="polite" style={{ minWidth: 32, fontSize: 11, textAlign: 'center' }}>
+          {Math.round(zoom.scale * 100)}%
+        </Text>
+        <Button
+          variant="subtle" color="gray" aria-label="Ampliar zoom"
+          disabled={zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconPlus size={16} aria-hidden /></Button>
+        <Button
+          variant="subtle" color="gray" aria-label="Restaurar enquadramento"
+          disabled={zoom.scale === 1} onClick={() => zoom.changeZoom()}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconReset size={16} aria-hidden /></Button>
+      </Box>
+      <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
+        <Button
+          variant="subtle" color="gray" onClick={onToggleFullscreen} p={8}
+          aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+        >{isFullscreen ? <IconMinimize size={16} aria-hidden /> : <IconMaximize size={16} aria-hidden />}</Button>
+      </Tooltip>
+    </Box>
+    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
     <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
       <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
@@ -511,35 +612,6 @@ function SpotlightVideoPlayer({
         display: 'block',
       }}
     />
-    </Box>
-    <Box
-      className="fullscreen-toggle-wrapper zoom-controls"
-      role="group"
-      aria-label="Zoom da transmissão"
-      style={{
-        position: 'absolute', bottom: 16, right: 'calc(24px + var(--stage-control-size))', zIndex: 10,
-        display: 'flex', alignItems: 'center', gap: 2,
-        background: 'rgba(13,17,23,.9)', borderRadius: 8,
-      }}
-    >
-      <Button
-        variant="subtle" color="gray" aria-label="Reduzir zoom"
-        disabled={zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
-        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
-      ><IconMinus size={16} aria-hidden /></Button>
-      <Text size="xs" aria-live="polite" style={{ minWidth: 32, fontSize: 11, textAlign: 'center' }}>
-        {Math.round(zoom.scale * 100)}%
-      </Text>
-      <Button
-        variant="subtle" color="gray" aria-label="Ampliar zoom"
-        disabled={zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
-        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
-      ><IconPlus size={16} aria-hidden /></Button>
-      <Button
-        variant="subtle" color="gray" aria-label="Restaurar enquadramento"
-        disabled={zoom.scale === 1} onClick={() => zoom.changeZoom()}
-        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
-      ><IconReset size={16} aria-hidden /></Button>
     </Box>
     </>
   );

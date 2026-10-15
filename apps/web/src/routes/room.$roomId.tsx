@@ -25,6 +25,7 @@ function RoomPage() {
       ['single', 'multi'].includes(new URLSearchParams(window.location.search).get('demo') || '')
   );
 
+  const [isCinema, setIsCinema] = useState(false);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
@@ -172,7 +173,7 @@ function RoomPage() {
   return (
     <Box
       style={{
-        height: '100vh',
+        height: '100dvh',
         width: '100vw',
         display: 'flex',
         flexDirection: 'column',
@@ -254,17 +255,21 @@ function RoomPage() {
       )}
 
       {/* Header */}
-      <RoomHeader
-        roomId={roomId}
-        participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
-        connectionStatus={session.connectionStatus}
-        onOpenParticipants={() => setIsParticipantsOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onLeave={handleLeave}
-      />
+      {!isCinema && (
+        <RoomHeader
+          roomId={roomId}
+          participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
+          connectionStatus={session.connectionStatus}
+          onOpenParticipants={() => setIsParticipantsOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onLeave={handleLeave}
+        />
+      )}
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        isCinema={isCinema}
+        onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
         onRetryPeer={session.retryPeer}
         localStream={session.localStream}
