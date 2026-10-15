@@ -1,4 +1,4 @@
-import { QUALITY_PROFILES, type QualityProfileKey } from '@screen-room/protocol';
+import { CAPTURE_FRAMERATE_ENVELOPE, resolveQuality, type QualitySelection } from '@screen-room/protocol';
 
 export function canShareScreen(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
@@ -39,25 +39,32 @@ export function formatSharingErrorMessage(error: unknown): string {
   return messages[err.name ?? ''] || `Falha ${err.name || 'desconhecida'}: ${err.message || 'o navegador não informou o motivo.'}`;
 }
 
-export async function captureDisplayMedia(quality: QualityProfileKey): Promise<MediaStream> {
+export async function captureDisplayMedia(quality: QualitySelection, onCaptured?: (stream: MediaStream) => void): Promise<MediaStream> {
   if (!canShareScreen()) {
     throw new Error(getShareSupportMessage());
   }
 
-  const profile = QUALITY_PROFILES[quality] || QUALITY_PROFILES.balanced;
+  const profile = resolveQuality(quality);
 
   // IMPORTANT: We only request display media with audio from the screen/tab.
   // We NEVER call getUserMedia and NEVER request microphone permissions!
   const constraints: DisplayMediaStreamOptions = {
     video: {
-      frameRate: { ideal: profile.maxFramerate, max: profile.maxFramerate },
+      // Chromium fixes native source capabilities from the initial ideal as well
+      // as max. Reserve 60 here, then constrain the unpublished track below.
+      frameRate: { ideal: CAPTURE_FRAMERATE_ENVELOPE, max: CAPTURE_FRAMERATE_ENVELOPE },
       width: { ideal: profile.width, max: profile.width },
       height: { ideal: profile.height, max: profile.height },
     },
     audio: true,
   };
 
-  return navigator.mediaDevices.getDisplayMedia(constraints);
+  const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+  // Register ownership immediately: session cleanup must not wait for constraints.
+  try { onCaptured?.(stream); }
+  catch (error) { stopAllTracks(stream); throw error; }
+  await applyCaptureQuality(stream.getVideoTracks()[0], quality);
+  return stream;
 }
 
 export function setStreamAudioMuted(stream: MediaStream | null, muted: boolean): void {
@@ -76,4 +83,44 @@ export function stopAllTracks(stream: MediaStream | null): void {
       // ignore
     }
   }
+}
+
+// Shared by initial capture, previews and active senders; never changes audio/enabled.
+async function applyTrackQuality(track: MediaStreamTrack | undefined, quality: QualitySelection): Promise<boolean> {
+  if (!track || track.readyState === 'ended') return true;
+  const profile = resolveQuality(quality);
+  let complete = true;
+  try {
+    if ('contentHint' in track) {
+      track.contentHint = profile.contentHint;
+      complete = track.contentHint === profile.contentHint;
+    } else complete = false;
+  } catch { complete = false; }
+  try {
+    if (!track.applyConstraints) return false;
+    const capabilities = track.getCapabilities?.() ?? {};
+    const bound = (value: number, range?: { max?: number; min?: number }) => {
+      const max = Math.min(value, range?.max ?? value);
+      // A source's minimum can exceed the requested ceiling; do not silently raise it.
+      return { ideal: max, max };
+    };
+    await track.applyConstraints({
+      width: bound(profile.width, capabilities.width),
+      height: bound(profile.height, capabilities.height),
+      frameRate: bound(profile.maxFramerate, capabilities.frameRate),
+    });
+    const settings = track.getSettings?.();
+    if (!settings || settings.width === undefined || settings.height === undefined || settings.frameRate === undefined) complete = false;
+    else if (settings.width > profile.width || settings.height > profile.height || settings.frameRate > profile.maxFramerate) complete = false;
+  } catch { complete = false; }
+  return complete;
+}
+
+const captureUpdates = new WeakMap<MediaStreamTrack, Promise<boolean>>();
+export function applyCaptureQuality(track: MediaStreamTrack | undefined, quality: QualitySelection): Promise<boolean> {
+  if (!track) return Promise.resolve(true);
+  const operation = (captureUpdates.get(track) ?? Promise.resolve(true)).catch(() => false)
+    .then(() => applyTrackQuality(track, quality));
+  captureUpdates.set(track, operation);
+  return operation;
 }

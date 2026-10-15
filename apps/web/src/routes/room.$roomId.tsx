@@ -70,7 +70,7 @@ function RoomPage() {
         ctx1.fillText('Firminha — Apresentação de Arquitetura', 120, 180);
         ctx1.fillStyle = '#94a3b8';
         ctx1.font = '28px system-ui, -apple-system, sans-serif';
-        ctx1.fillText('Screen Room • Alta qualidade (1080p) • Áudio da aba ativo', 120, 240);
+        ctx1.fillText('Screen Room • Nitidez · Equilibrado (até 1080p) • Áudio da aba ativo', 120, 240);
 
         // Simulated IDE code window
         ctx1.fillStyle = '#161b22';
@@ -87,7 +87,7 @@ function RoomPage() {
         ctx1.fillStyle = '#7ee787';
         ctx1.fillText('  const peerManager = new PeerManager({ rtcConfig });', 160, 490);
         ctx1.fillStyle = '#79c0ff';
-        ctx1.fillText('  const displayStream = await captureDisplayMedia("high");', 160, 550);
+        ctx1.fillText('  const displayStream = await captureDisplayMedia(DEFAULT_QUALITY);', 160, 550);
         ctx1.fillStyle = '#ffa657';
         ctx1.fillText('  await peerManager.attachLocalStream(displayStream);', 160, 610);
         ctx1.fillStyle = '#e6edf3';

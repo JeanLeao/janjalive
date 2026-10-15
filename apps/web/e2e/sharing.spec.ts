@@ -61,6 +61,14 @@ async function syntheticCapture(page: Page) {
         ((window as any).testCaptures ||= []).push(stream);
         (window as any).testCapture = stream;
         const track = stream.getVideoTracks()[0];
+        const nativeConstraints = track.applyConstraints.bind(track);
+        track.applyConstraints = async constraints => {
+          if ((window as any).testDelayConstraints) {
+            (window as any).testDelayConstraints = false;
+            await new Promise<void>(resolve => { (window as any).resolveConstraints = resolve; });
+          }
+          return nativeConstraints(constraints);
+        };
         const stop = track.stop.bind(track);
         track.stop = () => { clearInterval(timer); stop(); };
         stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer));
@@ -964,4 +972,83 @@ test('F27 first audio source negotiates without losing the reused remote video',
     await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
     await expect(host.getByRole('dialog')).toContainText('Transmissão, áudio e diagnóstico');
   } finally { await context.close(); }
+});
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  test(`F01 F02 quality controls and live sender limits ${viewport.width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, hasTouch: viewport.width < 500 });
+    const host = await context.newPage(), viewer = await context.newPage();
+    const openSettings = async () => {
+      const trigger = host.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+      await trigger.focus(); await host.keyboard.press('Enter');
+      await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+    };
+    const assertSender = async (fps: number, bitrate: number, hint: string) => {
+      await expect.poll(() => host.evaluate(() => (window as any).testPeers
+        .filter((pc: RTCPeerConnection) => pc.connectionState !== 'closed')
+        .flatMap((pc: RTCPeerConnection) => pc.getSenders().filter(sender => sender.track?.kind === 'video')
+          .map(sender => ({ fps: sender.getParameters().encodings[0]?.maxFramerate,
+            bitrate: sender.getParameters().encodings[0]?.maxBitrate, hint: sender.track?.contentHint }))))
+        ).toEqual([{ fps, bitrate, hint }]);
+    };
+    try {
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await Promise.all([host.goto(`/room/f01-${viewport.width}`), viewer.goto(`/room/f01-${viewport.width}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      await openSettings();
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('balanced');
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('20');
+      // Native radio keyboard interaction switches priority and clamps 20 -> 30.
+      await host.getByRole('radio', { name: 'Nitidez', exact: true }).focus();
+      await host.keyboard.press('ArrowRight');
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await host.getByLabel('Limite de FPS').selectOption('60');
+      await assertSender(60, 8000000, 'motion');
+      await host.screenshot({ path: test.info().outputPath(`quality-${viewport.width}.png`), animations: 'disabled' });
+      await test.info().attach('quality-ui', { path: test.info().outputPath(`quality-${viewport.width}.png`), contentType: 'image/png' });
+      await host.getByLabel('Nível de qualidade').selectOption('economy');
+      await expect(host.getByLabel('Limite de FPS').locator('option')).toHaveCount(1);
+      await assertSender(30, 2000000, 'motion');
+      if (viewport.width < 500) await host.getByText('Nitidez', { exact: true }).tap();
+      else await host.getByText('Nitidez', { exact: true }).click();
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await host.getByLabel('Limite de FPS').selectOption('20');
+      await assertSender(20, 6000000, 'text');
+      await host.getByRole('button', { name: 'Fechar configurações' }).click();
+      await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await assertSender(20, 6000000, 'text');
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await host.getByRole('button', { name: 'Confirmar troca' }).click();
+      await assertSender(20, 6000000, 'text');
+      await frames(viewer);
+      const stats = await host.evaluate(async () => {
+        const reports: unknown[] = [];
+        for (const pc of (window as any).testPeers as RTCPeerConnection[]) {
+          if (pc.connectionState !== 'closed') (await pc.getStats()).forEach(report => {
+            if (report.type === 'outbound-rtp' && report.kind === 'video') reports.push(report);
+          });
+        }
+        return { capture: (window as any).testCapture.getVideoTracks()[0].getSettings(), outbound: reports };
+      });
+      await test.info().attach('synthetic-real-webrtc-stats', { body: JSON.stringify(stats, null, 2), contentType: 'application/json' });
+      expect(await host.evaluate(() => (window as any).testCaptures.length)).toBe(2);
+    } finally { await context.close(); }
+  });
+}
+
+
+test('F01 cleanup owns captured tracks while initial quality constraints are pending', async ({ page }) => {
+  await syntheticCapture(page);
+  await page.goto('/room/f01-pending-constraints');
+  await page.evaluate(() => { (window as any).testDelayConstraints = true; });
+  await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+  await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
+  await page.getByRole('button', { name: 'Sair da sala', exact: true }).click();
+  await expect(page).toHaveURL('/');
+  expect(await page.evaluate(() => (window as any).testCapture.getTracks().every((track: MediaStreamTrack) => track.readyState === 'ended'))).toBe(true);
+  await page.evaluate(() => (window as any).resolveConstraints());
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });

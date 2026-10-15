@@ -118,11 +118,7 @@ test('protocol: validates typed signal payloads', () => {
   assert.equal(isIceSignal(answer), false);
 });
 
-test('protocol: exports expected quality profiles', () => {
-  assert.equal(QUALITY_PROFILES.economy.maxFramerate, 15);
-  assert.equal(QUALITY_PROFILES.balanced.maxFramerate, 20);
-  assert.equal(QUALITY_PROFILES.high.maxFramerate, 20);
-});
+
 
 test('protocol: generateSecureRoomId generates high-entropy, valid and unique room IDs', () => {
   const id1 = generateSecureRoomId();
