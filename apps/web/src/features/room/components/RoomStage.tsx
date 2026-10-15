@@ -239,6 +239,10 @@ export function RoomStage({
       }}
     >
       <style>{`
+        .stage-main-container { --stage-control-size: 36px; }
+        @media (max-width: 768px), (pointer: coarse) {
+          .stage-main-container { --stage-control-size: 44px; }
+        }
         @media (max-width: 768px) {
           .stage-main-container {
             flex-direction: column !important;
@@ -279,7 +283,7 @@ export function RoomStage({
             bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 58px) !important;
             right: 12px !important;
           }
-          .zoom-controls.fullscreen-toggle-wrapper { right: 60px !important; }
+          .zoom-controls.fullscreen-toggle-wrapper { right: calc(16px + var(--stage-control-size)) !important; }
         }
       `}</style>
       {/* Main Spotlight Canvas */}
@@ -389,8 +393,8 @@ export function RoomStage({
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
               style={{
-                width: 44,
-                height: 44,
+                width: 'var(--stage-control-size)',
+                height: 'var(--stage-control-size)',
                 borderRadius: '8px',
                 display: 'flex',
                 alignItems: 'center',
@@ -403,7 +407,7 @@ export function RoomStage({
                 transition: 'all 0.15s ease',
               }}
             >
-              {isFullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
+              {isFullscreen ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
             </UnstyledButton>
           </Tooltip>
         </Box>
@@ -513,29 +517,29 @@ function SpotlightVideoPlayer({
       role="group"
       aria-label="Zoom da transmissão"
       style={{
-        position: 'absolute', bottom: 16, right: 68, zIndex: 10,
-        display: 'flex', alignItems: 'center', gap: 4,
+        position: 'absolute', bottom: 16, right: 'calc(24px + var(--stage-control-size))', zIndex: 10,
+        display: 'flex', alignItems: 'center', gap: 2,
         background: 'rgba(13,17,23,.9)', borderRadius: 8,
       }}
     >
       <Button
         variant="subtle" color="gray" aria-label="Reduzir zoom"
         disabled={zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
-        style={{ minWidth: 44, height: 44, padding: 0 }}
-      ><IconMinus size={18} aria-hidden /></Button>
-      <Text size="xs" aria-live="polite" style={{ minWidth: 36, textAlign: 'center' }}>
+        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+      ><IconMinus size={16} aria-hidden /></Button>
+      <Text size="xs" aria-live="polite" style={{ minWidth: 32, fontSize: 11, textAlign: 'center' }}>
         {Math.round(zoom.scale * 100)}%
       </Text>
       <Button
         variant="subtle" color="gray" aria-label="Ampliar zoom"
         disabled={zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
-        style={{ minWidth: 44, height: 44, padding: 0 }}
-      ><IconPlus size={18} aria-hidden /></Button>
+        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+      ><IconPlus size={16} aria-hidden /></Button>
       <Button
         variant="subtle" color="gray" aria-label="Restaurar enquadramento"
         disabled={zoom.scale === 1} onClick={() => zoom.changeZoom()}
-        style={{ minWidth: 44, height: 44, padding: 0 }}
-      ><IconReset size={18} aria-hidden /></Button>
+        style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+      ><IconReset size={16} aria-hidden /></Button>
     </Box>
     </>
   );
