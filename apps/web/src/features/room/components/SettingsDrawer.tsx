@@ -7,19 +7,11 @@ import {
   Text,
   UnstyledButton,
   Button,
-  NativeSelect,
-  SegmentedControl,
   Code,
   Tabs,
 } from '@mantine/core';
-import {
-  QUALITY_PROFILES,
-  type QualitySelection,
-  type VisualPriority,
-  type QualityProfileKey,
-  type FrameRate,
-  normalizeQuality, resolveQuality, validFrameRates,
-} from '@screen-room/protocol';
+import type { QualitySelection } from '@screen-room/protocol';
+import { QualityControls } from './QualityControls';
 import type {
   ConnectionState,
   DiagnosticEntry,
@@ -67,8 +59,6 @@ export function SettingsDrawer({
 }: SettingsDrawerProps) {
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const profile = resolveQuality(quality);
-  const update = (patch: Partial<QualitySelection>) => onChangeQuality(normalizeQuality({ ...quality, ...patch }));
 
   const handleCopyLogs = async () => {
     if (typeof window !== 'undefined') {
@@ -192,29 +182,7 @@ export function SettingsDrawer({
         {/* Tab 1: Qualidade */}
         <Tabs.Panel value="quality">
           <Stack gap="md">
-            <div>
-              <Text fw={600} size="sm" c="#fff" mb={8}>Prioridade visual</Text>
-              <SegmentedControl fullWidth value={quality.priority}
-                aria-label="Prioridade visual"
-                onChange={value => update({ priority: value as VisualPriority })}
-                data={[{ value: 'sharpness', label: 'Nitidez' }, { value: 'motion', label: 'Fluidez' }]}
-                styles={{ root: { background: '#161b22' }, label: { minHeight: 36, display: 'grid', placeItems: 'center' } }} />
-              <Text size="xs" c="#8c959f" mt={8}>
-                {quality.priority === 'sharpness' ? 'Prioriza a leitura de textos, códigos e documentos.' : 'Prioriza movimento, animações e navegação dinâmica.'}
-              </Text>
-            </div>
-            <NativeSelect label="Nível de qualidade" value={quality.profile}
-              onChange={event => update({ profile: event.currentTarget.value as QualityProfileKey })}
-              data={Object.entries(QUALITY_PROFILES).map(([value, item]) => ({ value, label: item.label }))}
-              styles={{ input: { minHeight: 44, background: '#161b22', color: '#e6edf3' } }} />
-            <NativeSelect label="Limite de FPS" value={quality.fps}
-              onChange={event => update({ fps: Number(event.currentTarget.value) as FrameRate })}
-              data={validFrameRates(quality.priority, quality.profile).map(fps => ({ value: String(fps), label: `${fps} FPS` }))}
-              styles={{ input: { minHeight: 44, background: '#161b22', color: '#e6edf3' } }} />
-            <div role="status" aria-live="polite">
-              <Text size="sm" c="#e6edf3">Até {profile.height}p · {quality.fps} FPS · {profile.maxBitrate / 1_000_000} Mbps</Text>
-              <Text size="xs" c="#8c959f" mt={4}>Limites máximos. A fonte, o navegador e a rede determinam a qualidade efetiva.</Text>
-            </div>
+            <QualityControls quality={quality} onChange={onChangeQuality} />
 
             <Box
               style={{

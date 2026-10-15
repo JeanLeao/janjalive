@@ -51,6 +51,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [remoteConnectionStates, setRemoteConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({});
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [quality, setQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
+  const [qualityPending, setQualityPending] = useState(false);
+  const [qualityNotice, setQualityNotice] = useState<string | null>(null);
+  const qualityOperationRef = useRef<object | null>(null);
   const [networkStats, setNetworkStats] = useState<NetworkMetrics | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticEntry[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -87,7 +90,6 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const nicknameRef = useRef<string | undefined>(displayName?.trim() || undefined);
   const reconnectTokenRef = useRef<string | undefined>(undefined);
 
-  qualityRef.current = quality;
   remoteStreamsRef.current = remoteStreams;
 
   const showToast = useCallback((msg: string) => {
@@ -336,6 +338,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     return () => {
       isDisposed = true;
       captureGenerationRef.current++;
+      qualityOperationRef.current = null;
+      setQualityPending(false);
+      setQualityNotice(null);
       if (endedHandlerRef.current) {
         const { track, handler } = endedHandlerRef.current;
         track.removeEventListener('ended', handler);
@@ -361,6 +366,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, [roomId, showToast, enabled]);
 
   const stopSharing = useCallback(() => {
+    qualityOperationRef.current = null;
+    setQualityPending(false);
+    setQualityNotice(null);
     const generation = ++captureGenerationRef.current;
     if (endedHandlerRef.current) {
       const { track, handler } = endedHandlerRef.current;
@@ -403,6 +411,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
   const startSharing = useCallback(async () => {
     if (captureStateRef.current !== 'idle') return;
+    setQualityNotice(null);
     transition('requesting');
     const generation = ++captureGenerationRef.current;
     const requestedAt = performance.now();
@@ -415,9 +424,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       });
       if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
       localStreamRef.current = stream;
-      await applyCaptureQuality(stream.getVideoTracks()[0], qualityRef.current);
+      const applied = await applyCaptureQuality(stream.getVideoTracks()[0], qualityRef.current);
       if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
       if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { stopAllTracks(stream); throw new Error('Captura sem vídeo disponível.'); }
+      if (!applied) setQualityNotice('O navegador não aplicou todos os limites. Confira a captura observada; você pode continuar ou escolher outro perfil.');
       transition('preview');
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -456,7 +466,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const publishCapture = useCallback(async () => {
     const state = captureStateRef.current;
     const stream = localStreamRef.current;
-    if (!stream || (state !== 'preview' && state !== 'paused')) return;
+    if (qualityOperationRef.current || !stream || (state !== 'preview' && state !== 'paused')) return;
     if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { stopSharing(); return; }
     const generation = captureGenerationRef.current;
     transition(state === 'preview' ? 'publishing' : 'resuming');
@@ -586,7 +596,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const confirmSwitch = useCallback(async () => {
     const change = switchRef.current;
     const stream = change?.pending;
-    if (!change || !stream || captureStateRef.current !== 'switch-preview') return;
+    if (qualityOperationRef.current || !change || !stream || captureStateRef.current !== 'switch-preview') return;
     if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { void cancelSwitch(); return; }
     const generation = captureGenerationRef.current;
     transition('switch-publishing');
@@ -682,18 +692,28 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
   const changeQuality = useCallback(
     async (selection: QualitySelection) => {
+      if (['publishing', 'resuming', 'switch-publishing', 'switch-restoring'].includes(captureStateRef.current)) return;
+      const operation = {};
+      const generation = captureGenerationRef.current;
+      qualityOperationRef.current = operation;
+      setQualityPending(true);
+      setQualityNotice(null);
       const newQuality = normalizeQuality(selection);
       qualityRef.current = newQuality;
       setQuality(newQuality);
       const streams = new Set([localStreamRef.current, switchRef.current?.pending]);
-      const senderUpdate = peerManagerRef.current?.applyQuality(newQuality);
+      const senderUpdate = peerManagerRef.current?.applyQuality(newQuality).catch(() => false);
       const results = await Promise.all([...streams].filter(Boolean).map(stream =>
         applyCaptureQuality(stream!.getVideoTracks()[0], newQuality)));
       const verified = await senderUpdate;
-      if (qualityRef.current !== newQuality) return;
+      if (qualityOperationRef.current !== operation) return;
+      qualityOperationRef.current = null;
+      setQualityPending(false);
+      if (generation !== captureGenerationRef.current || qualityRef.current !== newQuality) return;
       const profile = resolveQuality(newQuality);
       loggerRef.current?.log('quality-selection', { ...newQuality, verified: verified && results.every(Boolean), captures: JSON.stringify([...streams].filter(Boolean).map(stream => stream!.getVideoTracks()[0]?.getSettings?.() ?? {})) });
-      showToast(verified && results.every(Boolean)
+      setQualityNotice(verified !== false && results.every(Boolean) ? null : 'O navegador não aplicou todos os limites. Confira a captura observada; você pode continuar ou escolher outro perfil.');
+      if (!['preview', 'switch-preview'].includes(captureStateRef.current)) showToast(verified !== false && results.every(Boolean)
         ? `Limites atualizados: ${profile.label}, ${newQuality.fps} FPS.`
         : `Selecionado: ${profile.label}, ${newQuality.fps} FPS. O navegador pode limitar a aplicação; consulte o diagnóstico.`);
     },
@@ -727,6 +747,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     updateNickname,
     currentNickname,
     quality,
+    qualityPending,
+    qualityNotice,
     networkStats,
     diagnostics,
     errorMessage,

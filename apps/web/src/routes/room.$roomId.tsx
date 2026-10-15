@@ -289,12 +289,14 @@ function RoomPage() {
       />
 
       {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
-        <CapturePreview stream={session.localStream} pending={session.captureState === 'publishing'}
+        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+          onChangeQuality={session.changeQuality} stream={session.localStream} pending={session.captureState === 'publishing'}
           onConfirm={session.publishCapture} onCancel={session.stopSharing} />
       )}
 
       {session.pendingStream && (
-        <CapturePreview stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
+        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+          stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
           onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
       )}
 

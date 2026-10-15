@@ -67,6 +67,7 @@ async function syntheticCapture(page: Page) {
             (window as any).testDelayConstraints = false;
             await new Promise<void>(resolve => { (window as any).resolveConstraints = resolve; });
           }
+          if ((window as any).testRejectConstraints) throw new DOMException('Unsupported limits', 'OverconstrainedError');
           return nativeConstraints(constraints);
         };
         const stop = track.stop.bind(track);
@@ -1051,4 +1052,108 @@ test('F01 cleanup owns captured tracks while initial quality constraints are pen
   expect(await page.evaluate(() => (window as any).testCapture.getTracks().every((track: MediaStreamTrack) => track.readyState === 'ended'))).toBe(true);
   await page.evaluate(() => (window as any).resolveConstraints());
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }, { width: 320, height: 640 }]) {
+  test(`Preview quality selection, privacy and settings synchronization ${viewport.width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, hasTouch: viewport.width < 500 });
+    const host = await context.newPage(), viewer = await context.newPage();
+    try {
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await Promise.all([host.goto(`/room/preview-quality-${viewport.width}`), viewer.goto(`/room/preview-quality-${viewport.width}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+      const dialog = host.getByRole('dialog');
+      await expect(dialog).toContainText('Nitidez · Equilibrado · 20 FPS');
+      await expect(dialog).toContainText('Resolução desejada: 1920 × 1080');
+      await expect(dialog).toContainText('Captura observada: 640 × 360');
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await expect(dialog).toContainText('Resolução desejada: 2560 × 1440');
+      await host.getByRole('radio', { name: 'Nitidez', exact: true }).focus();
+      await host.keyboard.press('ArrowRight');
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
+      await host.getByLabel('Limite de FPS').selectOption('60');
+      await expect(dialog).toContainText('Fluidez · Ultra · 60 FPS');
+      await expect(host.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeEnabled();
+      expect(await host.evaluate(() => (window as any).testCaptures.length)).toBe(1);
+      expect(await host.evaluate(() => (window as any).testPeers.flatMap((pc: RTCPeerConnection) => pc.getSenders()).filter((sender: RTCRtpSender) => sender.track))).toHaveLength(0);
+      await expect(viewer.locator('video')).toHaveCount(0);
+      await host.getByLabel('Limite de FPS').focus();
+      await host.keyboard.press('Tab'); // Cancel follows quality controls.
+      await expect(host.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused();
+      await host.keyboard.press('Tab');
+      await expect(host.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeFocused();
+      const observed = dialog.getByText('Captura observada: 640 × 360', { exact: true });
+      await observed.scrollIntoViewIfNeeded();
+      await expect(observed).toBeInViewport();
+      const observedBox = await observed.boundingBox();
+      const cancelBox = await host.getByRole('button', { name: 'Cancelar', exact: true }).boundingBox();
+      expect(observedBox!.y + observedBox!.height).toBeLessThanOrEqual(cancelBox!.y);
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const action = await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).boundingBox();
+      expect(action!.height).toBeGreaterThanOrEqual(44);
+      expect(action!.y + action!.height).toBeLessThanOrEqual(viewport.height);
+      await host.screenshot({ path: test.info().outputPath(`preview-${viewport.width}.png`), animations: 'disabled' });
+      await test.info().attach('preview-quality', { path: test.info().outputPath(`preview-${viewport.width}.png`), contentType: 'image/png' });
+      if (viewport.width < 500) await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).tap();
+      else await host.keyboard.press('Enter');
+      await frames(viewer);
+      const trigger = host.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+      await trigger.focus(); await host.keyboard.press('Enter');
+      await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('ultra');
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('60');
+      await host.getByLabel('Nível de qualidade').selectOption('economy');
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
+      await host.getByRole('button', { name: 'Fechar configurações' }).click();
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await expect(dialog).toContainText('Fluidez · Econômico · 30 FPS');
+      await expect(dialog.getByLabel('Nível de qualidade')).toHaveCount(0);
+      await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
+      await frames(viewer);
+      expect(await host.evaluate(() => (window as any).testCaptures[0].getVideoTracks()[0].readyState)).toBe('live');
+      expect(await host.evaluate(() => (window as any).testCaptures[1].getVideoTracks()[0].readyState)).toBe('ended');
+    } finally { await context.close(); }
+  });
+}
+
+test('Preview serializes rapid quality changes, blocks pending publication and reports partial failure', async ({ page }) => {
+  await syntheticCapture(page);
+  await page.goto('/room/preview-quality-pending');
+  await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+  await expect(page.getByRole('dialog')).toContainText('Captura observada:');
+  await page.evaluate(() => { (window as any).testDelayConstraints = true; });
+  await page.getByLabel('Nível de qualidade').selectOption('ultra');
+  await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
+  await expect(page.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeDisabled();
+  await expect(page.getByRole('status')).toContainText('Aplicando qualidade');
+  await page.getByLabel('Nível de qualidade').selectOption('economy');
+  await page.getByRole('radio', { name: 'Nitidez', exact: true }).focus(); await page.keyboard.press('ArrowRight');
+  await page.getByLabel('Nível de qualidade').selectOption('ultra');
+  await page.getByLabel('Limite de FPS').selectOption('60');
+  await page.evaluate(() => (window as any).resolveConstraints());
+  await expect(page.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeEnabled();
+  await expect(page.getByRole('dialog')).toContainText('Fluidez · Ultra · 60 FPS');
+  expect(await page.evaluate(() => (window as any).testCapture.getVideoTracks()[0].contentHint)).toBe('motion');
+  expect(await page.evaluate(() => (window as any).testCapture.getVideoTracks()[0].getConstraints().frameRate.max)).toBe(20); // Synthetic canvas capability remains 20 FPS.
+  expect(await page.evaluate(() => (window as any).testCaptures.length)).toBe(1);
+  await page.evaluate(() => { (window as any).testRejectConstraints = true; });
+  await page.getByLabel('Nível de qualidade').selectOption('economy');
+  await expect(page.getByRole('dialog')).toContainText('O navegador não aplicou todos os limites');
+  await expect(page.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeEnabled();
+  await page.evaluate(() => { (window as any).testDelayConstraints = true; (window as any).resolveConstraints = null; });
+  await page.getByLabel('Nível de qualidade').selectOption('ultra');
+  await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
+  await expect(page.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).testCapture.getTracks().every((track: MediaStreamTrack) => track.readyState === 'ended'))).toBe(true);
+  await page.evaluate(() => { (window as any).testRejectConstraints = false; });
+  await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+  await expect(page.getByRole('dialog')).toContainText('Fluidez · Ultra · 30 FPS');
+  await expect(page.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeEnabled();
+  await page.evaluate(() => (window as any).resolveConstraints());
+  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('O navegador não aplicou todos os limites', { exact: false })).toHaveCount(0);
 });
