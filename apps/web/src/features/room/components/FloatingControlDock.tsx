@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
+  Button,
   Box,
   UnstyledButton,
   Tooltip,
-  Text,
 } from '@mantine/core';
 import {
   IconScreen,
@@ -18,6 +18,10 @@ import {
 } from './Icons';
 
 export interface FloatingControlDockProps {
+  capturePending?: boolean;
+  isPaused?: boolean;
+  pausePending?: boolean;
+  onTogglePause?: () => void;
   isSharing: boolean;
   onToggleShare: () => void;
   hasAudioTrack: boolean;
@@ -31,6 +35,10 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  capturePending,
+  isPaused,
+  pausePending,
+  onTogglePause,
   isSharing,
   onToggleShare,
   hasAudioTrack,
@@ -77,24 +85,36 @@ export function FloatingControlDock({
         .floating-dock-btn {
           width: 42px;
           height: 42px;
+          flex-shrink: 0;
         }
+        .floating-dock-primary { flex-shrink: 0; height: 42px; border-radius: 24px; background: #2563eb; }
+        .floating-dock-bar button:hover:not(:disabled) { filter: brightness(1.15); }
+        .floating-dock-bar button:active:not(:disabled) { filter: brightness(0.9); }
         @media (max-width: 600px) {
           .floating-dock-wrapper {
             bottom: max(16px, env(safe-area-inset-bottom, 16px)) !important;
             max-width: calc(100vw - 16px) !important;
           }
           .floating-dock-bar {
-            gap: 6px !important;
-            padding: 5px 8px !important;
+            gap: 2px !important;
+            padding: 5px 6px !important;
           }
           .floating-dock-btn {
             width: 42px !important;
             height: 42px !important;
           }
-          .floating-dock-share-btn {
+          .floating-dock-primary .mantine-Button-section { margin-inline-end: 6px; }
+          .floating-dock-primary {
             height: 42px !important;
-            padding: 0 12px !important;
+            padding: 0 8px !important;
+            font-size: 12px;
           }
+        }
+        @media (max-width: 360px) {
+          .floating-dock-bar { padding: 5px 4px !important; }
+          .floating-dock-btn, .floating-dock-primary { width: 40px !important; min-width: 40px; height: 42px !important; padding: 0 !important; }
+          .floating-dock-primary-label { display: none; }
+          .floating-dock-primary .mantine-Button-section { margin: 0; }
         }
       `}</style>
       <Box
@@ -110,36 +130,35 @@ export function FloatingControlDock({
           boxShadow: '0 12px 32px rgba(0, 0, 0, 0.65)',
         }}
       >
-        {/* Share / Stop Share Button */}
-        {canShareScreen === true && (
-          <Tooltip
-            label={isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
-            withArrow
-          >
-            <UnstyledButton
-              onClick={onToggleShare}
-              aria-label={isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
-              className="floating-dock-share-btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '8px 16px',
-                borderRadius: '24px',
-                backgroundColor: isSharing ? '#1e3a8a' : '#2563eb',
-                border: isSharing ? '1px solid #3b82f6' : 'none',
-                color: '#ffffff',
-                fontWeight: 600,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isSharing ? <IconStopShare size={18} /> : <IconScreen size={18} />}
-              <Text size="xs" fw={600} c="#fff" visibleFrom="xs">
-                {isSharing ? 'Parar' : 'Compartilhar'}
-              </Text>
-            </UnstyledButton>
+        {isSharing ? (
+          <>
+            <Tooltip label={isPaused ? 'Retomar transmissão' : 'Pausar transmissão — o navegador continua capturando'} multiline w={280} events={{ hover: true, focus: true, touch: false }} withArrow>
+              <Button className="floating-dock-primary" px={14} loading={pausePending}
+                disabled={!onTogglePause} onClick={onTogglePause}
+                aria-label={isPaused ? 'Retomar transmissão' : 'Pausar transmissão'}
+                leftSection={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  {isPaused ? <path d="m8 5 11 7-11 7z" /> : <><path d="M8 5v14" /><path d="M16 5v14" /></>}
+                </svg>}>
+                <span className="floating-dock-primary-label">{isPaused ? 'Retomar' : 'Pausar'}</span>
+              </Button>
+            </Tooltip>
+            <Tooltip label="Parar compartilhamento de tela" events={{ hover: true, focus: true, touch: false }} withArrow>
+              <UnstyledButton onClick={onToggleShare} aria-label="Parar compartilhamento de tela"
+                className="floating-dock-btn" style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%',
+                  backgroundColor: '#21262d', border: '1px solid rgba(255,255,255,0.1)', color: '#e6edf3',
+                }}>
+                <IconStopShare size={18} />
+              </UnstyledButton>
+            </Tooltip>
+          </>
+        ) : canShareScreen === true && (
+          <Tooltip label={capturePending ? 'Cancelar captura' : 'Compartilhar tela'} events={{ hover: true, focus: true, touch: false }} withArrow>
+            <Button onClick={onToggleShare} className="floating-dock-primary" px={16}
+              aria-label={capturePending ? 'Cancelar captura' : 'Compartilhar tela'}
+              leftSection={<IconScreen size={18} />}>
+              <span className="floating-dock-primary-label">{capturePending ? 'Cancelar' : 'Compartilhar'}</span>
+            </Button>
           </Tooltip>
         )}
 
@@ -147,7 +166,7 @@ export function FloatingControlDock({
         {isSharing && hasAudioTrack && (
           <Tooltip
             label={isAudioMuted ? 'Reativar áudio da tela' : 'Mutar áudio da tela'}
-            withArrow
+            events={{ hover: true, focus: true, touch: false }} withArrow
           >
             <UnstyledButton
               onClick={onToggleAudioMute}
@@ -173,7 +192,7 @@ export function FloatingControlDock({
         )}
 
         {/* Copy Invite Link */}
-        <Tooltip label={copied ? 'Link copiado!' : 'Copiar convite da sala'} withArrow>
+        <Tooltip label={copied ? 'Link copiado!' : 'Copiar convite da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={handleCopyLink}
             aria-label="Copiar link de convite"
@@ -197,7 +216,7 @@ export function FloatingControlDock({
         </Tooltip>
 
         {/* Participants drawer toggle */}
-        <Tooltip label={`Participantes (${participantCount})`} withArrow>
+        <Tooltip label={`Participantes (${participantCount})`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={onOpenParticipants}
             aria-label={`Ver participantes (${participantCount})`}
@@ -222,7 +241,7 @@ export function FloatingControlDock({
         </Tooltip>
 
         {/* Settings button */}
-        <Tooltip label="Configurações e diagnósticos" withArrow>
+        <Tooltip label="Configurações e diagnósticos" events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={onOpenSettings}
             aria-label="Configurações e diagnósticos"
@@ -246,7 +265,7 @@ export function FloatingControlDock({
         </Tooltip>
 
         {/* Leave Room Button */}
-        <Tooltip label="Sair da sala" withArrow>
+        <Tooltip label="Sair da sala" events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={onLeave}
             aria-label="Sair da sala"

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const SharingStateSchema = z.object({
   active: z.boolean(),
+  paused: z.boolean().optional(),
   streamId: z.string().min(1).max(128).optional(),
   hasAudio: z.boolean(),
   audioMuted: z.boolean(),

@@ -249,3 +249,17 @@ test('room-state: Policy A enforces occupiedSlots and blocks new peers during ep
   });
   assert.equal(rooms.count('room-a'), 2);
 });
+
+test('room-state: paused metadata survives late join independently of other presenters', () => {
+  const rooms = new RoomRegistry();
+  rooms.join('pause', 'host');
+  rooms.join('pause', 'other');
+  const paused = { active: true, paused: true, streamId: 'one', hasAudio: true, audioMuted: true };
+  const live = { active: true, paused: false, streamId: 'two', hasAudio: false, audioMuted: false };
+  rooms.updateSharing('pause', 'host', paused);
+  rooms.updateSharing('pause', 'other', live);
+  rooms.join('pause', 'late');
+  const participants = rooms.getParticipants('pause');
+  assert.deepEqual(participants.find(p => p.peerId === 'host').sharing, paused);
+  assert.deepEqual(participants.find(p => p.peerId === 'other').sharing, live);
+});

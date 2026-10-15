@@ -1,3 +1,4 @@
+import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 import { Box, Alert } from '@mantine/core';
@@ -287,10 +288,19 @@ function RoomPage() {
         canShareScreen={canShare}
       />
 
+      {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
+        <CapturePreview stream={session.localStream} pending={session.captureState === 'publishing'}
+          onConfirm={session.publishCapture} onCancel={session.stopSharing} />
+      )}
+
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
+        capturePending={['requesting', 'preview', 'publishing', 'stopping'].includes(session.captureState)}
+        isPaused={session.captureState === 'paused'}
+        pausePending={['pausing', 'resuming'].includes(session.captureState)}
+        onTogglePause={session.captureState === 'paused' ? session.publishCapture : session.pauseSharing}
         isSharing={session.isSharing}
-        onToggleShare={session.isSharing ? session.stopSharing : session.startSharing}
+        onToggleShare={session.captureState !== 'idle' ? session.stopSharing : session.startSharing}
         hasAudioTrack={session.hasAudioTrack}
         isAudioMuted={session.isAudioMuted}
         onToggleAudioMute={session.toggleAudioMute}

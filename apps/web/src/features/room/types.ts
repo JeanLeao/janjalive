@@ -12,6 +12,7 @@ export interface RoomParticipant {
   nickname?: string;
   isLocal: boolean;
   isSharing: boolean;
+  isPaused?: boolean;
 }
 
 export interface NetworkMetrics {
