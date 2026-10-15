@@ -1,0 +1,383 @@
+{
+  "browser": "156.0.8078.4",
+  "nativeCapture": {
+    "settings": {
+      "aspectRatio": 1.7777777777777777,
+      "cursor": "motion",
+      "displaySurface": "browser",
+      "frameRate": 20,
+      "height": 1080,
+      "logicalSurface": true,
+      "resizeMode": "none",
+      "width": 1920
+    }
+  },
+  "rows": [
+    {
+      "requested": {
+        "priority": "sharpness",
+        "profile": "economy",
+        "fps": 20
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 20,
+        "height": 720,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 1280
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "text",
+      "outbound": [
+        {
+          "framesPerSecond": 19,
+          "width": 1280,
+          "height": 720,
+          "bitrateKbps": 481.3050557091754,
+          "framesEncoded": 34,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 19,
+          "framesDecoded": 34,
+          "width": 1280,
+          "height": 720
+        }
+      ]
+    },
+    {
+      "requested": {
+        "priority": "sharpness",
+        "profile": "balanced",
+        "fps": 30
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 30,
+        "height": 1080,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 1920
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "text",
+      "outbound": [
+        {
+          "framesPerSecond": 30,
+          "width": 1920,
+          "height": 1080,
+          "bitrateKbps": 1074.6578178170687,
+          "framesEncoded": 89,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 30,
+          "framesDecoded": 88,
+          "width": 1920,
+          "height": 1080
+        }
+      ]
+    },
+    {
+      "requested": {
+        "priority": "sharpness",
+        "profile": "ultra",
+        "fps": 30
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 30,
+        "height": 1440,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 2560
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "text",
+      "outbound": [
+        {
+          "framesPerSecond": 31,
+          "width": 2560,
+          "height": 1440,
+          "bitrateKbps": 1799.8193287263166,
+          "framesEncoded": 145,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 31,
+          "framesDecoded": 144,
+          "width": 2560,
+          "height": 1440
+        }
+      ]
+    },
+    {
+      "requested": {
+        "priority": "motion",
+        "profile": "economy",
+        "fps": 30
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 30,
+        "height": 720,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 1280
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "motion",
+      "outbound": [
+        {
+          "framesPerSecond": 30,
+          "width": 1280,
+          "height": 720,
+          "bitrateKbps": 670.3919491594364,
+          "framesEncoded": 200,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 30,
+          "framesDecoded": 199,
+          "width": 1280,
+          "height": 720
+        }
+      ]
+    },
+    {
+      "requested": {
+        "priority": "motion",
+        "profile": "balanced",
+        "fps": 60
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 60,
+        "height": 720,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 1280
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "motion",
+      "outbound": [
+        {
+          "framesPerSecond": 53,
+          "width": 1280,
+          "height": 720,
+          "bitrateKbps": 652.5188021156731,
+          "framesEncoded": 297,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 53,
+          "framesDecoded": 296,
+          "width": 1280,
+          "height": 720
+        }
+      ]
+    },
+    {
+      "requested": {
+        "priority": "motion",
+        "profile": "ultra",
+        "fps": 60
+      },
+      "verified": true,
+      "settings": {
+        "aspectRatio": 1.7777777777777777,
+        "cursor": "motion",
+        "displaySurface": "browser",
+        "frameRate": 60,
+        "height": 1080,
+        "logicalSurface": true,
+        "resizeMode": "none",
+        "width": 1920
+      },
+      "capabilities": {
+        "aspectRatio": {
+          "max": 2560,
+          "min": 0.000390625
+        },
+        "displaySurface": "browser",
+        "facingMode": [],
+        "frameRate": {
+          "max": 60,
+          "min": 0
+        },
+        "height": {
+          "max": 2560,
+          "min": 1
+        },
+        "resizeMode": [
+          "none",
+          "crop-and-scale"
+        ],
+        "width": {
+          "max": 2560,
+          "min": 1
+        }
+      },
+      "hint": "motion",
+      "outbound": [
+        {
+          "framesPerSecond": 42,
+          "width": 1920,
+          "height": 1080,
+          "bitrateKbps": 1748.822968000143,
+          "framesEncoded": 374,
+          "qualityLimitationReason": "none"
+        }
+      ],
+      "inbound": [
+        {
+          "framesPerSecond": 42,
+          "framesDecoded": 374,
+          "width": 1920,
+          "height": 1080
+        }
+      ]
+    }
+  ]
+}

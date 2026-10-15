@@ -47,8 +47,10 @@ test('stats-collector: triggers onDegradation when packet loss >= 5% with cooldo
   });
 
   const peer = manager.getOrCreatePeer('viewer-1');
+  let sample = 0;
   // Override peer stats to return high loss
   peer.pc.getStats = async () => {
+    sample++;
     const map = new Map();
     map.set('outbound', {
       type: 'outbound-rtp',
@@ -62,8 +64,9 @@ test('stats-collector: triggers onDegradation when packet loss >= 5% with cooldo
       type: 'remote-inbound-rtp',
       kind: 'video',
       localId: 'out',
-      packetsReceived: 90,
-      packetsLost: 10, // 10% loss
+      timestamp: sample * 3000,
+      packetsReceived: 90 * sample,
+      packetsLost: 10 * sample, // 10% loss
     });
     return map;
   };
@@ -74,6 +77,8 @@ test('stats-collector: triggers onDegradation when packet loss >= 5% with cooldo
     onDegradation: (loss) => degradationEvents.push(loss),
   });
 
+  await collector.collect();
+  assert.equal(degradationEvents.length, 0, 'First report establishes baseline');
   await collector.collect();
   assert.equal(degradationEvents.length, 1);
   assert.equal(degradationEvents[0], 10);
@@ -123,4 +128,33 @@ test('stats-collector: switching RTP sources or resetting counters cannot produc
   await collector.collect();
   assert.equal(metrics.bitrateKbps, 0);
   manager.dispose();
+});
+
+test('degradation uses worst fresh OUTBOUND interval, ignores inbound loss, stale reports and resets', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal: () => {}, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  const bad = manager.getOrCreatePeer('bad');
+  const good = manager.getOrCreatePeer('good');
+  let timestamp = 1000, received = 90, lost = 10;
+  let events = [];
+  const sample = (lossy) => new Map([
+    ['out', { id: 'out', type: 'outbound-rtp', kind: 'video', bytesSent: received * 1000, packetsSent: received + lost }],
+    ['remote', { id: 'remote', type: 'remote-inbound-rtp', kind: 'video', localId: 'out', timestamp,
+      packetsReceived: received, packetsLost: lossy ? lost : 0 }],
+    ['in', { id: 'in', type: 'inbound-rtp', kind: 'video', packetsReceived: received, packetsLost: 10000, bytesReceived: 1000 }],
+  ]);
+  bad.pc.getStats = async () => sample(true);
+  good.pc.getStats = async () => sample(false);
+  const collector = new StatsCollector({ peerManager: manager, onStats: () => {}, onDegradation: loss => events.push(loss) });
+  try {
+    await collector.collect();
+    await collector.collect();
+    assert.deepEqual(events, []);
+    timestamp += 3000; received += 94; lost += 6;
+    await collector.collect();
+    assert.deepEqual(events, [6], '6% on one viewer must not be diluted by another connection or inbound traffic');
+    collector.stop(); events = [];
+    timestamp += 3000; received = 1; lost = 0;
+    await collector.collect();
+    assert.deepEqual(events, []);
+  } finally { collector.stop(); manager.dispose(); }
 });

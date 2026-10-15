@@ -126,13 +126,13 @@ test('peer-manager: applies quality parameters to video senders', async () => {
   const peer = manager.getOrCreatePeer('viewer-1');
   await manager.attachLocalStream(stream);
 
-  await manager.applyQuality('economy');
-  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxBitrate, 800000);
-  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxFramerate, 15);
-
-  await manager.applyQuality('high');
-  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxBitrate, 3000000);
+  await manager.applyQuality({ priority: 'sharpness', profile: 'economy', fps: 20 });
+  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxBitrate, 1600000);
   assert.equal(peer.pc.senders[0].parameters.encodings[0].maxFramerate, 20);
+
+  await manager.applyQuality({ priority: 'sharpness', profile: 'ultra', fps: 30 });
+  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxBitrate, 6000000);
+  assert.equal(peer.pc.senders[0].parameters.encodings[0].maxFramerate, 30);
 });
 
 test('peer-manager: removePeer closes connection and triggers stream removal', () => {
@@ -358,8 +358,8 @@ test('quality constraints are bounded by capture capabilities without interrupti
   track.getCapabilities = () => ({ width: { min: 640, max: 640 }, height: { min: 360, max: 360 }, frameRate: { max: 15 } });
   track.applyConstraints = async (value) => { constraints = value; };
   await manager.attachLocalStream(new MockMediaStream([track]));
-  await manager.applyQuality('high');
-  assert.deepEqual(constraints, { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15 } });
+  await manager.applyQuality({ priority: 'sharpness', profile: 'ultra', fps: 30 });
+  assert.deepEqual(constraints, { width: { ideal: 640, max: 640 }, height: { ideal: 360, max: 360 }, frameRate: { ideal: 15, max: 15 } });
   assert.equal(track.readyState, 'live');
   manager.dispose();
 });
@@ -564,4 +564,72 @@ test('renegotiated audio and replacement video merge into the existing presenter
   assert.equal(received.at(-1), original);
   assert.deepEqual(original.getTracks(), [audio, nextVideo]);
   manager.dispose();
+});
+
+test('latest quality wins across multiple viewers, late join, replacement, detach and sender fallback', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal: () => {}, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  try {
+    const video = new MockMediaStreamTrack('video');
+    const audio = new MockMediaStreamTrack('audio');
+    audio.enabled = false;
+    const first = manager.getOrCreatePeer('first');
+    const second = manager.getOrCreatePeer('second');
+    await manager.attachLocalStream(new MockMediaStream([video, audio]));
+    let release;
+    const sender = first.videoSender;
+    const original = sender.setParameters.bind(sender);
+    let count = 0;
+    sender.setParameters = async params => {
+      if (count++ === 0) await new Promise(resolve => { release = resolve; });
+      return original(params);
+    };
+    const old = manager.applyQuality({ priority: 'motion', profile: 'ultra', fps: 60 });
+    while (!release) await new Promise(resolve => setImmediate(resolve));
+    const latest = manager.applyQuality({ priority: 'sharpness', profile: 'balanced', fps: 30 });
+    release(); await Promise.all([old, latest]);
+    for (const peer of [first, second]) {
+      assert.equal(peer.videoSender.parameters.encodings[0].maxBitrate, 3000000);
+      assert.equal(peer.videoSender.parameters.degradationPreference, 'maintain-resolution');
+    }
+    const late = manager.getOrCreatePeer('late');
+    await manager.createAndSendOffer('late');
+    assert.equal(late.videoSender.parameters.encodings[0].maxFramerate, 30);
+    await manager.handleOffer('late-answer', { type: 'offer', sdp: 'late-offer' });
+    assert.equal(manager.getPeers().get('late-answer').videoSender.parameters.encodings[0].maxFramerate, 30);
+    const replacement = new MockMediaStreamTrack('video');
+    await manager.attachLocalStream(new MockMediaStream([replacement, audio]));
+    assert.equal(audio.enabled, false);
+    assert.equal(first.videoSender.track, replacement);
+    const fallback = first.videoSender.setParameters.bind(first.videoSender);
+    first.videoSender.setParameters = async params => {
+      if (params.degradationPreference === 'maintain-framerate') throw new Error('unsupported preference');
+      return fallback(params);
+    };
+    await manager.applyQuality({ priority: 'motion', profile: 'ultra', fps: 60 });
+    assert.equal(first.videoSender.parameters.encodings[0].maxBitrate, 8000000);
+    await manager.detachLocalStream();
+    assert.equal(first.videoSender.track, null);
+    assert.equal(first.audioSender.track, null);
+  } finally { manager.dispose(); }
+});
+
+test('quality completion cannot send an answer from a retired peer', async () => {
+  const signals = [];
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal: (_, signal) => signals.push(signal), onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  try {
+    await manager.attachLocalStream(new MockMediaStream([new MockMediaStreamTrack('video')]));
+    const peer = manager.getOrCreatePeer('retiring');
+    let release;
+    const original = peer.videoSender.setParameters.bind(peer.videoSender);
+    peer.videoSender.setParameters = async parameters => {
+      await new Promise(resolve => { release = resolve; });
+      return original(parameters);
+    };
+    const answer = manager.handleOffer('retiring', { type: 'offer', sdp: 'offer' });
+    while (!release) await new Promise(resolve => setImmediate(resolve));
+    manager.removePeer('retiring');
+    release();
+    await answer;
+    assert.equal(signals.filter(signal => signal.type === 'answer').length, 0);
+  } finally { manager.dispose(); }
 });

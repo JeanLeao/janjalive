@@ -93,11 +93,13 @@ test('media: captureDisplayMedia NEVER uses getUserMedia and NEVER captures micr
     writable: true,
   });
 
-  const stream = await captureDisplayMedia('high');
+  const stream = await captureDisplayMedia({ priority: 'sharpness', profile: 'balanced', fps: 20 });
   assert.equal(getUserMediaCalled, false, 'getUserMedia must NEVER be called');
   assert.equal(getDisplayMediaCalled, true);
   assert.equal(receivedConstraints.audio, true, 'Audio should be display audio');
   assert.equal(receivedConstraints.video.width.max, 1920);
+  assert.equal(receivedConstraints.video.frameRate.max, 60, 'Native envelope must allow future FPS increases without recapture');
+  assert.equal(receivedConstraints.video.frameRate.ideal, 60);
 
   delete globalThis.window;
   if (origNavigator) Object.defineProperty(globalThis, 'navigator', origNavigator);
@@ -145,4 +147,33 @@ test('media: simulated native interruption emits ended once', () => {
   track.endNatively();
   assert.equal(track.readyState, 'ended');
   assert.equal(events, 1);
+});
+
+test('capture limits, hints, small sources, failures and serialized updates preserve audio', async () => {
+  const { applyCaptureQuality } = await import('../src/features/room/media/display-media.ts');
+  const video = new MockMediaStreamTrack('video');
+  video.contentHint = '';
+  const applied = [];
+  let settings = {};
+  video.getSettings = () => settings;
+  video.getCapabilities = () => ({ width: { max: 640 }, height: { max: 360 }, frameRate: { max: 60 } });
+  let release;
+  video.applyConstraints = async limits => {
+    if (!applied.length) await new Promise(resolve => { release = resolve; });
+    applied.push(limits);
+    settings = { width: limits.width.max, height: limits.height.max, frameRate: limits.frameRate.max };
+  };
+  const old = applyCaptureQuality(video, { priority: 'motion', profile: 'ultra', fps: 60 });
+  await new Promise(resolve => setImmediate(resolve));
+  const latest = applyCaptureQuality(video, { priority: 'sharpness', profile: 'economy', fps: 20 });
+  release();
+  assert.deepEqual(await Promise.all([old, latest]), [true, true]);
+  assert.equal(video.contentHint, 'text');
+  assert.deepEqual(settings, { width: 640, height: 360, frameRate: 20 });
+  assert.equal(video.enabled, true);
+  video.applyConstraints = async () => { throw new Error('unsupported'); };
+  assert.equal(await applyCaptureQuality(video, { priority: 'motion', profile: 'ultra', fps: 60 }), false);
+  delete video.contentHint;
+  delete video.applyConstraints;
+  assert.equal(await applyCaptureQuality(video, { priority: 'motion', profile: 'ultra', fps: 60 }), false);
 });

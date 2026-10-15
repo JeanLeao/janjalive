@@ -1,4 +1,5 @@
-import { QUALITY_PROFILES, type QualityProfileKey } from '@screen-room/protocol';
+import { applyCaptureQuality } from '../media/display-media.ts';
+import { DEFAULT_QUALITY, normalizeQuality, resolveQuality, type QualitySelection } from '@screen-room/protocol';
 import type { DiagnosticsLogger } from '../diagnostics/diagnostics-logger';
 
 export interface ManagedPeer {
@@ -73,7 +74,8 @@ export class PeerManager {
 
   private peers = new Map<string, ManagedPeer>();
   private localStream: MediaStream | null = null;
-  private currentQuality: QualityProfileKey = 'balanced';
+  private currentQuality: QualitySelection = DEFAULT_QUALITY;
+  private qualityChain: Promise<unknown> = Promise.resolve();
   private readonly configReady: Promise<void>;
   private readonly options: PeerManagerOptions;
 
@@ -309,7 +311,8 @@ export class PeerManager {
         if (this.peers.get(peerId) !== peer) return;
         await peer.pc.setLocalDescription(offer);
         if (this.peers.get(peerId) !== peer) return;
-        await this.applyQualityToPeer(peer);
+        await this.applyQualityToPeer(peer, true);
+        if (this.peers.get(peerId) !== peer) return;
         this.options.logger?.log('offer-created', { peer: peerId, negotiationId: peer.negotiationId, elapsedMs: Math.round(performance.now() - peer.createdAt) });
         const sent = this.options.onSendSignal(peerId, {
           type: 'offer',
@@ -363,6 +366,8 @@ export class PeerManager {
         await this.flushPendingIce(peer);
         const answer = await peer.pc.createAnswer();
         await peer.pc.setLocalDescription(answer);
+        if (this.peers.get(from) !== peer) return;
+        await this.applyQualityToPeer(peer, true);
         if (this.peers.get(from) !== peer) return;
         this.options.logger?.log('answer-created', { to: from });
         this.options.onSendSignal(from, {
@@ -522,47 +527,60 @@ export class PeerManager {
     }));
   }
 
-  async applyQuality(qualityKey: QualityProfileKey): Promise<void> {
-    this.currentQuality = qualityKey;
-    for (const peer of this.peers.values()) {
-      await this.applyQualityToPeer(peer);
-    }
-    const profile = QUALITY_PROFILES[qualityKey];
-    try {
-      const track = this.localStream?.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() || {};
-      const bounded = (value: number, range?: { min?: number; max?: number }) => ({
-        ideal: Math.max(range?.min ?? 0, Math.min(value, range?.max ?? value)),
+  applyQuality(selection: QualitySelection): Promise<boolean> {
+    const quality = normalizeQuality(selection);
+    this.currentQuality = quality;
+    const stream = this.localStream;
+    const operation = this.qualityChain.catch(() => {}).then(async () => {
+      if (this.currentQuality !== quality || this.localStream !== stream) return false;
+      const capture = await applyCaptureQuality(stream?.getVideoTracks()[0], quality);
+      if (this.currentQuality !== quality || this.localStream !== stream) return false;
+      const results = await Promise.all([...this.peers.values()].map(peer => this.applyQualityToPeer(peer)));
+      this.options.logger?.log('quality-requested', {
+        ...quality, captureVerified: capture, sendersAccepted: results.every(Boolean),
+        capture: JSON.stringify(stream?.getVideoTracks()[0]?.getSettings?.() ?? {}),
       });
-      await track?.applyConstraints?.({
-        frameRate: bounded(profile.maxFramerate, capabilities.frameRate),
-        width: bounded(profile.width, capabilities.width),
-        height: bounded(profile.height, capabilities.height),
-      });
-    } catch (err: any) {
-      this.options.logger?.log('capture-quality-error', { message: err?.message });
-    }
-    this.options.logger?.log('quality-applied', {
-      profile: qualityKey,
-      bitrate: profile.maxBitrate,
-      fps: profile.maxFramerate,
+      return capture && results.every(Boolean);
     });
+    this.qualityChain = operation;
+    return operation;
   }
 
-  private async applyQualityToPeer(peer: ManagedPeer): Promise<void> {
-    const profile = QUALITY_PROFILES[this.currentQuality];
-    const sender = peer.videoSender || peer.pc.getSenders().find((item) => item.track?.kind === 'video');
-    if (!sender?.getParameters || !sender.setParameters) return;
-
-    try {
-      const parameters = sender.getParameters();
-      parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-      parameters.encodings[0].maxBitrate = profile.maxBitrate;
-      parameters.encodings[0].maxFramerate = profile.maxFramerate;
-      await sender.setParameters(parameters);
-    } catch (err: any) {
-      this.options.logger?.log('quality-apply-skip', { peer: peer.id, message: err?.message });
-    }
+  private async applyQualityToPeer(peer: ManagedPeer, inSignalChain = false): Promise<boolean> {
+    // Share the peer's serialization barrier with track replacement and negotiation.
+    const run = async () => {
+      if (this.peers.get(peer.id) !== peer) return false;
+      const profile = resolveQuality(this.currentQuality);
+      const sender = peer.videoSender || peer.pc.getSenders().find(item => item.track?.kind === 'video');
+      if (!sender?.track) return true;
+      if (!sender.getParameters || !sender.setParameters) return false;
+      const configure = async (preference: boolean) => {
+        const parameters = sender.getParameters();
+        if (!parameters.encodings?.length) return false;
+        for (const encoding of parameters.encodings) {
+          encoding.maxBitrate = profile.maxBitrate;
+          encoding.maxFramerate = profile.maxFramerate;
+        }
+        if (preference) parameters.degradationPreference = profile.degradationPreference;
+        else delete parameters.degradationPreference;
+        await sender.setParameters(parameters);
+        const actual = sender.getParameters();
+        return actual.encodings?.every(encoding => encoding.maxBitrate === profile.maxBitrate && encoding.maxFramerate === profile.maxFramerate)
+          && (!preference || actual.degradationPreference === profile.degradationPreference);
+      };
+      try { return await configure(true); }
+      catch (err: any) {
+        this.options.logger?.log('quality-preference-error', { peer: peer.id, message: err?.message });
+        try { await configure(false); } catch (error: any) {
+          this.options.logger?.log('quality-sender-error', { peer: peer.id, message: error?.message });
+        }
+        return false;
+      }
+    };
+    if (inSignalChain) return run();
+    const operation = peer.signalChain.catch(() => {}).then(run);
+    peer.signalChain = operation.then(() => {});
+    return operation;
   }
 
   removePeer(peerId: string): void {

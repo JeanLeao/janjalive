@@ -23,6 +23,8 @@ interface PeerHistory {
 export class StatsCollector {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly statsByPeer = new Map<string, PeerHistory>();
+  private readonly outboundHistory = new Map<string, { pc: RTCPeerConnection; id: string; sent: number; lost: number; timestamp: number }>();
+  private readonly trafficHistory = new Map<string, { pc: RTCPeerConnection; id: string; bytes: number; timestamp: number }>();
   private lastAutoDowngradeTime = 0;
   private readonly options: StatsCollectorOptions;
 
@@ -45,17 +47,20 @@ export class StatsCollector {
       this.timer = null;
     }
     this.statsByPeer.clear();
+    this.outboundHistory.clear();
+    this.trafficHistory.clear();
     this.options.onStats(null);
   }
 
   async collect(): Promise<void> {
     const peers = this.options.peerManager.getPeers();
-    for (const id of this.statsByPeer.keys()) if (!peers.has(id)) this.statsByPeer.delete(id);
+    for (const id of this.statsByPeer.keys()) if (!peers.has(id)) { this.statsByPeer.delete(id); this.outboundHistory.delete(id); this.trafficHistory.delete(`${id}:send`); this.trafficHistory.delete(`${id}:receive`); }
     if (peers.size === 0) {
       this.options.onStats(null);
       return;
     }
 
+    let worstOutboundLoss = 0;
     const samples: Array<{ bitrate: number; loss: number; rtt: number }> = [];
 
     for (const [peerId, peer] of peers) {
@@ -92,6 +97,43 @@ export class StatsCollector {
         }
       });
 
+      // Only a fresh receiver report tied to OUR outbound video can reduce OUR quality.
+      // Inbound video can belong to another simultaneous presenter.
+      if (outbound && remoteInbound) {
+        const previous = this.outboundHistory.get(peerId);
+        const sent = remoteInbound.packetsReceived ?? outbound.packetsSent;
+        const lost = remoteInbound.packetsLost;
+        const timestamp = remoteInbound.timestamp;
+        const id = `${outbound.id}:${remoteInbound.id ?? 'remote'}`;
+        if (Number.isFinite(sent) && Number.isFinite(lost) && Number.isFinite(timestamp)) {
+          if (previous?.pc === peer.pc && previous.id === id && timestamp > previous.timestamp && sent >= previous.sent && lost >= previous.lost) {
+            const deltaSent = sent - previous.sent;
+            const deltaLost = lost - previous.lost;
+            const total = remoteInbound.packetsReceived === undefined ? deltaSent : deltaSent + deltaLost;
+            if (total > 0) worstOutboundLoss = Math.max(worstOutboundLoss, Math.min(100, deltaLost / total * 100));
+          }
+          this.outboundHistory.set(peerId, { pc: peer.pc, id, sent, lost, timestamp });
+        }
+      } else this.outboundHistory.delete(peerId);
+      const bitrateFor = (direction: 'send' | 'receive', report: any, bytes: number | undefined) => {
+        const key = `${peerId}:${direction}`;
+        const previous = this.trafficHistory.get(key);
+        if (!report || !Number.isFinite(bytes) || !Number.isFinite(report.timestamp)) { this.trafficHistory.delete(key); return undefined; }
+        this.trafficHistory.set(key, { pc: peer.pc, id: report.id, bytes: bytes!, timestamp: report.timestamp });
+        if (!previous || previous.pc !== peer.pc || previous.id !== report.id || bytes! < previous.bytes || report.timestamp <= previous.timestamp) return undefined;
+        return Math.round((bytes! - previous.bytes) * 8 / (report.timestamp - previous.timestamp));
+      };
+      this.options.logger?.log('video-quality-stats', {
+        peer: peerId,
+        outboundBitrateKbps: bitrateFor('send', outbound, outbound?.bytesSent),
+        inboundBitrateKbps: bitrateFor('receive', inbound, inbound?.bytesReceived),
+        encodeFps: outbound?.framesPerSecond,
+        receiveFps: inbound?.framesPerSecond,
+        encodedWidth: outbound?.frameWidth, encodedHeight: outbound?.frameHeight,
+        receivedWidth: inbound?.frameWidth, receivedHeight: inbound?.frameHeight,
+        bytesSent: outbound?.bytesSent, bytesReceived: inbound?.bytesReceived,
+        qualityLimitationReason: outbound?.qualityLimitationReason,
+      });
       if (!outbound && !inbound) continue;
 
       const history = this.statsByPeer.get(peerId);
@@ -148,9 +190,9 @@ export class StatsCollector {
       connections: metrics.activeConnections,
     });
 
-    if (avgLoss >= 5 && Date.now() - this.lastAutoDowngradeTime >= 20000) {
+    if (worstOutboundLoss >= 5 && Date.now() - this.lastAutoDowngradeTime >= 20000) {
       this.lastAutoDowngradeTime = Date.now();
-      this.options.onDegradation?.(avgLoss);
+      this.options.onDegradation?.(worstOutboundLoss);
     }
   }
 }

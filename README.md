@@ -15,7 +15,7 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 - **Tela e áudio em sincronia:** Suporte a transmissão de vídeo e áudio da aba ou sistema com controle de mudo direto na interface.
 - **Sem captura de microfone:** O microfone pessoal **nunca é solicitado, capturado ou gravado**. A aplicação utiliza exclusivamente a API nativa `navigator.mediaDevices.getDisplayMedia()`.
 - **Múltiplas transmissões com palco dinâmico:** Se múltiplos participantes compartilharem a tela, o palco principal destaca uma transmissão com reprodutor em tamanho integral, enquanto as demais são exibidas em miniaturas clicáveis para alternância sem perda de conexão.
-- **Perfis de qualidade e adaptação:** Perfis ajustáveis (Econômico, Equilibrado e Alta Qualidade) com degradação automática em redes sob perda excessiva de pacotes.
+- **Perfis de qualidade e adaptação:** Prioridade Nitidez ou Fluidez, perfis Econômico, Equilibrado e Ultra e limites de 20/30/60 FPS conforme a combinação, com redução automática por perdas de envio. Veja a matriz em [PERFORMANCE.md](./PERFORMANCE.md).
 - **Diagnóstico em tempo real:** Métricas de latência (RTT), perda de pacotes, bitrate e conexões ativas visíveis diretamente na interface da sala.
 
 ---
