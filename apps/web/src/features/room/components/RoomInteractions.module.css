@@ -1,23 +1,100 @@
-.controls { position: absolute; top: 64px; right: 16px; z-index: 25; display: flex; gap: 8px; }
-.controls > button { min-height: 44px; background: #161b22; border-color: #414b59; color: #e6edf3; }
-.controls button:hover { background: #263344; }
-.controls button:focus-visible, .messages:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-.badge { margin-left: 6px; padding: 2px 6px; border-radius: 10px; background: #2563eb; color: white; font-size: 12px; }
-.picker { position: absolute; top: 52px; right: 0; display: flex; padding: 6px; border: 1px solid #414b59; border-radius: 8px; background: #161b22; }
-.picker button { width: 48px; height: 48px; background: transparent; border: 0; border-radius: 6px; font-size: 24px; cursor: pointer; }
-.picker button:disabled { opacity: .5; cursor: default; }
-.reactions { position: absolute; top: 120px; right: 16px; z-index: 24; pointer-events: none; display: flex; flex-direction: column; gap: 6px; max-width: min(260px, calc(100% - 32px)); }
-.reaction { background: #161b22; border: 1px solid #414b59; border-radius: 8px; padding: 6px 10px; font-size: 13px; overflow-wrap: anywhere; animation: appear 180ms ease-out; }
-.reaction span { font-size: 20px; }
-.messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #414b59 #0d1117; }
-.message { padding: 12px 0; border-bottom: 1px solid #28313d; }
-.message p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
-.message time { color: #a9b4c2; font-size: 12px; font-variant-numeric: tabular-nums; }
-.composer { padding-top: 12px; }
-.composer textarea { background: #161b22; color: #e6edf3; border-color: #536074; caret-color: #58a6ff; }
-.composer textarea::placeholder { color: #a9b4c2; }
-.composer label { color: #e6edf3; }
-.error { position: absolute; top: 116px; right: 16px; z-index: 26; max-width: min(320px, calc(100% - 32px)); padding: 8px; background: #161b22; color: #fca5a5; font-size: 13px; border-radius: 6px; }
-@keyframes appear { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .reaction { animation: none; } }
-@media (max-width: 390px) { .controls { right: 8px; gap: 6px; } }
+/* Interações sociais: chat e reações. Paleta alinhada ao header, dock e palco do Screen Room. */
+.srOnly { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---- Acesso compacto (header e contextual) ---- */
+.actions { display: inline-flex; align-items: center; gap: 2px; padding: 2px; height: 36px; background: #161b22; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; flex-shrink: 0; }
+.floating { background: rgba(13,17,23,.88); backdrop-filter: blur(8px); border-color: rgba(255,255,255,.12); }
+.action { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #a9b4c2; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.action:hover { background: rgba(255,255,255,.08); color: #e6edf3; }
+.action[data-active] { background: rgba(37,99,235,.22); color: #93c5fd; }
+.action:focus-visible, .close:focus-visible, .reactionButton:focus-visible, .send:focus-visible, .jump:focus-visible, .log:focus-visible, .panel:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.panel:focus-visible { outline-offset: -2px; }
+.divider { width: 1px; height: 16px; background: rgba(255,255,255,.1); }
+.badge { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #2563eb; border: 2px solid #0d1117; color: #fff; font-size: 10px; font-weight: 700; line-height: 12px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1px rgba(37,99,235,.4); }
+@media (pointer: coarse) { .action { width: 40px; height: 38px; } .actions { height: 42px; } }
+@media (pointer: coarse) and (max-width: 600px) { .actions { height: 40px; } .action { width: 38px; height: 36px; } }
+@media (max-width: 600px) and (pointer: fine) { .action { width: 30px; } }
+
+/* ---- Seletor de reações ---- */
+.popover { padding: 6px; background: #161b22; border: 1px solid rgba(255,255,255,.12); color: #e6edf3; }
+.picker { display: flex; gap: 2px; }
+.reactionButton { width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; font-size: 24px; line-height: 1; cursor: pointer; transition: background-color .12s ease, transform .12s ease; }
+.reactionButton span { display: block; transition: transform .12s ease; }
+.reactionButton:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+.reactionButton:hover:not(:disabled) span { transform: scale(1.18); }
+.reactionButton:active:not(:disabled) { background: rgba(37,99,235,.28); }
+.reactionButton:disabled { opacity: .4; cursor: default; }
+.pickerHint { margin: 4px 6px 2px; color: #a9b4c2; font-size: 11px; }
+
+/* ---- Reações temporárias ---- */
+.reactions { position: absolute; left: 16px; bottom: 84px; z-index: 24; pointer-events: none; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: min(240px, calc(100% - 32px)); }
+.reaction { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 12px 4px 8px; background: rgba(13,17,23,.88); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; color: #e6edf3; font-size: 12px; font-weight: 600; animation: rise 220ms ease-out; }
+.reactionEmoji { font-size: 18px; line-height: 1; }
+.reactionName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.error { position: absolute; top: 56px; right: 16px; z-index: 26; max-width: min(320px, calc(100% - 32px)); padding: 8px 12px; background: #161b22; border: 1px solid rgba(248,113,113,.35); border-radius: 10px; color: #fca5a5; font-size: 13px; }
+
+/* ---- Painel do chat ---- */
+.panel { position: absolute; top: 60px; right: 12px; bottom: 76px; z-index: 28; width: min(372px, calc(100% - 24px)); display: flex; flex-direction: column; min-height: 0; background: #0d1117; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.55); color: #e6edf3; overflow: hidden; animation: slideIn 180ms ease-out; }
+.panelHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 12px 10px 16px; border-bottom: 1px solid rgba(255,255,255,.08); flex-shrink: 0; }
+.panelTitle h2 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -.005em; line-height: 1.3; }
+.panelTitle p { margin: 1px 0 0; font-size: 11px; color: #8c959f; line-height: 1.3; }
+.close { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #a9b4c2; cursor: pointer; }
+.close:hover { background: rgba(255,255,255,.08); color: #e6edf3; }
+@media (pointer: coarse) { .close { width: 44px; height: 44px; margin: -6px -4px; } }
+
+.logWrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; scrollbar-color: #30363d transparent; }
+.empty { margin: auto; max-width: 240px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: #8c959f; font-size: 12px; line-height: 1.5; }
+.empty strong { color: #e6edf3; font-size: 14px; }
+.emptyIcon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 14px; background: #161b22; border: 1px solid rgba(255,255,255,.08); color: #8c959f; }
+
+.message { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
+.continued { margin-top: -7px; }
+.own { justify-content: flex-end; }
+.avatar, .avatarSpace { width: 26px; height: 26px; flex-shrink: 0; }
+.avatar { display: grid; place-items: center; border-radius: 50%; font-size: 10px; font-weight: 700; align-self: flex-start; }
+.body { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: calc(100% - 34px); }
+.own .body { align-items: flex-end; max-width: 86%; }
+.meta { display: flex; align-items: baseline; gap: 8px; padding: 0 2px; min-width: 0; }
+.meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: #e6edf3; }
+.meta time { color: #8c959f; font-size: 11px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.bubble { margin: 0; padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: #1c232d; color: #e6edf3; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.continued .bubble { border-top-left-radius: 4px; }
+.message:not(.continued) .bubble { border-top-left-radius: 4px; }
+.continued .bubble { border-radius: 4px 14px 14px 4px; }
+.own .bubble { background: #2563eb; color: #fff; border-radius: 14px 4px 14px 14px; }
+.own.continued .bubble { border-radius: 14px 4px 4px 14px; }
+
+.jump { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.jump:hover { background: #1d4ed8; }
+
+/* ---- Composição ---- */
+.composer { padding: 8px 12px 10px; border-top: 1px solid rgba(255,255,255,.08); background: #0d1117; flex-shrink: 0; }
+.status { min-height: 0; padding: 0 4px; color: #a9b4c2; font-size: 12px; line-height: 1.4; }
+.status:not(:empty) { margin-bottom: 6px; }
+.statusError { color: #fca5a5; }
+.field { display: flex; align-items: flex-end; gap: 6px; padding: 4px 4px 4px 12px; background: #161b22; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; transition: border-color .15s ease, box-shadow .15s ease; }
+.field:focus-within { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,.25); }
+.field[data-disabled] { opacity: .7; }
+.field textarea { flex: 1; min-width: 0; max-height: 120px; padding: 7px 0; border: 0; outline: 0; resize: none; background: transparent; color: #e6edf3; caret-color: #58a6ff; font: inherit; font-size: 14px; line-height: 1.45; }
+.field textarea:focus-visible { outline: none; }
+.field textarea::placeholder { color: #8c959f; }
+.send { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; padding: 0; border: 0; border-radius: 10px; background: #2563eb; color: #fff; cursor: pointer; transition: background-color .15s ease, opacity .15s ease; }
+.send:hover:not(:disabled) { background: #1d4ed8; }
+.send:disabled { background: #21262d; color: #6e7681; cursor: default; }
+.send[aria-busy="true"] { background: #1e3a8a; color: #fff; }
+@media (pointer: coarse) { .send { width: 44px; height: 44px; } .field textarea { font-size: 16px; } }
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+.footnote { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; padding: 0 4px; color: #6e7681; font-size: 10.5px; line-height: 1.3; }
+.counter { color: #d4a72c; font-variant-numeric: tabular-nums; }
+@media (pointer: coarse) { .footnote span:first-child { display: none; } }
+
+@media (max-width: 600px) {
+  .panel { top: 8px; right: 8px; left: 8px; width: auto; }
+  .reactions { left: auto; right: 12px; bottom: auto; top: 108px; align-items: flex-end; z-index: 30; }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes slideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .reaction, .panel { animation: none; } .spinner { animation-duration: 2s; } .reactionButton, .reactionButton span { transition: none; } }
