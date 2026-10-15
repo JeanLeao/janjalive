@@ -256,7 +256,7 @@ test('ICE readiness gates connections and disposal invalidates pending setup', a
   assert.equal(manager.getPeers().size, 0);
 });
 
-test('one recipient failing track replacement does not block other recipients', async () => {
+test('one recipient failing track replacement reports publication failure after other recipients settle', async () => {
   const sent = [];
   const manager = new PeerManager({
     rtcConfig: {}, onSendSignal: (target, data) => { sent.push({ target, data }); return true; },
@@ -267,7 +267,7 @@ test('one recipient failing track replacement does not block other recipients', 
   for (const id of ['broken', 'healthy']) await manager.handleAnswer(id, { type: 'answer', sdp: 'answer' });
   manager.getPeer('broken').videoSender.replaceTrack = async () => { throw new Error('isolated failure'); };
   const stream = new MockMediaStream();
-  await manager.attachLocalStream(stream);
+  await assert.rejects(manager.attachLocalStream(stream), /isolated failure/);
   assert.equal(manager.getPeer('healthy').videoSender.track, stream.getVideoTracks()[0]);
   assert.ok(sent.some(s => s.target === 'healthy' && s.data.type === 'offer'));
   manager.dispose();
@@ -490,5 +490,78 @@ test('pause queued during video attachment drains both senders without attaching
   await Promise.all([attachment, pause]);
   assert.equal(peer.videoSender.track, null);
   if (peer.audioSender) assert.equal(peer.audioSender.track, null);
+  manager.dispose();
+});
+
+test('source replacement reuses negotiated senders without a new offer, including audio removal/return', async () => {
+  const signals = [];
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: (target, data) => { signals.push(data); return true; },
+    onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  manager.setParticipants(['viewer']);
+  await manager.attachLocalStream(new MockMediaStream([new MockMediaStreamTrack('video'), new MockMediaStreamTrack('audio')]));
+  await manager.handleAnswer('viewer', { type: 'answer', sdp: 'answer' });
+  const peer = manager.getPeer('viewer');
+  const videoSender = peer.videoSender, audioSender = peer.audioSender;
+  const offers = signals.filter(s => s.type === 'offer').length;
+  await manager.detachLocalStream();
+  const videoOnly = new MockMediaStream();
+  await manager.attachLocalStream(videoOnly);
+  assert.equal(peer.videoSender, videoSender);
+  assert.equal(peer.audioSender, audioSender);
+  assert.equal(videoSender.track, videoOnly.getVideoTracks()[0]);
+  assert.equal(audioSender.track, null);
+  const withAudio = new MockMediaStream([new MockMediaStreamTrack('video'), new MockMediaStreamTrack('audio')]);
+  await manager.detachLocalStream();
+  await manager.attachLocalStream(withAudio);
+  assert.equal(audioSender.track, withAudio.getAudioTracks()[0]);
+  assert.equal(signals.filter(s => s.type === 'offer').length, offers);
+  manager.dispose();
+});
+
+test('incompatible source properties fall back to addTrack and negotiation on the existing connection', async () => {
+  const signals = [];
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: (target, data) => { signals.push(data); return true; },
+    onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  manager.setParticipants(['viewer']);
+  await manager.attachLocalStream(new MockMediaStream());
+  await manager.handleAnswer('viewer', { type: 'answer', sdp: 'answer' });
+  const peer = manager.getPeer('viewer'), connection = peer.pc;
+  const oldSender = peer.videoSender;
+  peer.videoSender.replaceTrack = async () => { throw Object.assign(new Error('Requires negotiation'), { name: 'InvalidModificationError' }); };
+  // Model removeTrack without closing the reusable peer connection.
+  connection.removeTrack = sender => { sender.track = null; };
+  const offers = signals.filter(s => s.type === 'offer').length;
+  const next = new MockMediaStream();
+  await manager.attachLocalStream(next);
+  assert.equal(manager.getPeer('viewer').pc, connection);
+  assert.equal(oldSender.track, null);
+  assert.equal(peer.videoSender.track, next.getVideoTracks()[0]);
+  assert.equal(signals.filter(s => s.type === 'offer').length, offers + 1);
+  manager.dispose();
+});
+
+test('renegotiated audio and replacement video merge into the existing presenter receiver stream', () => {
+  globalThis.MediaStream = MockMediaStream;
+  const received = [];
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => true,
+    onRemoteStreamAdd: (id, stream) => received.push(stream), onRemoteStreamRemove: () => {},
+  });
+  const peer = manager.getOrCreatePeer('presenter');
+  const video = new MockMediaStreamTrack('video');
+  const original = new MockMediaStream([video]);
+  peer.pc.ontrack({ track: video, streams: [original] });
+  const audio = new MockMediaStreamTrack('audio');
+  peer.pc.ontrack({ track: audio, streams: [new MockMediaStream([audio])] });
+  assert.equal(received.at(-1), original);
+  assert.deepEqual(original.getTracks(), [video, audio]);
+  const nextVideo = new MockMediaStreamTrack('video');
+  peer.pc.ontrack({ track: nextVideo, streams: [new MockMediaStream([nextVideo])] });
+  assert.equal(received.at(-1), original);
+  assert.deepEqual(original.getTracks(), [audio, nextVideo]);
   manager.dispose();
 });

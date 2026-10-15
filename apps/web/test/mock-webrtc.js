@@ -49,6 +49,10 @@ export class MockMediaStream {
   addTrack(track) {
     this.tracks.push(track);
   }
+
+  removeTrack(track) {
+    this.tracks = this.tracks.filter(item => item !== track);
+  }
 }
 
 export class MockRTCRtpSender {
