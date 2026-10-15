@@ -4,6 +4,8 @@ import {
   Box,
   UnstyledButton,
   Tooltip,
+  Menu,
+  Loader,
 } from '@mantine/core';
 import {
   IconScreen,
@@ -18,6 +20,10 @@ import {
 } from './Icons';
 
 export interface FloatingControlDockProps {
+  onSwitchCapture?: () => void;
+  switchPending?: boolean;
+  switchRestoring?: boolean;
+  onCancelSwitch?: () => void;
   capturePending?: boolean;
   isPaused?: boolean;
   pausePending?: boolean;
@@ -35,6 +41,10 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  onSwitchCapture,
+  switchPending,
+  switchRestoring,
+  onCancelSwitch,
   capturePending,
   isPaused,
   pausePending,
@@ -134,7 +144,7 @@ export function FloatingControlDock({
           <>
             <Tooltip label={isPaused ? 'Retomar transmissão' : 'Pausar transmissão — o navegador continua capturando'} multiline w={280} events={{ hover: true, focus: true, touch: false }} withArrow>
               <Button className="floating-dock-primary" px={14} loading={pausePending}
-                disabled={!onTogglePause} onClick={onTogglePause}
+                disabled={!onTogglePause || switchPending} onClick={onTogglePause}
                 aria-label={isPaused ? 'Retomar transmissão' : 'Pausar transmissão'}
                 leftSection={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   {isPaused ? <path d="m8 5 11 7-11 7z" /> : <><path d="M8 5v14" /><path d="M16 5v14" /></>}
@@ -162,6 +172,18 @@ export function FloatingControlDock({
           </Tooltip>
         )}
 
+        {isSharing && (
+          <Tooltip label={switchRestoring ? 'Restaurando transmissão…' : switchPending ? 'Cancelar troca' : 'Trocar tela'} events={{ hover: true, focus: true, touch: false }} withArrow>
+            <UnstyledButton onClick={switchPending ? onCancelSwitch : onSwitchCapture}
+              disabled={!switchPending && !onSwitchCapture} aria-label={switchRestoring ? 'Restaurando transmissão…' : switchPending ? 'Cancelar troca' : 'Trocar tela'}
+              className="floating-dock-btn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#21262d', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)' }}>
+              {switchPending ? <Loader size={18} aria-hidden /> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="3" width="18" height="13" rx="2" /><path d="M8 21h8M12 16v5M7 8h10m-3-3 3 3-3 3" />
+              </svg>}
+            </UnstyledButton>
+          </Tooltip>
+        )}
+
         {/* Screen Audio Mute / Unmute Toggle (only active if sharing and track exists) */}
         {isSharing && hasAudioTrack && (
           <Tooltip
@@ -169,6 +191,7 @@ export function FloatingControlDock({
             events={{ hover: true, focus: true, touch: false }} withArrow
           >
             <UnstyledButton
+              disabled={switchPending}
               onClick={onToggleAudioMute}
               aria-label={isAudioMuted ? 'Reativar áudio da tela' : 'Mutar áudio da tela'}
               className="floating-dock-btn"
@@ -192,7 +215,7 @@ export function FloatingControlDock({
         )}
 
         {/* Copy Invite Link */}
-        <Tooltip label={copied ? 'Link copiado!' : 'Copiar convite da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        {!isSharing && <Tooltip label={copied ? 'Link copiado!' : 'Copiar convite da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={handleCopyLink}
             aria-label="Copiar link de convite"
@@ -213,7 +236,7 @@ export function FloatingControlDock({
           >
             {copied ? <IconCheck size={18} /> : <IconLink size={18} />}
           </UnstyledButton>
-        </Tooltip>
+        </Tooltip>}
 
         {/* Participants drawer toggle */}
         <Tooltip label={`Participantes (${participantCount})`} events={{ hover: true, focus: true, touch: false }} withArrow>
@@ -241,28 +264,36 @@ export function FloatingControlDock({
         </Tooltip>
 
         {/* Settings button */}
-        <Tooltip label="Configurações e diagnósticos" events={{ hover: true, focus: true, touch: false }} withArrow>
-          <UnstyledButton
-            onClick={onOpenSettings}
-            aria-label="Configurações e diagnósticos"
-            className="floating-dock-btn"
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#21262d',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: '#e6edf3',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <IconGear size={18} />
-          </UnstyledButton>
-        </Tooltip>
+        <Menu position="top" withinPortal>
+          <Menu.Target>
+            <Tooltip label="Configurações e convite" events={{ hover: true, focus: true, touch: false }} withArrow>
+              <UnstyledButton
+                aria-label="Configurações e convite"
+                className="floating-dock-btn"
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#21262d',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#e6edf3',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <IconGear size={18} />
+              </UnstyledButton>
+            </Tooltip>
+
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={onOpenSettings}>Configurações e diagnósticos</Menu.Item>
+            <Menu.Item onClick={handleCopyLink}>{copied ? 'Link copiado!' : 'Copiar link de convite'}</Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
 
         {/* Leave Room Button */}
         <Tooltip label="Sair da sala" events={{ hover: true, focus: true, touch: false }} withArrow>

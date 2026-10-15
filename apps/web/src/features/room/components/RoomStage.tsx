@@ -119,7 +119,7 @@ export function RoomStage({
       stream: remote.stream,
       isLocal: false,
       displayName: formatDisplayName(remotePart?.nickname, false),
-      hasAudio: remote.stream.getAudioTracks().length > 0,
+      hasAudio: remotePart?.hasAudio ?? remote.stream.getAudioTracks().some(track => track.readyState === 'live'),
     });
   }
 

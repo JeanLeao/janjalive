@@ -13,6 +13,7 @@ export interface RoomParticipant {
   isLocal: boolean;
   isSharing: boolean;
   isPaused?: boolean;
+  hasAudio?: boolean;
 }
 
 export interface NetworkMetrics {

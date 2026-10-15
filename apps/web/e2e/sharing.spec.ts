@@ -33,6 +33,8 @@ async function syntheticCapture(page: Page) {
     Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
       configurable: true,
       value: async () => {
+        ((window as any).testCaptureActivations ||= []).push(navigator.userActivation.isActive);
+        if ((window as any).testRejectCapture) throw new DOMException('Selection cancelled', (window as any).testRejectCapture);
         const canvas = document.createElement('canvas');
         canvas.width = 640; canvas.height = 360;
         const ctx = canvas.getContext('2d')!;
@@ -56,8 +58,26 @@ async function syntheticCapture(page: Page) {
           (window as any).testAudioUnavailable = !resumed || audioContext.state !== 'running';
           stream.addTrack(destination.stream.getAudioTracks()[0]);
         }
+        ((window as any).testCaptures ||= []).push(stream);
         (window as any).testCapture = stream;
+        const track = stream.getVideoTracks()[0];
+        const stop = track.stop.bind(track);
+        track.stop = () => { clearInterval(timer); stop(); };
         stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer));
+        // Count application listeners separately from the synthetic source's own cleanup.
+        const endedListeners = new Set<EventListenerOrEventListenerObject>();
+        ((window as any).testEndedListeners ||= []).push(endedListeners);
+        const target: EventTarget = track;
+        const addListener = target.addEventListener.bind(target);
+        const removeListener = target.removeEventListener.bind(target);
+        target.addEventListener = (type, listener, options) => {
+          if (type === 'ended' && listener) endedListeners.add(listener);
+          addListener(type, listener, options);
+        };
+        target.removeEventListener = (type, listener, options) => {
+          if (type === 'ended' && listener) endedListeners.delete(listener);
+          removeListener(type, listener, options);
+        };
         if ((window as any).testDelayCapture) await new Promise(resolve => { (window as any).resolveCapture = resolve; });
         return stream;
       },
@@ -629,13 +649,10 @@ for (const mobile of [false, true]) {
     const page = await context.newPage(), viewer = await context.newPage();
     await syntheticCapture(page);
     await page.addInitScript(() => {
-      const setDescription = RTCPeerConnection.prototype.setLocalDescription;
-      RTCPeerConnection.prototype.setLocalDescription = async function (description?: RTCLocalSessionDescriptionInit) {
-        if ((window as any).holdPublication) await new Promise(resolve => { (window as any).releasePublication = resolve; });
-        return setDescription.bind(this)(description);
-      };
       const replaceTrack = RTCRtpSender.prototype.replaceTrack;
       RTCRtpSender.prototype.replaceTrack = async function (track) {
+        // Publication can reuse an already negotiated sender without setting SDP.
+        if (track && (window as any).holdPublication) await new Promise(resolve => { (window as any).releasePublication = resolve; });
         if ((window as any).holdPause) await new Promise(resolve => { ((window as any).releasePause ||= []).push(resolve); });
         return replaceTrack.call(this, track);
       };
@@ -675,3 +692,276 @@ for (const mobile of [false, true]) {
     } finally { await context.close(); }
   });
 }
+
+async function senderTrackIds(page: Page) {
+  return page.evaluate(() => (window as any).testPeers.flatMap((pc: RTCPeerConnection) =>
+    pc.connectionState === 'closed' ? [] : pc.getSenders().flatMap(sender => sender.track ? [sender.track.id] : [])) as string[]);
+}
+
+async function holdReplacement(page: Page) {
+  await page.addInitScript(() => {
+    const replace = RTCRtpSender.prototype.replaceTrack;
+    RTCRtpSender.prototype.replaceTrack = async function (track) {
+      const w = window as any;
+      if (w.testFailReplace === (track ? 'attach' : 'detach')) throw new Error('Injected replacement failure');
+      if (w.testHoldReplace === (track ? 'attach' : 'detach')) {
+        await new Promise(resolve => { (w.testReplacements ||= []).push(resolve); });
+      }
+      return replace.call(this, track);
+    };
+  });
+}
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 320, height: 568 }, { width: 800, height: 360 }]) {
+  test(`F27 confirm and cancel protect both sources, audio and reusable senders at ${viewport.width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, hasTouch: viewport.width === 320 });
+    try {
+      const host = await context.newPage(), viewer = await context.newPage();
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await host.addInitScript(() => { (window as any).testAudio = true; });
+      await Promise.all([host.goto(`/room/f27-confirm-${viewport.width}`), viewer.goto(`/room/f27-confirm-${viewport.width}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      await host.getByRole('button', { name: 'Mutar áudio da tela', exact: true }).click();
+      const original = await senderTrackIds(host);
+      const switchButton = host.getByRole('button', { name: 'Trocar tela', exact: true });
+      await switchButton.focus(); await host.keyboard.press('Enter');
+      const dialog = host.getByRole('dialog');
+      await expect(dialog).toContainText('Nova origem — não está ao vivo');
+      await expect.poll(() => senderTrackIds(host)).toEqual([]);
+      expect(await host.evaluate(() => (window as any).testCaptures[0].getTracks().every((t: MediaStreamTrack) => !t.enabled && t.readyState === 'live'))).toBe(true);
+      await expect(viewer.getByText('Transmissão pausada', { exact: true }).first()).toBeVisible();
+      const previewBounds = (await dialog.boundingBox())!;
+      expect(previewBounds.x).toBeGreaterThanOrEqual(0);
+      expect(previewBounds.x + previewBounds.width).toBeLessThanOrEqual(viewport.width);
+      expect(previewBounds.y + previewBounds.height).toBeLessThanOrEqual(viewport.height);
+      await host.screenshot({ path: test.info().outputPath('switch-preview.png') });
+      await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+      await expect.poll(() => senderTrackIds(host)).toEqual(original);
+      expect(await host.evaluate(() => (window as any).testCaptures[1].getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
+      await frames(viewer);
+      await switchButton.click();
+      await expect(dialog).toContainText('Nova origem');
+      const confirm = dialog.getByRole('button', { name: 'Confirmar troca', exact: true });
+      if (viewport.width === 320) await confirm.tap(); else { await confirm.focus(); await host.keyboard.press('Enter'); }
+      await expect(dialog).toHaveCount(0);
+      await frames(viewer);
+      const next = await host.evaluate(() => (window as any).testCapture.getTracks().map((t: MediaStreamTrack) => t.id));
+      expect((await senderTrackIds(host)).sort()).toEqual(next.sort());
+      expect(await host.evaluate(() => (window as any).testCaptures[0].getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
+      await expect(host.getByRole('button', { name: 'Reativar áudio da tela', exact: true })).toBeVisible();
+      expect(await host.evaluate(() => (window as any).testCapture.getAudioTracks()[0].enabled)).toBe(false);
+      expect(await host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState !== 'closed').length)).toBe(1);
+      const bar = await host.locator('.floating-dock-bar').boundingBox();
+      expect(bar!.x).toBeGreaterThanOrEqual(0); expect(bar!.x + bar!.width).toBeLessThanOrEqual(viewport.width);
+      await host.screenshot({ path: test.info().outputPath('switch-dock.png') });
+      // Muted preference survives absence and later return of an audio track.
+      await host.evaluate(() => { (window as any).testAudio = false; });
+      await switchButton.click(); await expect(dialog).toContainText('Sem áudio');
+      await dialog.getByRole('button', { name: 'Confirmar troca' }).click();
+      await expect(dialog).toHaveCount(0);
+      expect((await senderTrackIds(host)).length).toBe(1);
+      await expect(viewer.getByText('Tela com áudio', { exact: true })).toHaveCount(0);
+      await host.evaluate(() => { (window as any).testAudio = true; });
+      await switchButton.click(); await dialog.getByRole('button', { name: 'Confirmar troca' }).click();
+      await expect(dialog).toHaveCount(0);
+      expect((await senderTrackIds(host)).length).toBe(2);
+      expect(await host.evaluate(() => (window as any).testCapture.getAudioTracks()[0].enabled)).toBe(false);
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect.poll(() => senderTrackIds(host)).toEqual([]);
+      expect(await host.evaluate(() => (window as any).testCaptures.every((s: MediaStream) => s.getTracks().every(t => t.readyState === 'ended')))).toBe(true);
+      expect(await host.evaluate(() => (window as any).testEndedListeners.every((listeners: Set<unknown>) => listeners.size === 0))).toBe(true);
+    } finally { await context.close(); }
+  });
+}
+
+for (const paused of [false, true]) {
+  test(`F27 picker errors and preview cancellation restore original ${paused ? 'paused' : 'live'} state`, async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+      const host = await context.newPage(), viewer = await context.newPage();
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await Promise.all([host.goto(`/room/f27-cancel-${paused}`), viewer.goto(`/room/f27-cancel-${paused}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      const original = await senderTrackIds(host);
+      if (paused) await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      const button = host.getByRole('button', { name: 'Trocar tela', exact: true });
+      for (const error of ['NotAllowedError', 'AbortError', 'NotReadableError']) {
+        await host.evaluate(error => { (window as any).testRejectCapture = error; }, error);
+        await button.click();
+        await expect(host.getByRole('button', { name: paused ? 'Retomar transmissão' : 'Pausar transmissão', exact: true })).toBeEnabled();
+        await expect.poll(() => senderTrackIds(host)).toEqual(paused ? [] : original);
+      }
+      await host.evaluate(() => { (window as any).testRejectCapture = null; });
+      await button.click(); await expect(host.getByRole('dialog')).toBeVisible();
+      await host.keyboard.press('Escape');
+      await expect.poll(() => senderTrackIds(host)).toEqual(paused ? [] : original);
+      await expect(host.getByRole('button', { name: paused ? 'Retomar transmissão' : 'Pausar transmissão', exact: true })).toBeEnabled();
+      // Confirmation always resumes the selected source, even when initiated from pause.
+      await button.click(); await host.getByRole('button', { name: 'Confirmar troca' }).click();
+      await expect(host.getByRole('button', { name: 'Pausar transmissão', exact: true })).toBeEnabled();
+      await frames(viewer);
+    } finally { await context.close(); }
+  });
+}
+
+for (const action of ['cancel', 'stop', 'leave', 'old-ended', 'new-ended', 'old-ended-confirm'] as const) {
+  test(`F27 delayed picker and native endings: ${action}`, async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+      const host = await context.newPage(); await syntheticCapture(host);
+      await host.goto(`/room/f27-delayed-${action}`); await startLive(host);
+      await host.evaluate(() => { (window as any).testDelayCapture = true; });
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await expect.poll(() => host.evaluate(() => (window as any).testCaptures.length)).toBe(2);
+      expect(await host.evaluate(() => (window as any).testCaptures[0].getTracks().every((t: MediaStreamTrack) => !t.enabled))).toBe(true);
+      if (action.startsWith('old-ended')) await host.evaluate(() => {
+        const track = (window as any).testCaptures[0].getVideoTracks()[0]; track.stop(); track.dispatchEvent(new Event('ended'));
+      });
+      if (action === 'cancel') await host.getByRole('button', { name: 'Cancelar troca', exact: true }).click();
+      if (action === 'stop') await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      if (action === 'leave') await host.getByRole('button', { name: /Sair/ }).last().click();
+      await host.evaluate(() => (window as any).resolveCapture());
+      if (action === 'old-ended' || action === 'old-ended-confirm' || action === 'new-ended') {
+        await expect(host.getByRole('dialog')).toBeVisible();
+        if (action === 'new-ended') await host.evaluate(() => {
+          const track = (window as any).testCapture.getVideoTracks()[0]; track.stop(); track.dispatchEvent(new Event('ended'));
+        });
+        else await host.getByRole('button', { name: action === 'old-ended-confirm' ? 'Confirmar troca' : 'Cancelar', exact: true }).click();
+      }
+      await expect(host.getByRole('dialog')).toHaveCount(0);
+      if (action === 'cancel' || action === 'new-ended' || action === 'old-ended-confirm') {
+        await expect(host.getByRole('button', { name: 'Pausar transmissão', exact: true })).toBeEnabled();
+        const liveIndex = action === 'old-ended-confirm' ? 1 : 0;
+        expect(await host.evaluate(index => (window as any).testCaptures[index].getVideoTracks()[0].readyState, liveIndex)).toBe('live');
+      } else {
+        await expect.poll(() => host.evaluate(() => (window as any).testCaptures.every((s: MediaStream) => s.getTracks().every(t => t.readyState === 'ended')))).toBe(true);
+        await expect.poll(() => senderTrackIds(host)).toEqual([]);
+      }
+    } finally { await context.close(); }
+  });
+}
+
+for (const failure of ['detach', 'attach']) {
+  test(`F27 ${failure} failure stops both captures and all senders`, async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+      const host = await context.newPage(), viewer = await context.newPage();
+      await syntheticCapture(host); await syntheticCapture(viewer); await holdReplacement(host);
+      await Promise.all([host.goto(`/room/f27-failure-${failure}`), viewer.goto(`/room/f27-failure-${failure}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      await host.evaluate(failure => { (window as any).testFailReplace = failure; }, failure);
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      if (failure === 'attach') await host.getByRole('button', { name: 'Confirmar troca' }).click();
+      await expect(host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeVisible();
+      await expect.poll(() => senderTrackIds(host)).toEqual([]);
+      await expect.poll(() => host.evaluate(() => (window as any).testCaptures.every((s: MediaStream) => s.getTracks().every(t => t.readyState === 'ended')))).toBe(true);
+    } finally { await context.close(); }
+  });
+}
+
+test('F27 detach barrier, duplicate clicks, late join, reconnect and independent presenter', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const host = await context.newPage(), other = await context.newPage();
+    await syntheticCapture(host); await syntheticCapture(other); await holdReplacement(host);
+    await Promise.all([host.goto('/room/f27-concurrency'), other.goto('/room/f27-concurrency')]);
+    await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+    await startLive(host); await startLive(other); await frames(host); await frames(other);
+    const originalOthers = await senderTrackIds(other);
+    await host.evaluate(() => { (window as any).testHoldReplace = 'detach'; });
+    // Dispatch twice within one event turn: the synchronous state guard must prevent a second picker.
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await expect.poll(() => host.evaluate(() => (window as any).testCaptures.length)).toBe(2);
+    await expect.poll(() => host.evaluate(() => (window as any).testReplacements?.length || 0)).toBeGreaterThan(0);
+    await expect(host.getByRole('dialog')).toHaveCount(0);
+    expect(await host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState !== 'closed').every((pc: RTCPeerConnection) => pc.getSenders().every(s => !s.track || !s.track.enabled)))).toBe(true);
+    const late = await context.newPage(); await syntheticCapture(late); await late.goto('/room/f27-concurrency');
+    await expect(host.getByRole('button', { name: 'Ver participantes (3)', exact: true }).first()).toBeVisible();
+    await host.evaluate(() => { (window as any).testHoldReplace = null; (window as any).testReplacements.forEach((resolve: () => void) => resolve()); });
+    await expect(host.getByRole('dialog')).toBeVisible();
+    await expect.poll(() => senderTrackIds(host)).toEqual([]);
+    // Reconnect while the unconfirmed source exists; rebuilt peers must remain streamless.
+    await host.evaluate(() => (window as any).testSockets.at(-1).close());
+    await expect(host.getByText('Conectado', { exact: true })).toBeVisible();
+    await expect(host.getByRole('button', { name: 'Ver participantes (3)', exact: true }).first()).toBeVisible();
+    await expect.poll(() => senderTrackIds(host)).toEqual([]);
+    expect(await other.evaluate(ids => (window as any).testPeers.some((pc: RTCPeerConnection) => pc.connectionState !== 'closed' && pc.getSenders().some(s => ids.includes(s.track?.id ?? ''))), originalOthers)).toBe(true);
+    await host.getByRole('button', { name: 'Confirmar troca' }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await expect(host.getByRole('dialog')).toHaveCount(0);
+    await frames(other); await frames(late);
+    const currentIds = await host.evaluate(() => (window as any).testCapture.getTracks().map((t: MediaStreamTrack) => t.id));
+    await expect.poll(() => senderTrackIds(host)).toEqual([...currentIds, ...currentIds]);
+  } finally { await context.close(); }
+});
+
+for (const phase of ['detach-cancel', 'detach-stop', 'publish-stop', 'publish-end', 'restore-stop'] as const) {
+  test(`F27 invalidates queued operations: ${phase}`, async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+      const host = await context.newPage(), viewer = await context.newPage();
+      await syntheticCapture(host); await syntheticCapture(viewer); await holdReplacement(host);
+      await host.addInitScript(() => { (window as any).testAudio = true; });
+      await Promise.all([host.goto(`/room/f27-queued-${phase}`), viewer.goto(`/room/f27-queued-${phase}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      const original = await senderTrackIds(host);
+      const detaching = phase.startsWith('detach');
+      if (detaching) await host.evaluate(() => { (window as any).testHoldReplace = 'detach'; });
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await expect.poll(() => host.evaluate(() => (window as any).testCaptures.length)).toBe(2);
+      if (detaching) {
+        await expect.poll(() => host.evaluate(() => (window as any).testReplacements?.length || 0)).toBeGreaterThan(0);
+        if (phase === 'detach-cancel') await host.getByRole('button', { name: 'Cancelar troca', exact: true }).click();
+        else await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+        await expect(host.getByRole('dialog')).toHaveCount(0);
+      } else {
+        await expect(host.getByRole('dialog')).toBeVisible();
+        await host.evaluate(() => { (window as any).testHoldReplace = 'attach'; });
+        await host.getByRole('button', { name: phase === 'restore-stop' ? 'Cancelar' : 'Confirmar troca', exact: true }).click();
+        await expect.poll(() => host.evaluate(() => (window as any).testReplacements?.length || 0)).toBeGreaterThan(0);
+        if (phase === 'publish-end') await host.evaluate(() => {
+          const track = (window as any).testCapture.getVideoTracks()[0]; track.stop(); track.dispatchEvent(new Event('ended'));
+        });
+        else if (phase === 'publish-stop') await host.getByRole('dialog').getByRole('button', { name: 'Parar', exact: true }).click();
+        else await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      }
+      await host.evaluate(() => { (window as any).testHoldReplace = null; (window as any).testReplacements.forEach((resolve: () => void) => resolve()); });
+      if (phase === 'detach-cancel') {
+        await expect(host.getByRole('button', { name: 'Pausar transmissão', exact: true })).toBeEnabled();
+        await expect.poll(() => senderTrackIds(host)).toEqual(original);
+        expect(await host.evaluate(() => (window as any).testCaptures[1].getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
+      } else {
+        await expect(host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeVisible();
+        await expect.poll(() => senderTrackIds(host)).toEqual([]);
+        expect(await host.evaluate(() => (window as any).testCaptures.every((s: MediaStream) => s.getTracks().every(t => t.readyState === 'ended')))).toBe(true);
+      }
+    } finally { await context.close(); }
+  });
+}
+
+test('F27 first audio source negotiates without losing the reused remote video', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const host = await context.newPage(), viewer = await context.newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await Promise.all([host.goto('/room/f27-first-audio'), viewer.goto('/room/f27-first-audio')]);
+    await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+    await startLive(host); await frames(viewer);
+    await host.evaluate(() => { (window as any).testAudio = true; });
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca' }).click();
+    await expect(host.getByRole('dialog')).toHaveCount(0);
+    await frames(viewer);
+    await expect.poll(() => viewer.locator('video').first().evaluate(video =>
+      (video as HTMLVideoElement).srcObject instanceof MediaStream && ((video as HTMLVideoElement).srcObject as MediaStream).getTracks().filter(t => t.readyState === 'live').map(t => t.kind).sort(),
+    )).toEqual(['audio', 'video']);
+    const settings = host.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+    await settings.focus(); await host.keyboard.press('Enter');
+    await expect(host.getByRole('menuitem', { name: 'Copiar link de convite', exact: true })).toBeVisible();
+    await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+    await expect(host.getByRole('dialog')).toContainText('Transmissão, áudio e diagnóstico');
+  } finally { await context.close(); }
+});

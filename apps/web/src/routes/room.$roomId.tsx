@@ -293,10 +293,19 @@ function RoomPage() {
           onConfirm={session.publishCapture} onCancel={session.stopSharing} />
       )}
 
+      {session.pendingStream && (
+        <CapturePreview stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
+          onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
+      )}
+
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
+        onSwitchCapture={['sharing', 'paused'].includes(session.captureState) ? session.switchCapture : undefined}
+        switchPending={session.captureState.startsWith('switch-')}
+        switchRestoring={session.captureState === 'switch-restoring'}
+        onCancelSwitch={session.cancelSwitch}
         capturePending={['requesting', 'preview', 'publishing', 'stopping'].includes(session.captureState)}
-        isPaused={session.captureState === 'paused'}
+        isPaused={session.captureState === 'paused' || session.captureState.startsWith('switch-')}
         pausePending={['pausing', 'resuming'].includes(session.captureState)}
         onTogglePause={session.captureState === 'paused' ? session.publishCapture : session.pauseSharing}
         isSharing={session.isSharing}

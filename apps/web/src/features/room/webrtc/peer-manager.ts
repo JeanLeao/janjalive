@@ -181,7 +181,12 @@ export class PeerManager {
         kind: event.track.kind,
       });
       if (this.peers.get(peerId) !== peer) return;
-      peer.remoteStream = event.streams[0] || peer.remoteStream || new MediaStream();
+      // A newly added audio sender may carry a different stream ID from reused video.
+      // Keep one receiver stream per presenter so renegotiation cannot discard their video.
+      peer.remoteStream ||= event.streams[0] || new MediaStream();
+      for (const track of peer.remoteStream.getTracks()) {
+        if (track.kind === event.track.kind && track !== event.track) peer.remoteStream.removeTrack(track);
+      }
       if (!peer.remoteStream.getTracks().includes(event.track)) peer.remoteStream.addTrack(event.track);
       if (this.sharing.get(peerId) !== false) this.options.onRemoteStreamAdd(peerId, peer.remoteStream);
     };
@@ -444,31 +449,54 @@ export class PeerManager {
     const audioTrack = stream.getAudioTracks()[0];
 
     for (const id of this.participants) this.getOrCreatePeer(id);
-    await Promise.all([...this.peers.values()].map((peer) => {
+    const attachments = await Promise.allSettled([...this.peers.values()].map((peer) => {
+      let needsNegotiation = !peer.pc.localDescription;
       peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
         if (this.peers.get(peer.id) !== peer || this.localStream !== stream) return;
         if (peer.videoSender && videoTrack) {
-          await peer.videoSender.replaceTrack(videoTrack);
+          try { await peer.videoSender.replaceTrack(videoTrack); }
+          catch (error) {
+            if ((error as Error).name !== 'InvalidModificationError') throw error;
+            if (this.localStream !== stream || this.peers.get(peer.id) !== peer) return;
+            peer.pc.removeTrack(peer.videoSender);
+            peer.videoSender = peer.pc.addTrack(videoTrack, stream);
+            needsNegotiation = true;
+          }
         } else if (videoTrack) {
           peer.videoSender = peer.pc.addTrack(videoTrack, stream);
+          needsNegotiation = true;
         }
 
         if (this.localStream !== stream) return;
         if (peer.audioSender) {
-          await peer.audioSender.replaceTrack(audioTrack || null);
+          try { await peer.audioSender.replaceTrack(audioTrack || null); }
+          catch (error) {
+            if (!audioTrack || (error as Error).name !== 'InvalidModificationError') throw error;
+            if (this.localStream !== stream || this.peers.get(peer.id) !== peer) return;
+            peer.pc.removeTrack(peer.audioSender);
+            peer.audioSender = peer.pc.addTrack(audioTrack, stream);
+            needsNegotiation = true;
+          }
         } else if (audioTrack) {
           peer.audioSender = peer.pc.addTrack(audioTrack, stream);
+          needsNegotiation = true;
         }
-        peer.negotiationPending = true;
-      }).catch((err) => this.options.logger?.log('attach-error', { peer: peer.id, message: err?.message }));
+        peer.negotiationPending ||= needsNegotiation;
+      }).catch((err) => {
+        this.options.logger?.log('attach-error', { peer: peer.id, message: err?.message });
+        throw err;
+      });
       return peer.signalChain;
     }));
 
+    const failed = attachments.find(result => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+    if (this.localStream !== stream) return;
     await this.applyQuality(this.currentQuality);
 
     // Trigger offer to all peers in stable state
     await Promise.all(
-      [...this.peers.keys()].map((peerId) =>
+      [...this.peers.keys()].filter(id => this.peers.get(id)?.negotiationPending).map((peerId) =>
         this.createAndSendOffer(peerId).catch((err) => {
           this.options.logger?.log('offer-error', { peer: peerId, message: err?.message });
         }),
