@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Popover } from '@mantine/core';
 import { INTERACTION_LIMITS, REACTIONS, type ChatMessage, type Reaction, type ReactionEvent } from '@screen-room/protocol';
 import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar';
-import { IconChat, IconClose, IconSend, IconSmile } from './Icons';
+import { IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
 import classes from './RoomInteractions.module.css';
 
 const labels: Record<Reaction, string> = {
@@ -16,12 +16,12 @@ const labels: Record<Reaction, string> = {
   bubbles: 'Bolhas de sabão',
   rocket: 'Foguete',
 };
-const symbols: Record<Reaction, string> = {
+const symbols: Record<Reaction, React.ReactNode> = {
   applause: '👏',
   like: '👍',
   heart: '❤️',
   celebrate: '🎉',
-  brazil: '🇧🇷',
+  brazil: <IconFlagBrazil />,
   dislike: '👎',
   'middle-finger': '🖕',
   bubbles: '🫧',

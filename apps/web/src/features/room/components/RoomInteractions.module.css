@@ -29,7 +29,7 @@
 /* ---- Reações temporárias ---- */
 .reactions { position: absolute; left: 16px; bottom: 84px; z-index: 24; pointer-events: none; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: min(240px, calc(100% - 32px)); }
 .reaction { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 12px 4px 8px; background: rgba(13,17,23,.88); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; color: #e6edf3; font-size: 12px; font-weight: 600; animation: rise 220ms ease-out; }
-.reactionEmoji { font-size: 18px; line-height: 1; }
+.reactionEmoji { font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .reactionName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .error { position: absolute; top: 56px; right: 16px; z-index: 26; max-width: min(320px, calc(100% - 32px)); padding: 8px 12px; background: #161b22; border: 1px solid rgba(248,113,113,.35); border-radius: 10px; color: #fca5a5; font-size: 13px; }

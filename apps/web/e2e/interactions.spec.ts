@@ -88,7 +88,7 @@ test('chat and reactions without media: bidirectional, unread, late join, mobile
     ]);
     await expect(a.getByTestId('reaction-event')).toHaveCount(2);
     await expect(b.getByTestId('reaction-event')).toHaveCount(2);
-    await expect(a.getByTestId('reaction-event').getByText('🇧🇷')).toBeVisible();
+    await expect(a.getByTestId('reaction-event').locator('[data-testid="flag-brazil"]')).toBeVisible();
     await expect(a.getByTestId('reaction-event').getByText('🫧')).toBeVisible();
     await expect(a.getByTestId('reaction-event').getByText(/reagiu: Brasil/)).toBeVisible();
     await expect(a.getByTestId('reaction-event').getByText(/reagiu: Bolhas de sabão/)).toBeVisible();
