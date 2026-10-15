@@ -126,7 +126,7 @@ export class SignalingClient {
           this.options.logger?.log('signal-receive', { type: raw.type, count: (raw as any).count });
           this.options.onMessage(raw);
         } else {
-          this.options.logger?.log('signal-malformed', { data: raw });
+          this.options.logger?.log('signal-malformed', { reason: 'invalid-server-message' });
         }
       } catch (parseError: any) {
         this.options.logger?.log('signal-parse-error', { message: parseError?.message });

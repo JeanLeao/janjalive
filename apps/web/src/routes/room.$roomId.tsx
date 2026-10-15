@@ -1,3 +1,4 @@
+import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
 import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
@@ -153,6 +154,25 @@ function RoomPage() {
     enabled: !isDemo,
   });
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  const connected = session.connectionStatus === 'connected';
+  const interactionsUi = useInteractionsUi({
+    roomId, messages: session.chatMessages, error: session.interactionError, pending: session.chatPending,
+    connected, onSendChat: session.sendChat,
+  });
+  const { closePicker } = interactionsUi;
+  useEffect(() => { closePicker(); }, [isCinema, isFullscreen, closePicker]);
+  const localPeerId = session.participants.find((p) => p.isLocal)?.peerId;
+  const interactionActions = (variant: 'header' | 'floating') => (
+    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant} />
+  );
+
   const handleLeave = () => {
     session.stopSharing();
     navigate({ to: '/' });
@@ -264,11 +284,15 @@ function RoomPage() {
           onOpenParticipants={() => setIsParticipantsOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onLeave={handleLeave}
+          interactions={isFullscreen ? null : interactionActions('header')}
         />
       )}
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        interactions={<InteractionLayer ui={interactionsUi} messages={session.chatMessages} reactions={session.reactions}
+          error={session.interactionError} pending={session.chatPending} connected={connected} localPeerId={localPeerId} />}
+        interactionAccess={interactionActions('floating')}
         isCinema={isCinema}
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}

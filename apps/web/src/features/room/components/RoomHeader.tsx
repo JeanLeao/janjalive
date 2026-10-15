@@ -26,6 +26,8 @@ export interface RoomHeaderProps {
   onOpenParticipants: () => void;
   onOpenSettings: () => void;
   onLeave: () => void;
+  /** Acesso social (chat e reações), posicionado junto aos participantes. */
+  interactions?: React.ReactNode;
 }
 
 export function RoomHeader({
@@ -35,6 +37,7 @@ export function RoomHeader({
   onOpenParticipants,
   onOpenSettings,
   onLeave,
+  interactions,
 }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false);
 
@@ -118,12 +121,24 @@ export function RoomHeader({
           .room-header-settings-standalone {
             display: none !important;
           }
+          .room-header-actions {
+            gap: 4px !important;
+          }
+        }
+        @media (max-width: 420px) {
+          .room-header-pill-prefix {
+            display: none;
+          }
+          .room-header-brand-mark {
+            display: none !important;
+          }
         }
       `}</style>
       {/* Left: Brand & Room Context Pill */}
       <Group gap="xs" align="center" wrap="nowrap" style={{ minWidth: 0 }}>
         <Group gap="xs" align="center" wrap="nowrap">
           <Box
+            className="room-header-brand-mark"
             style={{
               width: 28,
               height: 28,
@@ -167,7 +182,7 @@ export function RoomHeader({
             }}
           >
             <Text size="xs" c="#8c959f" fw={500}>
-              sala • <span style={{ color: '#e6edf3', fontWeight: 600 }}>{shortRoomId}</span>
+              <span className="room-header-pill-prefix">sala • </span><span style={{ color: '#e6edf3', fontWeight: 600 }}>{shortRoomId}</span>
             </Text>
             {copied ? (
               <IconCheck size={13} style={{ color: '#22c55e' }} />
@@ -179,7 +194,7 @@ export function RoomHeader({
       </Group>
 
       {/* Right: Participant Count, Settings, Status */}
-      <Group gap="xs" align="center" wrap="nowrap">
+      <Group gap="xs" align="center" wrap="nowrap" className="room-header-actions">
         {/* Connection status pill */}
         <Tooltip label={`Status da conexão: ${getStatusLabel()}`} withArrow>
           <Box
@@ -207,6 +222,8 @@ export function RoomHeader({
             </Text>
           </Box>
         </Tooltip>
+
+        {interactions}
 
         {/* Participant cluster button */}
         <Tooltip label="Ver participantes" withArrow>

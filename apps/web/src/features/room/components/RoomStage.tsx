@@ -29,6 +29,9 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  interactions?: React.ReactNode;
+  /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
+  interactionAccess?: React.ReactNode;
   isCinema?: boolean;
   onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
@@ -54,6 +57,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  interactions,
+  interactionAccess,
   isCinema = false,
   onToggleCinema,
   remoteConnectionStates = {},
@@ -141,6 +146,7 @@ export function RoomStage({
     : [];
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
+  const showAccess = isCinema || isFullscreen;
 
   // Empty state if no stream is active
   if (!activeStream) {
@@ -157,6 +163,8 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        {interactions}
+        {isCinema && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -257,6 +265,7 @@ export function RoomStage({
         minHeight: 0,
       }}
     >
+      {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
@@ -279,6 +288,10 @@ export function RoomStage({
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
+        }
+        @media (max-width: 560px) {
+          .stage-quality-pill-compact { display: none !important; }
+          .stage-top-right-access { top: 60px !important; }
         }
         @media (max-width: 768px) {
           .stage-main-container {
@@ -392,27 +405,38 @@ export function RoomStage({
           />
         </Box>
 
-        {/* Top-Right Quality / Live Pill */}
+        {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
         <Box
+          className={showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right'}
           style={{
             position: 'absolute',
             top: 16,
             right: 16,
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            backgroundColor: 'rgba(13, 17, 23, 0.85)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            padding: '5px 10px',
-            borderRadius: '16px',
-            zIndex: 10,
+            gap: 8,
+            zIndex: 26,
           }}
         >
-          <IconSignal size={13} style={{ color: '#22c55e' }} />
-          <Text size="xs" fw={500} c="#8c959f">
-            {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
-          </Text>
+          {showAccess && interactionAccess}
+          <Box
+            className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(13, 17, 23, 0.85)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '5px 10px',
+              borderRadius: '16px',
+            }}
+          >
+            <IconSignal size={13} style={{ color: '#22c55e' }} />
+            <Text size="xs" fw={500} c="#8c959f">
+              {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
+            </Text>
+          </Box>
         </Box>
       </Box>
 

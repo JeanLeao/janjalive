@@ -259,3 +259,31 @@ server {
 - [PERFORMANCE.md](./PERFORMANCE.md) — Perfis de qualidade de vídeo, adaptação conservadora e limites da arquitetura mesh.
 - [TURN.md](./TURN.md) — Mecanismos de credenciais temporárias TURN, configuração de firewall e comportamento de fallback.
 - [DEPLOY.md](./DEPLOY.md) — Guia de implantação e operação em servidor VPS Linux com proxy reverso.
+
+### Chat e reações efêmeros (F06 + F07)
+
+Chat e reações usam o WebSocket da sala, inclusive sem transmissão. O servidor
+atribui remetente, nickname, sala, horário e ID; o evento devolvido ao remetente
+confirma aceitação pelo servidor (não leitura ou entrega a todos). Texto é exibido
+literalmente. Quem entra depois não recebe mensagens anteriores.
+
+Os limites ficam em `INTERACTION_LIMITS`, em `packages/protocol/src/messages.ts`:
+texto com até 1000 unidades UTF-16, sem controles (exceto tab e quebra de linha)
+ou controles direcionais; 5 envios de chat e 8 reações por participante a cada
+janela móvel de 10 segundos. As cotas são independentes, somadas ao limitador geral
+de 100 mensagens WebSocket por segundo. Tentativas duplicadas também consomem cota;
+os últimos 64 IDs de solicitações são lembrados para impedir duplicação imediata.
+Cotas e IDs acompanham a identidade durante substituição de socket e reserva de
+reconexão, e são liberados ao sair ou expirar a reserva. Nenhum conteúdo de chat
+é mantido pelo servidor ou incluído nos diagnósticos.
+
+O cliente guarda até 200 mensagens apenas em memória, durante a sessão da sala,
+e mostra até 6 reações por 3 segundos, respeitando movimento reduzido. O chat
+permanece disponível no Cinema e dentro do contêiner de fullscreen do palco.
+PiP nativo contém apenas o vídeo; use a janela da sala para conversar ou reagir.
+
+Envios dependem de conexão e entrada confirmada na sala. Não há fila ou reenvio
+após reconexão; uma interrupção ou timeout de 8 segundos informa que o envio não
+foi confirmado. Uma confirmação tardia ainda pode aparecer no histórico, sem
+promessa de recuperação. Reações são descartadas na desconexão; o histórico local
+continua durante a reconexão, mas é limpo ao encerrar ou trocar a sessão/sala.
