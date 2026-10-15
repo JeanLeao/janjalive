@@ -5,8 +5,28 @@ import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar'
 import { IconChat, IconClose, IconSend, IconSmile } from './Icons';
 import classes from './RoomInteractions.module.css';
 
-const labels: Record<Reaction, string> = { applause: 'Aplausos', like: 'Gostei', heart: 'Adorei', celebrate: 'Celebrar' };
-const symbols: Record<Reaction, string> = { applause: '👏', like: '👍', heart: '❤️', celebrate: '🎉' };
+const labels: Record<Reaction, string> = {
+  applause: 'Aplausos',
+  like: 'Gostei',
+  heart: 'Adorei',
+  celebrate: 'Celebrar',
+  brazil: 'Brasil',
+  dislike: 'Não gostei',
+  'middle-finger': 'Dedo do meio',
+  bubbles: 'Bolhas de sabão',
+  rocket: 'Foguete',
+};
+const symbols: Record<Reaction, string> = {
+  applause: '👏',
+  like: '👍',
+  heart: '❤️',
+  celebrate: '🎉',
+  brazil: '🇧🇷',
+  dislike: '👎',
+  'middle-finger': '🖕',
+  bubbles: '🫧',
+  rocket: '🚀',
+};
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
 interface InteractionsStateInput {
@@ -65,6 +85,22 @@ export function InteractionActions({ ui, connected, onSendReaction, variant }: {
 }) {
   const { unread, opened, picker } = ui;
   const badge = unread > 99 ? '99+' : String(unread);
+  const onPickerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (index === -1) return;
+    let nextIndex = index;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % buttons.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + buttons.length) % buttons.length;
+    else if (event.key === 'ArrowDown') nextIndex = (index + 3) % buttons.length;
+    else if (event.key === 'ArrowUp') nextIndex = (index - 3 + buttons.length) % buttons.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = buttons.length - 1;
+    else return;
+    event.preventDefault();
+    buttons[nextIndex]?.focus();
+  };
+
   return <div className={`${classes.actions} ${variant === 'floating' ? classes.floating : ''}`} role="group" aria-label="Interações da sala">
     <button type="button" className={classes.action} data-chat-trigger aria-expanded={opened} aria-controls="room-chat-panel"
       title="Chat" aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
@@ -82,7 +118,7 @@ export function InteractionActions({ ui, connected, onSendReaction, variant }: {
         </button>
       </Popover.Target>
       <Popover.Dropdown className={classes.popover}>
-        <div role="group" aria-label="Reações rápidas" className={classes.picker}>
+        <div role="group" aria-label="Reações rápidas" className={classes.picker} onKeyDown={onPickerKeyDown}>
           {REACTIONS.map(reaction => <button key={reaction} type="button" className={classes.reactionButton} disabled={!connected}
             aria-label={labels[reaction]} title={labels[reaction]} onClick={() => { onSendReaction(reaction); ui.closePicker(); }}>
             <span aria-hidden="true">{symbols[reaction]}</span>

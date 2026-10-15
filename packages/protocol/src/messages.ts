@@ -24,7 +24,10 @@ export const INTERACTION_LIMITS = {
   textLength: 1000, history: 200, chatBurst: 5, reactionBurst: 8,
   windowMs: 10_000, reactionDurationMs: 3000, visibleReactions: 6,
 } as const;
-export const REACTIONS = ['applause', 'like', 'heart', 'celebrate'] as const;
+export const REACTIONS = [
+  'applause', 'like', 'heart', 'celebrate',
+  'brazil', 'dislike', 'middle-finger', 'bubbles', 'rocket',
+] as const;
 export const ReactionSchema = z.enum(REACTIONS);
 export type Reaction = z.infer<typeof ReactionSchema>;
 export const ChatTextSchema = z.string().trim().min(1).max(INTERACTION_LIMITS.textLength)

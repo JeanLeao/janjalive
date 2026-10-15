@@ -25,11 +25,92 @@ test('chat and reactions without media: bidirectional, unread, late join, mobile
     await a.screenshot({ animations: 'disabled', path: '/tmp/f06-desktop-chat.png' });
     await Promise.all([a.getByRole('button', { name: 'Fechar chat' }).click(), b.getByRole('button', { name: 'Fechar chat' }).click()]);
     await expect(a.getByRole('button', { name: 'Abrir chat', exact: true })).toBeFocused();
+    await expect(b.getByText('Ana entrou na sala.')).toBeHidden({ timeout: 6000 });
+
+    // Verify all 9 reactions in 3x3 grid picker on desktop and mobile
     await Promise.all([a.getByRole('button', { name: 'Reagir', exact: true }).click(), b.getByRole('button', { name: 'Reagir', exact: true }).click()]);
-    await Promise.all([a.getByRole('button', { name: 'Aplausos', exact: true }).click(), b.getByRole('button', { name: 'Gostei', exact: true }).click()]);
+    const expectedReactions = [
+      'Aplausos', 'Gostei', 'Adorei', 'Celebrar',
+      'Brasil', 'Não gostei', 'Dedo do meio', 'Bolhas de sabão', 'Foguete'
+    ];
+    for (const name of expectedReactions) {
+      await expect(a.getByRole('button', { name, exact: true })).toBeVisible();
+      await expect(b.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+
+    // Capture open 3x3 popovers
+    await a.screenshot({ animations: 'disabled', path: '/tmp/f07-desktop-picker.png' });
+    await b.screenshot({ animations: 'disabled', path: '/tmp/f07-mobile-320-picker.png' });
+    await a.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-desktop-picker.png' });
+    await b.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-mobile-320-picker.png' });
+
+    // Test keyboard navigation in 3x3 grid
+    const firstBtn = a.getByRole('button', { name: 'Aplausos', exact: true });
+    await firstBtn.focus();
+    await expect(firstBtn).toBeFocused();
+    await a.keyboard.press('ArrowRight'); // -> Gostei
+    await expect(a.getByRole('button', { name: 'Gostei', exact: true })).toBeFocused();
+    await a.keyboard.press('ArrowDown'); // -> Brasil (+3)
+    await expect(a.getByRole('button', { name: 'Brasil', exact: true })).toBeFocused();
+    await a.keyboard.press('ArrowDown'); // -> Bolhas de sabão (+3)
+    await expect(a.getByRole('button', { name: 'Bolhas de sabão', exact: true })).toBeFocused();
+    await a.keyboard.press('ArrowRight'); // -> Foguete (+1)
+    await expect(a.getByRole('button', { name: 'Foguete', exact: true })).toBeFocused();
+    await a.keyboard.press('ArrowLeft'); // -> Bolhas de sabão (-1)
+    await expect(a.getByRole('button', { name: 'Bolhas de sabão', exact: true })).toBeFocused();
+    await a.keyboard.press('ArrowUp'); // -> Brasil (-3)
+    await expect(a.getByRole('button', { name: 'Brasil', exact: true })).toBeFocused();
+    await a.keyboard.press('Home'); // -> Aplausos
+    await expect(a.getByRole('button', { name: 'Aplausos', exact: true })).toBeFocused();
+    await a.keyboard.press('End'); // -> Foguete
+    await expect(a.getByRole('button', { name: 'Foguete', exact: true })).toBeFocused();
+
+    // Verify no horizontal overflow at 320px
+    const overflow320 = await b.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+    expect(overflow320).toBe(true);
+
+    // Verify 390px responsive behavior, layout without overflow, and screenshot
+    await b.setViewportSize({ width: 390, height: 844 });
+    await b.mouse.move(0, 0);
+    await expect(b.getByRole('button', { name: 'Brasil', exact: true })).toBeVisible();
+    await b.screenshot({ animations: 'disabled', path: '/tmp/f07-mobile-390-picker.png' });
+    await b.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-mobile-390-picker.png' });
+    const overflow390 = await b.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+    expect(overflow390).toBe(true);
+    await b.setViewportSize({ width: 320, height: 740 });
+    await b.mouse.move(0, 0);
+    await expect(b.getByRole('button', { name: 'Brasil', exact: true })).toBeVisible();
+
+    // Send new reactions: Brasil on desktop, Bolhas de sabão on mobile
+    await Promise.all([
+      a.getByRole('button', { name: 'Brasil', exact: true }).click(),
+      b.getByRole('button', { name: 'Bolhas de sabão', exact: true }).click()
+    ]);
     await expect(a.getByTestId('reaction-event')).toHaveCount(2);
     await expect(b.getByTestId('reaction-event')).toHaveCount(2);
-    await a.screenshot({ animations: 'disabled', path: '/tmp/f06-reactions.png' });
+    await expect(a.getByTestId('reaction-event').getByText('🇧🇷')).toBeVisible();
+    await expect(a.getByTestId('reaction-event').getByText('🫧')).toBeVisible();
+    await expect(a.getByTestId('reaction-event').getByText(/reagiu: Brasil/)).toBeVisible();
+    await expect(a.getByTestId('reaction-event').getByText(/reagiu: Bolhas de sabão/)).toBeVisible();
+
+    await a.screenshot({ animations: 'disabled', path: '/tmp/f07-reactions.png' });
+    await a.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-reactions.png' });
+    await b.screenshot({ animations: 'disabled', path: '/tmp/f07-reactions-mobile.png' });
+    await b.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-reactions-mobile.png' });
+
+    // Send remaining new reactions: Foguete, Dedo do meio, Não gostei
+    await a.getByRole('button', { name: 'Reagir', exact: true }).click();
+    await a.getByRole('button', { name: 'Foguete', exact: true }).click();
+    await expect(a.getByTestId('reaction-event').getByText('🚀')).toBeVisible();
+
+    await a.getByRole('button', { name: 'Reagir', exact: true }).click();
+    await a.getByRole('button', { name: 'Dedo do meio', exact: true }).click();
+    await expect(a.getByTestId('reaction-event').getByText('🖕')).toBeVisible();
+
+    await a.getByRole('button', { name: 'Reagir', exact: true }).click();
+    await a.getByRole('button', { name: 'Não gostei', exact: true }).click();
+    await expect(a.getByTestId('reaction-event').getByText('👎')).toBeVisible();
+
     await expect(a.getByTestId('reaction-event')).toHaveCount(0, { timeout: 6000 });
     await late.goto('/room/e2e-interactions');
     await late.getByRole('button', { name: 'Abrir chat', exact: true }).click();
@@ -49,12 +130,31 @@ test('interaction controls remain inside fullscreen and Cinema with multiple pre
   await expect(page.getByRole('textbox', { name: 'Mensagem', exact: true })).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: '/tmp/f06-cinema-chat.png' });
   await page.getByRole('button', { name: 'Fechar chat' }).click();
+
+  // Test reaction picker inside Cinema mode
+  await page.getByRole('button', { name: 'Reagir', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Foguete', exact: true })).toBeVisible();
+  expect(await page.getByRole('button', { name: 'Foguete', exact: true }).evaluate(node => {
+    return document.querySelector('.stage-main-container')?.contains(node) || document.body.contains(node);
+  })).toBe(true);
+  await page.screenshot({ animations: 'disabled', path: '/tmp/f07-cinema-picker.png' });
+  await page.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-cinema-picker.png' });
+  await page.getByRole('button', { name: 'Reagir', exact: true }).click();
+
   await page.getByRole('button', { name: /Tela cheia/i }).first().click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   await page.getByRole('button', { name: 'Abrir chat', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Mensagem', exact: true })).toBeVisible();
   expect(await page.getByRole('textbox', { name: 'Mensagem', exact: true }).evaluate(node => document.fullscreenElement?.contains(node))).toBe(true);
   await page.screenshot({ animations: 'disabled', path: '/tmp/f06-fullscreen-chat.png' });
+  await page.getByRole('button', { name: 'Fechar chat' }).click();
+
+  // Test reaction picker inside fullscreen mode
+  await page.getByRole('button', { name: 'Reagir', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Brasil', exact: true })).toBeVisible();
+  expect(await page.getByRole('button', { name: 'Brasil', exact: true }).evaluate(node => document.fullscreenElement?.contains(node))).toBe(true);
+  await page.screenshot({ animations: 'disabled', path: '/tmp/f07-fullscreen-picker.png' });
+  await page.screenshot({ animations: 'disabled', path: '/home/aldobmigge/.gemini/antigravity-cli/brain/b861a022-b031-484d-a39a-49bf440c1b2d/f07-fullscreen-picker.png' });
   await page.keyboard.press('Escape');
 });
 
@@ -101,3 +201,4 @@ test('reconnection preserves accepted chat without replay; rejection keeps the d
     await expect(page.getByRole('log').locator('article')).toHaveCount(0);
   } finally { await context.close(); }
 });
+

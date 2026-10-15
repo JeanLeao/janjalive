@@ -17,14 +17,14 @@
 
 /* ---- Seletor de reações ---- */
 .popover { padding: 6px; background: #161b22; border: 1px solid rgba(255,255,255,.12); color: #e6edf3; }
-.picker { display: flex; gap: 2px; }
+.picker { display: grid; grid-template-columns: repeat(3, 44px); gap: 4px; }
 .reactionButton { width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; font-size: 24px; line-height: 1; cursor: pointer; transition: background-color .12s ease, transform .12s ease; }
 .reactionButton span { display: block; transition: transform .12s ease; }
 .reactionButton:hover:not(:disabled) { background: rgba(255,255,255,.1); }
 .reactionButton:hover:not(:disabled) span { transform: scale(1.18); }
 .reactionButton:active:not(:disabled) { background: rgba(37,99,235,.28); }
 .reactionButton:disabled { opacity: .4; cursor: default; }
-.pickerHint { margin: 4px 6px 2px; color: #a9b4c2; font-size: 11px; }
+.pickerHint { margin: 6px 4px 2px; color: #a9b4c2; font-size: 11px; text-align: center; }
 
 /* ---- Reações temporárias ---- */
 .reactions { position: absolute; left: 16px; bottom: 84px; z-index: 24; pointer-events: none; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: min(240px, calc(100% - 32px)); }

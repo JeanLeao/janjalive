@@ -19,7 +19,7 @@ async function connect(app) {
   }};
 }
 const chat = (text = 'Olá') => ({ type: 'send-chat', requestId: randomUUID(), text });
-const reaction = () => ({ type: 'send-reaction', requestId: randomUUID(), reaction: 'like' });
+const reaction = (r = 'like') => ({ type: 'send-reaction', requestId: randomUUID(), reaction: r });
 
 test('interactions: authoritative identity, isolation, no history, validation, limits and recovery', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
@@ -43,8 +43,15 @@ test('interactions: authoritative identity, isolation, no history, validation, l
   a.send(chat('x'.repeat(1001))); await a.next('error');
   for (let i = 0; i < 3; i++) { a.send(chat()); await a.next('chat-message'); await b.next('chat-message'); }
   a.send(chat()); await a.next('interaction-rejected');
-  for (let i = 0; i < 8; i++) { a.send(reaction()); await a.next('reaction'); await b.next('reaction'); }
-  a.send(reaction()); await a.next('interaction-rejected');
+  const sampleReactions = ['applause', 'like', 'heart', 'celebrate', 'brazil', 'dislike', 'middle-finger', 'bubbles'];
+  for (const r of sampleReactions) {
+    a.send(reaction(r));
+    const recA = await a.next('reaction');
+    const recB = await b.next('reaction');
+    assert.equal(recA.reaction, r);
+    assert.equal(recB.reaction, r);
+  }
+  a.send(reaction('rocket')); await a.next('interaction-rejected');
   const replacement = await connect(app);
   replacement.send({ type: 'join', roomId: 'talk', peerId: 'a', reconnectToken: peers.reconnectToken });
   await replacement.next('peers');
