@@ -1068,6 +1068,21 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await expect(dialog).toContainText('Nitidez · Equilibrado · 20 FPS');
       await expect(dialog).toContainText('Resolução desejada: 1920 × 1080');
       await expect(dialog).toContainText('Captura observada: 640 × 360');
+      const details = dialog.locator('summary');
+      await expect(details).toContainText('1080p · 20 FPS · 3 Mbps');
+      await expect(dialog.locator('details')).not.toHaveAttribute('open', '');
+      const scrollArea = dialog.locator('video').locator('..');
+      expect(await scrollArea.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
+      const preview = await dialog.locator('video').boundingBox();
+      expect(preview!.height).toBeGreaterThan(100);
+      // Let the participant notification leave before capturing the full composition.
+      await expect(host.getByText('Visitante entrou na sala.', { exact: true })).toBeHidden();
+      await host.screenshot({ path: test.info().outputPath(`preview-default-${viewport.width}.png`), animations: 'disabled' });
+      await details.focus();
+      await host.keyboard.press('Enter');
+      await expect(dialog.getByText('Captura observada: 640 × 360', { exact: true })).toBeVisible();
+      await host.screenshot({ path: test.info().outputPath(`preview-details-${viewport.width}.png`), animations: 'disabled' });
+      await host.keyboard.press('Enter');
       await host.getByLabel('Nível de qualidade').selectOption('ultra');
       await expect(dialog).toContainText('Resolução desejada: 2560 × 1440');
       await host.getByRole('radio', { name: 'Nitidez', exact: true }).focus();
@@ -1080,11 +1095,14 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       expect(await host.evaluate(() => (window as any).testPeers.flatMap((pc: RTCPeerConnection) => pc.getSenders()).filter((sender: RTCRtpSender) => sender.track))).toHaveLength(0);
       await expect(viewer.locator('video')).toHaveCount(0);
       await host.getByLabel('Limite de FPS').focus();
-      await host.keyboard.press('Tab'); // Cancel follows quality controls.
+      await host.keyboard.press('Tab');
+      await expect(details).toBeFocused();
+      await host.keyboard.press('Tab'); // Cancel follows the technical disclosure.
       await expect(host.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused();
       await host.keyboard.press('Tab');
       await expect(host.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeFocused();
       const observed = dialog.getByText('Captura observada: 640 × 360', { exact: true });
+      await details.click();
       await observed.scrollIntoViewIfNeeded();
       await expect(observed).toBeInViewport();
       const observedBox = await observed.boundingBox();
@@ -1094,6 +1112,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       const action = await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).boundingBox();
       expect(action!.height).toBeGreaterThanOrEqual(44);
       expect(action!.y + action!.height).toBeLessThanOrEqual(viewport.height);
+      await details.click();
+      await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).focus();
       await host.screenshot({ path: test.info().outputPath(`preview-${viewport.width}.png`), animations: 'disabled' });
       await test.info().attach('preview-quality', { path: test.info().outputPath(`preview-${viewport.width}.png`), contentType: 'image/png' });
       if (viewport.width < 500) await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).tap();
