@@ -250,9 +250,23 @@ export function RoomStage({
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
-        .stage-view-controls { position: absolute; bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 74px); right: 16px; z-index: 20; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; max-width: calc(100% - 24px); padding: 4px; background: rgba(13, 17, 23, .9); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; }
+        .stage-view-controls {
+          position: absolute;
+          bottom: max(16px, env(safe-area-inset-bottom, 0px), var(--stage-dock-clearance, 0px));
+          right: max(16px, env(safe-area-inset-right, 0px));
+          max-width: calc(100% - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px)));
+          z-index: 20;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 4px;
+          padding: 4px;
+          background: rgba(13, 17, 23, .9);
+          border: 1px solid rgba(255,255,255,.1);
+          border-radius: 8px;
+        }
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
-        .stage-main-container:fullscreen .fullscreen-toggle-wrapper { bottom: max(16px, env(safe-area-inset-bottom)) !important; }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
         }
@@ -289,12 +303,6 @@ export function RoomStage({
           }
           .watching-participants-box {
             display: none !important;
-          }
-        }
-        @media (max-width: 600px) {
-          .fullscreen-toggle-wrapper {
-            bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 74px);
-            right: 12px !important;
           }
         }
       `}</style>
@@ -487,10 +495,39 @@ function SpotlightVideoPlayer({
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
   const zoom = useVideoZoom(videoRef, stream);
   const pip = usePictureInPicture(videoRef, stream);
+  const controlsRef = useRef<HTMLDivElement>(null);
+
+  // Lift the bar only when it would overlap the central dock.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const canvas = controls?.parentElement;
+    const dock = controls?.ownerDocument.querySelector<HTMLElement>('.floating-dock-wrapper');
+    if (!controls || !canvas || !dock) return;
+    const positionControls = () => {
+      const bar = controls.getBoundingClientRect();
+      const dockBounds = dock.getBoundingClientRect();
+      const overlapsHorizontally = bar.left < dockBounds.right && bar.right > dockBounds.left;
+      const clearance = !isFullscreen && dockBounds.width > 0 && overlapsHorizontally
+        ? Math.max(0, canvas.getBoundingClientRect().bottom - dockBounds.top + 12)
+        : 0;
+      controls.style.setProperty('--stage-dock-clearance', `${clearance}px`);
+    };
+    const observer = new ResizeObserver(positionControls);
+    observer.observe(controls);
+    observer.observe(canvas);
+    observer.observe(dock);
+    window.addEventListener('resize', positionControls);
+    positionControls();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionControls);
+      controls.style.removeProperty('--stage-dock-clearance');
+    };
+  }, [isFullscreen]);
 
   return (
     <>
-    <Box className="stage-view-controls fullscreen-toggle-wrapper" role="group" aria-label="Visualização da transmissão">
+    <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
       {onToggleCinema && (
         <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
           <Button
