@@ -198,3 +198,16 @@ test('protocol: identifies terminal WebSocket close codes and validates ErrorMes
   });
   assert.equal(peersWithToken.success, true);
 });
+
+test('protocol: sharing accepts explicit pause and legacy messages without pause', () => {
+  const legacy = { type: 'update-sharing', active: true, hasAudio: true, audioMuted: true };
+  assert.equal(ClientMessageSchema.safeParse(legacy).success, true);
+  const paused = { ...legacy, paused: true, streamId: 'capture-1' };
+  assert.equal(ClientMessageSchema.parse(paused).paused, true);
+  assert.equal(ClientMessageSchema.safeParse({ ...paused, paused: 'yes' }).success, false);
+  const snapshot = ServerMessageSchema.parse({
+    type: 'peers', peers: ['presenter'], count: 1,
+    participants: [{ peerId: 'presenter', sharing: { active: true, paused: true, hasAudio: true, audioMuted: true } }],
+  });
+  assert.equal(snapshot.participants[0].sharing.paused, true);
+});

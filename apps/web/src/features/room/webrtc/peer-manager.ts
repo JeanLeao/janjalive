@@ -453,6 +453,7 @@ export class PeerManager {
           peer.videoSender = peer.pc.addTrack(videoTrack, stream);
         }
 
+        if (this.localStream !== stream) return;
         if (peer.audioSender) {
           await peer.audioSender.replaceTrack(audioTrack || null);
         } else if (audioTrack) {
@@ -482,7 +483,11 @@ export class PeerManager {
         if (this.peers.get(peer.id) !== peer) return;
         await Promise.all([peer.videoSender, peer.audioSender].map(async (sender) => {
           try { await sender?.replaceTrack(null); }
-          catch (err: any) { this.options.logger?.log('replace-null-track-error', { peer: peer.id, message: err?.message }); }
+          catch (err: any) {
+            this.options.logger?.log('replace-null-track-error', { peer: peer.id, message: err?.message });
+            this.removePeer(peer.id);
+            throw err;
+          }
         }));
       });
       return peer.signalChain;

@@ -20,11 +20,17 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ---
 
+## Prévia, pausa e encerramento
+
+**Compartilhar tela** abre o seletor nativo do navegador. A captura escolhida aparece em uma prévia local silenciosa, com indicação de áudio disponível. Nenhuma mídia é publicada antes de **Entrar ao vivo**. **Cancelar prévia**, fechar a prévia ou sair da sala encerra as tracks; uma nova tentativa solicita outra captura.
+
+**Pausar** suspende o envio de vídeo e áudio, mantendo a captura do navegador. Os espectadores veem **Transmissão pausada**, inclusive ao entrar durante a pausa. **Retomar** reutiliza a captura válida e preserva o mudo; **Parar** encerra a captura definitivamente. O botão nativo de encerramento do navegador também funciona durante prévia e pausa. Uma falha ao suspender o envio encerra a captura por segurança.
+
 ## Modos de visualização
 
 Na barra do palco, **Modo Cinema** recolhe o cabeçalho e as miniaturas para ampliar a transmissão dentro da página. O dock continua disponível; **Transmissões** permite abrir as miniaturas e trocar o destaque. O botão **Sair do Modo Cinema** restaura o layout. A preferência de Cinema e o zoom são preservados ao entrar e sair de tela cheia.
 
-**Janela flutuante (PiP)** usa o vídeo principal na janela nativa do navegador, quando disponível. A ativação é manual; o controle fica indisponível quando o navegador ou o vídeo não permitem PiP. Trocar o destaque, substituir ou encerrar a transmissão e sair da sala encerram o PiP; uma nova ativação é manual. Reconexões que mantêm o stream não solicitam outra janela.
+**Janela flutuante (PiP)** usa o vídeo principal na janela nativa do navegador, quando disponível. A ativação é manual; o controle fica indisponível quando o navegador ou o vídeo não permitem PiP. Trocar o destaque, pausar, substituir ou encerrar a transmissão e sair da sala encerram o PiP; uma nova ativação é manual. Reconexões que mantêm o stream não solicitam outra janela.
 
 O PiP pode mostrar o vídeo sem zoom CSS, sobreposições ou controles da página. A disponibilidade e a coexistência com fullscreen dependem do navegador; o estado do controle acompanha os eventos nativos. Há detecção da API padrão e do modo de apresentação WebKit, sem garantia de suporte em todos os dispositivos.
 

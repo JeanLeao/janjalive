@@ -46,7 +46,8 @@ export interface RoomStageProps {
 
 interface StreamItem {
   id: string; // 'local' or peerId
-  stream: MediaStream;
+  stream: MediaStream | null;
+  paused?: boolean;
   isLocal: boolean;
   displayName: string;
   hasAudio: boolean;
@@ -101,6 +102,7 @@ export function RoomStage({
   if (isSharing && localStream) {
     const localPart = participants.find((p) => p.isLocal);
     streamItems.push({
+      paused: participants.find(p => p.isLocal)?.isPaused,
       id: 'local',
       stream: localStream,
       isLocal: true,
@@ -112,12 +114,20 @@ export function RoomStage({
   for (const remote of remoteStreams) {
     const remotePart = participants.find((p) => p.peerId === remote.peerId);
     streamItems.push({
+      paused: remotePart?.isPaused,
       id: remote.peerId,
       stream: remote.stream,
       isLocal: false,
       displayName: formatDisplayName(remotePart?.nickname, false),
       hasAudio: remote.stream.getAudioTracks().length > 0,
     });
+  }
+
+  for (const participant of participants) {
+    if (!participant.isLocal && participant.isSharing && participant.isPaused && !streamItems.some(item => item.id === participant.peerId)) {
+      streamItems.push({ id: participant.peerId, stream: null, paused: true, isLocal: false,
+        displayName: formatDisplayName(participant.nickname, false), hasAudio: false });
+    }
   }
 
   // Active presentation spotlight
@@ -322,7 +332,7 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
-          stream={activeStream.stream}
+          stream={activeStream.paused ? null : activeStream.stream}
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
           onRetry={() => onRetryPeer?.(activeStream.id)}
@@ -370,14 +380,14 @@ export function RoomStage({
             {getInitials(activeStream.displayName)}
           </Box>
           <Text size="xs" fw={600} c="#fff">
-            {activeStream.displayName} · Transmitindo
+            {activeStream.displayName} · {activeStream.paused ? 'Pausado' : 'Transmitindo'}
           </Text>
           <Box
             style={{
               width: 6,
               height: 6,
               borderRadius: '50%',
-              backgroundColor: '#22c55e',
+              backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
             }}
           />
         </Box>
@@ -477,7 +487,7 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
-  stream: MediaStream;
+  stream: MediaStream | null;
   isLocal: boolean;
   isCinema: boolean;
   isFullscreen: boolean;
@@ -566,7 +576,7 @@ function SpotlightVideoPlayer({
       >
         <Button
           variant="subtle" color="gray" aria-label="Reduzir zoom"
-          disabled={zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
+          disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconMinus size={16} aria-hidden /></Button>
         <Text size="xs" aria-live="polite" style={{ minWidth: 32, fontSize: 11, textAlign: 'center' }}>
@@ -574,12 +584,12 @@ function SpotlightVideoPlayer({
         </Text>
         <Button
           variant="subtle" color="gray" aria-label="Ampliar zoom"
-          disabled={zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
+          disabled={!stream || zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={16} aria-hidden /></Button>
         <Button
           variant="subtle" color="gray" aria-label="Restaurar enquadramento"
-          disabled={zoom.scale === 1} onClick={() => zoom.changeZoom()}
+          disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom()}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconReset size={16} aria-hidden /></Button>
       </Box>
@@ -592,13 +602,17 @@ function SpotlightVideoPlayer({
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
     <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
-      <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>
+      {stream && <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>}
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
     <Box ref={zoom.viewportRef} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-    <video
+    {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
+      <Text c="white">Transmissão pausada</Text>
+      {isLocal && <Text c="dimmed" size="sm">O navegador continua capturando. Retome ou pare pelo controle de compartilhamento.</Text>}
+    </Box>}
+    {stream && <video
       ref={videoRef}
       autoPlay
       playsInline
@@ -611,7 +625,7 @@ function SpotlightVideoPlayer({
         objectFit: 'contain',
         display: 'block',
       }}
-    />
+    />}
     </Box>
     </>
   );
@@ -626,7 +640,7 @@ function PreviewCard({
   onClick: () => void;
 }) {
   // CRITICAL: Secondary preview thumbnails MUST ALWAYS BE MUTED to prevent duplicate/cacophony audio!
-  const videoRef = useMediaStreamVideo(streamItem.stream, true);
+  const videoRef = useMediaStreamVideo(streamItem.paused ? null : streamItem.stream, true);
 
   return (
     <UnstyledButton
@@ -670,6 +684,7 @@ function PreviewCard({
           }}
         />
 
+        {streamItem.paused && <Text pos="absolute" c="white" size="xs">Pausado</Text>}
         {/* Hover overlay hint */}
         <Box
           style={{

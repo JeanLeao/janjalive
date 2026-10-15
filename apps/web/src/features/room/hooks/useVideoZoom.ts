@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { constrainView, fitVideo, initialView, zoomAt } from '../utils/video-zoom';
 
 // Movement stays in refs and is painted once per frame; it never updates the session.
-export function useVideoZoom(videoRef: RefObject<HTMLVideoElement | null>, stream: MediaStream) {
+export function useVideoZoom(videoRef: RefObject<HTMLVideoElement | null>, stream: MediaStream | null) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const changeRef = useRef<(delta?: number) => void>(() => {});
   const [scale, setScale] = useState(1);

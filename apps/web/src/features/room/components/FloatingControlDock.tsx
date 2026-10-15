@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Button,
   Box,
   UnstyledButton,
   Tooltip,
@@ -18,6 +19,10 @@ import {
 } from './Icons';
 
 export interface FloatingControlDockProps {
+  capturePending?: boolean;
+  isPaused?: boolean;
+  pausePending?: boolean;
+  onTogglePause?: () => void;
   isSharing: boolean;
   onToggleShare: () => void;
   hasAudioTrack: boolean;
@@ -31,6 +36,10 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  capturePending,
+  isPaused,
+  pausePending,
+  onTogglePause,
   isSharing,
   onToggleShare,
   hasAudioTrack,
@@ -84,7 +93,7 @@ export function FloatingControlDock({
             max-width: calc(100vw - 16px) !important;
           }
           .floating-dock-bar {
-            gap: 6px !important;
+            gap: 2px !important;
             padding: 5px 8px !important;
           }
           .floating-dock-btn {
@@ -113,12 +122,12 @@ export function FloatingControlDock({
         {/* Share / Stop Share Button */}
         {canShareScreen === true && (
           <Tooltip
-            label={isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
+            label={capturePending ? 'Cancelar captura' : isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
             withArrow
           >
             <UnstyledButton
               onClick={onToggleShare}
-              aria-label={isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
+              aria-label={capturePending ? 'Cancelar captura' : isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela'}
               className="floating-dock-share-btn"
               style={{
                 display: 'flex',
@@ -137,9 +146,18 @@ export function FloatingControlDock({
             >
               {isSharing ? <IconStopShare size={18} /> : <IconScreen size={18} />}
               <Text size="xs" fw={600} c="#fff" visibleFrom="xs">
-                {isSharing ? 'Parar' : 'Compartilhar'}
+                {capturePending ? 'Cancelar' : isSharing ? 'Parar' : 'Compartilhar'}
               </Text>
             </UnstyledButton>
+          </Tooltip>
+        )}
+
+        {isSharing && (
+          <Tooltip label="Pausar interrompe a transmissão; o navegador continua capturando." multiline w={280} withArrow>
+            <Button variant="subtle" color="gray" px={8} h={42} loading={pausePending} onClick={onTogglePause}
+              aria-label={isPaused ? 'Retomar transmissão' : 'Pausar transmissão'}>
+              {isPaused ? 'Retomar' : 'Pausar'}
+            </Button>
           </Tooltip>
         )}
 

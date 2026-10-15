@@ -422,3 +422,73 @@ for (const reconnectingId of ['host', 'viewer']) {
     } finally { managers.host.dispose(); managers.viewer.dispose(); }
   });
 }
+
+test('pause detaches both senders, retains capture and blocks new/recovered peers until resume', async () => {
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => true,
+    onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  manager.setParticipants(['viewer']);
+  const stream = new MockMediaStream();
+  await manager.attachLocalStream(stream);
+  await manager.detachLocalStream();
+  for (const peer of manager.getPeers().values()) {
+    assert.equal(peer.videoSender.track, null);
+    if (peer.audioSender) assert.equal(peer.audioSender.track, null);
+  }
+  manager.addParticipant('late');
+  const late = manager.getOrCreatePeer('late');
+  assert.ok(late.pc.getSenders().every(sender => !sender.track));
+  manager.recoverPeer('viewer');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(manager.getPeer('viewer').videoSender.track, null);
+  manager.resetPeer('viewer');
+  assert.ok(manager.getOrCreatePeer('viewer').pc.getSenders().every(sender => !sender.track));
+  await manager.attachLocalStream(stream);
+  assert.equal(manager.getPeer('viewer').videoSender.track, stream.getVideoTracks()[0]);
+  manager.dispose();
+});
+
+test('failed pause closes the affected connection instead of retaining a publishing sender', async () => {
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => true,
+    onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  manager.setParticipants(['viewer']);
+  await manager.attachLocalStream(new MockMediaStream());
+  const peer = manager.getPeer('viewer');
+  peer.videoSender.replaceTrack = async () => { throw new Error('detach failed'); };
+  await assert.rejects(manager.detachLocalStream(), /detach failed/);
+  assert.equal(peer.pc.connectionState, 'closed');
+  assert.equal(manager.getPeer('viewer'), undefined);
+  manager.dispose();
+});
+
+test('pause queued during video attachment drains both senders without attaching stale audio', async () => {
+  const manager = new PeerManager({
+    rtcConfig: {}, onSendSignal: () => true,
+    onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+  });
+  manager.setParticipants(['viewer']);
+  await manager.attachLocalStream(new MockMediaStream());
+  const peer = manager.getPeer('viewer');
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  peer.videoSender.replaceTrack = async track => {
+    entered();
+    await new Promise(resolve => { release = resolve; });
+    peer.videoSender.track = track;
+  };
+  const attachment = manager.attachLocalStream(new MockMediaStream());
+  await started;
+  const pause = manager.detachLocalStream();
+  release();
+  // The detach invokes replaceTrack(null) on the same serialized sender.
+  await new Promise(resolve => setImmediate(resolve));
+  release();
+  await Promise.all([attachment, pause]);
+  assert.equal(peer.videoSender.track, null);
+  if (peer.audioSender) assert.equal(peer.audioSender.track, null);
+  manager.dispose();
+});

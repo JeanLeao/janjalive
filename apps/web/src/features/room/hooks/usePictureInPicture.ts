@@ -9,7 +9,7 @@ type PresentationVideo = HTMLVideoElement & {
 const pendingDocuments = new WeakSet<Document>();
 
 // This hook owns only presentation, never the MediaStream or its tracks.
-export function usePictureInPicture(ref: RefObject<HTMLVideoElement | null>, stream: MediaStream) {
+export function usePictureInPicture(ref: RefObject<HTMLVideoElement | null>, stream: MediaStream | null) {
   const [active, setActive] = useState(false);
   const [available, setAvailable] = useState(false);
   const [pending, setPending] = useState(false);
@@ -18,7 +18,12 @@ export function usePictureInPicture(ref: RefObject<HTMLVideoElement | null>, str
 
   useEffect(() => {
     const video = ref.current as PresentationVideo | null;
-    if (!video) return;
+    if (!video || !stream) {
+      setActive(false);
+      setAvailable(false);
+      setPending(false);
+      return;
+    }
     let disposed = false;
     let busy = false;
     const standard = () => document.pictureInPictureEnabled && typeof video.requestPictureInPicture === 'function';
