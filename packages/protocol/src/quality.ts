@@ -12,7 +12,7 @@ export interface QualitySelection {
   profile: QualityProfileKey;
   fps: FrameRate;
 }
-export const DEFAULT_QUALITY: QualitySelection = { priority: 'sharpness', profile: 'balanced', fps: 20 };
+export const DEFAULT_QUALITY: QualitySelection = { priority: 'sharpness', profile: 'balanced', fps: 30 };
 export const QUALITY_PROFILES = {
   economy: { label: 'Econômico' },
   balanced: { label: 'Equilibrado' },

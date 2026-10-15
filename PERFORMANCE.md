@@ -2,7 +2,7 @@
 
 ## Prioridade, perfil e limite de FPS
 
-As definições são centralizadas em `packages/protocol/src/quality.ts`. O padrão é **Nitidez · Equilibrado · 20 FPS**. A gaveta apresenta prioridade visual, nível de qualidade e somente os limites de FPS válidos.
+As definições são centralizadas em `packages/protocol/src/quality.ts`. O padrão é **Nitidez · Equilibrado · 30 FPS**. A gaveta apresenta prioridade visual, nível de qualidade e somente os limites de FPS válidos.
 
 | Prioridade | Perfil | Resolução máxima | FPS selecionáveis | Bitrate máximo por conexão |
 |---|---|---:|---|---:|

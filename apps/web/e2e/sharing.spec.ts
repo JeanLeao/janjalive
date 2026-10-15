@@ -999,8 +999,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await startLive(host); await frames(viewer);
       await openSettings();
       await expect(host.getByLabel('Nível de qualidade')).toHaveValue('balanced');
-      await expect(host.getByLabel('Limite de FPS')).toHaveValue('20');
-      // Native radio keyboard interaction switches priority and clamps 20 -> 30.
+      await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
+      // Switching priority from sharpness to motion preserves valid 30 FPS.
       await host.getByRole('radio', { name: 'Nitidez', exact: true }).focus();
       await host.keyboard.press('ArrowRight');
       await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
@@ -1065,12 +1065,14 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
       const dialog = host.getByRole('dialog');
-      await expect(dialog).toContainText('Nitidez · Equilibrado · 20 FPS');
+      await expect(dialog).toContainText('Nitidez · Equilibrado · 30 FPS');
+      await expect(dialog).toContainText('1080p · 3 Mbps');
       await expect(dialog).toContainText('Resolução desejada: 1920 × 1080');
       await expect(dialog).toContainText('Captura observada: 640 × 360');
       const details = dialog.locator('summary');
-      await expect(details).toContainText('1080p · 20 FPS · 3 Mbps');
+      await expect(details).toContainText('Detalhes da captura');
       await expect(dialog.locator('details')).not.toHaveAttribute('open', '');
+      await expect(dialog.getByLabel('Nível de qualidade')).toHaveCount(0);
       const scrollArea = dialog.locator('video').locator('..');
       expect(await scrollArea.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
       const preview = await dialog.locator('video').boundingBox();
@@ -1083,6 +1085,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await expect(dialog.getByText('Captura observada: 640 × 360', { exact: true })).toBeVisible();
       await host.screenshot({ path: test.info().outputPath(`preview-details-${viewport.width}.png`), animations: 'disabled' });
       await host.keyboard.press('Enter');
+      await dialog.getByRole('button', { name: 'Alterar qualidade', exact: true }).click();
+      await expect(dialog.getByLabel('Nível de qualidade')).toBeVisible();
       await host.getByLabel('Nível de qualidade').selectOption('ultra');
       await expect(dialog).toContainText('Resolução desejada: 2560 × 1440');
       await host.getByRole('radio', { name: 'Nitidez', exact: true }).focus();
@@ -1090,6 +1094,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await expect(host.getByLabel('Limite de FPS')).toHaveValue('30');
       await host.getByLabel('Limite de FPS').selectOption('60');
       await expect(dialog).toContainText('Fluidez · Ultra · 60 FPS');
+      await expect(dialog).toContainText('1080p · 8 Mbps');
       await expect(host.getByRole('button', { name: 'Entrar ao vivo', exact: true })).toBeEnabled();
       expect(await host.evaluate(() => (window as any).testCaptures.length)).toBe(1);
       expect(await host.evaluate(() => (window as any).testPeers.flatMap((pc: RTCPeerConnection) => pc.getSenders()).filter((sender: RTCRtpSender) => sender.track))).toHaveLength(0);
@@ -1143,6 +1148,7 @@ test('Preview serializes rapid quality changes, blocks pending publication and r
   await page.goto('/room/preview-quality-pending');
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
   await expect(page.getByRole('dialog')).toContainText('Captura observada:');
+  await page.getByRole('button', { name: 'Alterar qualidade', exact: true }).click();
   await page.evaluate(() => { (window as any).testDelayConstraints = true; });
   await page.getByLabel('Nível de qualidade').selectOption('ultra');
   await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
@@ -1176,4 +1182,84 @@ test('Preview serializes rapid quality changes, blocks pending publication and r
   await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('O navegador não aplicou todos os limites', { exact: false })).toHaveCount(0);
+});
+
+test('Preview modal maintains visual stability and zero tremor during async quality transitions', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+      configurable: true,
+      value: async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1280; canvas.height = 720;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 1280, 720);
+        const stream = canvas.captureStream(30);
+        const track = stream.getVideoTracks()[0];
+        const origApply = track.applyConstraints.bind(track);
+        track.applyConstraints = async (c) => {
+          await new Promise((r) => setTimeout(r, 250));
+          return origApply(c);
+        };
+        return stream;
+      },
+    });
+  });
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/room/preview-tremor-regression');
+  await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Nitidez · Equilibrado · 30 FPS');
+
+  const getMetrics = async () => {
+    const dialogBox = await dialog.boundingBox();
+    const videoBox = await dialog.locator('video').boundingBox();
+    return { dialogBox, videoBox };
+  };
+
+  const initial = await getMetrics();
+
+  // Expand controls
+  await dialog.getByRole('button', { name: 'Alterar qualidade', exact: true }).click();
+  await expect(dialog.getByLabel('Nível de qualidade')).toBeVisible();
+
+  const expanded = await getMetrics();
+  // Anchored top: modal top y and video top y must stay completely stable
+  expect(expanded.dialogBox!.y).toBeCloseTo(initial.dialogBox!.y, 0.1);
+  expect(expanded.videoBox!.y).toBeCloseTo(initial.videoBox!.y, 0.1);
+
+  // Toggle Fluidez with async constraints
+  await page.getByText('Fluidez', { exact: true }).click();
+  await page.waitForTimeout(60);
+  await expect(page.getByRole('status')).toContainText('Aplicando qualidade');
+  const duringPending = await getMetrics();
+  expect(duringPending.dialogBox!.y).toBeCloseTo(expanded.dialogBox!.y, 0.1);
+  expect(duringPending.videoBox!.y).toBeCloseTo(expanded.videoBox!.y, 0.1);
+
+  await expect(page.getByRole('status')).not.toContainText('Aplicando qualidade');
+  const afterFluidez = await getMetrics();
+  expect(afterFluidez.dialogBox!.y).toBeCloseTo(expanded.dialogBox!.y, 0.1);
+  expect(afterFluidez.videoBox!.y).toBeCloseTo(expanded.videoBox!.y, 0.1);
+  await expect(dialog).toContainText('Fluidez · Equilibrado · 30 FPS');
+
+  // Toggle Nitidez back
+  await page.getByText('Nitidez', { exact: true }).click();
+  await page.waitForTimeout(60);
+  const duringPendingBack = await getMetrics();
+  expect(duringPendingBack.dialogBox!.y).toBeCloseTo(expanded.dialogBox!.y, 0.1);
+  expect(duringPendingBack.videoBox!.y).toBeCloseTo(expanded.videoBox!.y, 0.1);
+
+  await expect(page.getByRole('status')).not.toContainText('Aplicando qualidade');
+  const afterNitidez = await getMetrics();
+  expect(afterNitidez.dialogBox!.y).toBeCloseTo(expanded.dialogBox!.y, 0.1);
+  expect(afterNitidez.videoBox!.y).toBeCloseTo(expanded.videoBox!.y, 0.1);
+
+  // Collapse controls
+  await dialog.getByRole('button', { name: 'Ocultar qualidade', exact: true }).click();
+  await expect(dialog.getByLabel('Nível de qualidade')).toHaveCount(0);
+  const collapsedAgain = await getMetrics();
+  expect(collapsedAgain.dialogBox!.y).toBeCloseTo(initial.dialogBox!.y, 0.1);
+  expect(collapsedAgain.videoBox!.y).toBeCloseTo(initial.videoBox!.y, 0.1);
 });

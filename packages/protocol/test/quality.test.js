@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_QUALITY, normalizeQuality, resolveQuality, validFrameRates, downgradeQuality } from '../dist/index.js';
 
 test('approved quality matrix and default', () => {
-  assert.deepEqual(DEFAULT_QUALITY, { priority: 'sharpness', profile: 'balanced', fps: 20 });
+  assert.deepEqual(DEFAULT_QUALITY, { priority: 'sharpness', profile: 'balanced', fps: 30 });
   const rows = [
     ['sharpness', 'economy', 1280, 720, 1600000, [20, 30]],
     ['sharpness', 'balanced', 1920, 1080, 3000000, [20, 30]],
@@ -30,5 +30,6 @@ test('transitions preserve valid choices and clamp invalid FPS; downgrade preser
   const balanced = downgradeQuality(ultra);
   assert.deepEqual(balanced, { ...ultra, profile: 'balanced' });
   assert.deepEqual(downgradeQuality(balanced), { priority: 'motion', profile: 'economy', fps: 30 });
-  assert.equal(normalizeQuality({ ...DEFAULT_QUALITY, profile: 'ultra' }).fps, 20);
+  assert.equal(normalizeQuality({ ...DEFAULT_QUALITY, profile: 'ultra' }).fps, 30);
+  assert.equal(normalizeQuality({ priority: 'sharpness', profile: 'ultra', fps: 20 }).fps, 20);
 });
