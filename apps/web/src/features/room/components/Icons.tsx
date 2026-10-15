@@ -456,3 +456,11 @@ export function IconMinus({ size = 20, ...props }: IconProps) {
 export function IconReset({ size = 20, ...props }: IconProps) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6" /></svg>;
 }
+
+export function IconCinema({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 8h20M2 16h20" /></svg>;
+}
+
+export function IconPictureInPicture({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" /></svg>;
+}
