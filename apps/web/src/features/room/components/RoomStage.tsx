@@ -7,6 +7,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
+import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import {
   formatDisplayName,
@@ -15,6 +16,9 @@ import {
 } from '../utils/avatar';
 import {
   IconScreen,
+  IconPlus,
+  IconMinus,
+  IconReset,
   IconMaximize,
   IconMinimize,
   IconSignal,
@@ -275,6 +279,7 @@ export function RoomStage({
             bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 58px) !important;
             right: 12px !important;
           }
+          .zoom-controls.fullscreen-toggle-wrapper { right: 60px !important; }
         }
       `}</style>
       {/* Main Spotlight Canvas */}
@@ -314,7 +319,7 @@ export function RoomStage({
             padding: '5px 12px 5px 6px',
             borderRadius: '20px',
             zIndex: 10,
-            pointerEvents: 'none',
+            pointerEvents: 'auto',
           }}
         >
           <Box
@@ -384,8 +389,8 @@ export function RoomStage({
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
               style={{
-                width: 36,
-                height: 36,
+                width: 44,
+                height: 44,
                 borderRadius: '8px',
                 display: 'flex',
                 alignItems: 'center',
@@ -477,6 +482,7 @@ function SpotlightVideoPlayer({
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
   const [playback, setPlayback] = useState('Conectando');
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
+  const zoom = useVideoZoom(videoRef, stream);
 
   return (
     <>
@@ -486,6 +492,7 @@ function SpotlightVideoPlayer({
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
+    <Box ref={zoom.viewportRef} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
     <video
       ref={videoRef}
       autoPlay
@@ -500,6 +507,36 @@ function SpotlightVideoPlayer({
         display: 'block',
       }}
     />
+    </Box>
+    <Box
+      className="fullscreen-toggle-wrapper zoom-controls"
+      role="group"
+      aria-label="Zoom da transmissão"
+      style={{
+        position: 'absolute', bottom: 16, right: 68, zIndex: 10,
+        display: 'flex', alignItems: 'center', gap: 4,
+        background: 'rgba(13,17,23,.9)', borderRadius: 8,
+      }}
+    >
+      <Button
+        variant="subtle" color="gray" aria-label="Reduzir zoom"
+        disabled={zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
+        style={{ minWidth: 44, height: 44, padding: 0 }}
+      ><IconMinus size={18} aria-hidden /></Button>
+      <Text size="xs" aria-live="polite" style={{ minWidth: 36, textAlign: 'center' }}>
+        {Math.round(zoom.scale * 100)}%
+      </Text>
+      <Button
+        variant="subtle" color="gray" aria-label="Ampliar zoom"
+        disabled={zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
+        style={{ minWidth: 44, height: 44, padding: 0 }}
+      ><IconPlus size={18} aria-hidden /></Button>
+      <Button
+        variant="subtle" color="gray" aria-label="Restaurar enquadramento"
+        disabled={zoom.scale === 1} onClick={() => zoom.changeZoom()}
+        style={{ minWidth: 44, height: 44, padding: 0 }}
+      ><IconReset size={18} aria-hidden /></Button>
+    </Box>
     </>
   );
 }
