@@ -15,10 +15,24 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 - **Tela e áudio em sincronia:** Suporte a transmissão de vídeo e áudio da aba ou sistema com controle de mudo direto na interface.
 - **Sem captura de microfone:** O microfone pessoal **nunca é solicitado, capturado ou gravado**. A aplicação utiliza exclusivamente a API nativa `navigator.mediaDevices.getDisplayMedia()`.
 - **Múltiplas transmissões com palco dinâmico:** Se múltiplos participantes compartilharem a tela, o palco principal destaca uma transmissão com reprodutor em tamanho integral, enquanto as demais são exibidas em miniaturas clicáveis para alternância sem perda de conexão.
-- **Perfis de qualidade e adaptação:** Perfis ajustáveis (Econômico, Equilibrado e Alta Qualidade) com degradação automática em redes sob perda excessiva de pacotes.
+- **Perfis de qualidade e adaptação:** Prioridade Nitidez ou Fluidez, perfis Econômico, Equilibrado e Ultra e limites de 20/30/60 FPS conforme a combinação, com redução automática por perdas de envio. Veja a matriz em [PERFORMANCE.md](./PERFORMANCE.md).
 - **Diagnóstico em tempo real:** Métricas de latência (RTT), perda de pacotes, bitrate e conexões ativas visíveis diretamente na interface da sala.
 
 ---
+
+## Prévia, pausa e encerramento
+
+**Compartilhar tela** abre o seletor nativo do navegador. A captura escolhida aparece em uma prévia local silenciosa, com indicação de áudio disponível. Nenhuma mídia é publicada antes de **Entrar ao vivo**. **Cancelar prévia**, fechar a prévia ou sair da sala encerra as tracks; uma nova tentativa solicita outra captura.
+
+**Pausar** suspende o envio de vídeo e áudio, mantendo a captura do navegador. Os espectadores veem **Transmissão pausada**, inclusive ao entrar durante a pausa. **Retomar** reutiliza a captura válida e preserva o mudo; **Parar** encerra a captura definitivamente. O botão nativo de encerramento do navegador também funciona durante prévia e pausa. Uma falha ao suspender o envio encerra a captura por segurança.
+
+## Modos de visualização
+
+Na barra do palco, **Modo Cinema** recolhe o cabeçalho e as miniaturas para ampliar a transmissão dentro da página. O dock continua disponível; **Transmissões** permite abrir as miniaturas e trocar o destaque. O botão **Sair do Modo Cinema** restaura o layout. A preferência de Cinema e o zoom são preservados ao entrar e sair de tela cheia.
+
+**Janela flutuante (PiP)** usa o vídeo principal na janela nativa do navegador, quando disponível. A ativação é manual; o controle fica indisponível quando o navegador ou o vídeo não permitem PiP. Trocar o destaque, pausar, substituir ou encerrar a transmissão e sair da sala encerram o PiP; uma nova ativação é manual. Reconexões que mantêm o stream não solicitam outra janela.
+
+O PiP pode mostrar o vídeo sem zoom CSS, sobreposições ou controles da página. A disponibilidade e a coexistência com fullscreen dependem do navegador; o estado do controle acompanha os eventos nativos. Há detecção da API padrão e do modo de apresentação WebKit, sem garantia de suporte em todos os dispositivos.
 
 ## Estrutura do Monorepo
 
@@ -245,3 +259,31 @@ server {
 - [PERFORMANCE.md](./PERFORMANCE.md) — Perfis de qualidade de vídeo, adaptação conservadora e limites da arquitetura mesh.
 - [TURN.md](./TURN.md) — Mecanismos de credenciais temporárias TURN, configuração de firewall e comportamento de fallback.
 - [DEPLOY.md](./DEPLOY.md) — Guia de implantação e operação em servidor VPS Linux com proxy reverso.
+
+### Chat e reações efêmeros (F06 + F07)
+
+Chat e reações usam o WebSocket da sala, inclusive sem transmissão. O servidor
+atribui remetente, nickname, sala, horário e ID; o evento devolvido ao remetente
+confirma aceitação pelo servidor (não leitura ou entrega a todos). Texto é exibido
+literalmente. Quem entra depois não recebe mensagens anteriores.
+
+Os limites ficam em `INTERACTION_LIMITS`, em `packages/protocol/src/messages.ts`:
+texto com até 1000 unidades UTF-16, sem controles (exceto tab e quebra de linha)
+ou controles direcionais; 5 envios de chat e 8 reações por participante a cada
+janela móvel de 10 segundos. As cotas são independentes, somadas ao limitador geral
+de 100 mensagens WebSocket por segundo. Tentativas duplicadas também consomem cota;
+os últimos 64 IDs de solicitações são lembrados para impedir duplicação imediata.
+Cotas e IDs acompanham a identidade durante substituição de socket e reserva de
+reconexão, e são liberados ao sair ou expirar a reserva. Nenhum conteúdo de chat
+é mantido pelo servidor ou incluído nos diagnósticos.
+
+O cliente guarda até 200 mensagens apenas em memória, durante a sessão da sala,
+e mostra até 6 reações por 3 segundos, respeitando movimento reduzido. O chat
+permanece disponível no Cinema e dentro do contêiner de fullscreen do palco.
+PiP nativo contém apenas o vídeo; use a janela da sala para conversar ou reagir.
+
+Envios dependem de conexão e entrada confirmada na sala. Não há fila ou reenvio
+após reconexão; uma interrupção ou timeout de 8 segundos informa que o envio não
+foi confirmado. Uma confirmação tardia ainda pode aparecer no histórico, sem
+promessa de recuperação. Reações são descartadas na desconexão; o histórico local
+continua durante a reconexão, mas é limpo ao encerrar ou trocar a sessão/sala.

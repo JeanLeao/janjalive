@@ -1,111 +1,54 @@
-# Performance da Transmissão
+# Performance da transmissão
 
-Este documento descreve os perfis de qualidade de vídeo do Screen Room, os mecanismos de limitação de taxa e a política conservadora de adaptação automática de rede.
+## Prioridade, perfil e limite de FPS
 
----
+As definições são centralizadas em `packages/protocol/src/quality.ts`. O padrão é **Nitidez · Equilibrado · 30 FPS**. A gaveta apresenta prioridade visual, nível de qualidade e somente os limites de FPS válidos.
 
-## 1. Perfis de Qualidade
+| Prioridade | Perfil | Resolução máxima | FPS selecionáveis | Bitrate máximo por conexão |
+|---|---|---:|---|---:|
+| Nitidez | Econômico | 1280×720 | 20 / 30 | 1,6 Mbps |
+| Nitidez | Equilibrado | 1920×1080 | 20 / 30 | 3 Mbps |
+| Nitidez | Ultra | 2560×1440 | 20 / 30 | 6 Mbps |
+| Fluidez | Econômico | 1280×720 | 30 | 2 Mbps |
+| Fluidez | Equilibrado | 1280×720 | 30 / 60 | 4 Mbps |
+| Fluidez | Ultra | 1920×1080 | 30 / 60 | 8 Mbps |
 
-Os perfis de qualidade são definidos centralizadamente em `packages/protocol/src/quality.ts`:
+Esses valores são **tetos configurados**, não garantias de resolução, FPS ou bitrate entregue. Fontes menores não são ampliadas artificialmente. Ultra não significa 4K. Texto estático pode gerar poucos quadros e baixo bitrate mesmo com limites elevados.
 
-| Perfil | Resolução Máxima | FPS Máximo | Bitrate Máximo | Cenário de Uso Recomendado |
-|---|---:|---:|---:|---|
-| **Econômico** (`economy`) | 1280×720 (720p) | 15 FPS | 800 kbps (800.000 bps) | Conexões móveis, conexões com oscilação ou relay via TURN |
-| **Equilibrado** (`balanced` — padrão) | 1280×720 (720p) | 20 FPS | 1,5 Mbps (1.500.000 bps) | Apresentações de slides, navegação em sistemas e reuniões cotidianas |
-| **Alta Qualidade** (`high`) | 1920×1080 (1080p) | 20 FPS | 3,0 Mbps (3.000.000 bps) | Linhas de código, tipografia miúda e diagramas detalhados em conexões de alta velocidade |
+Nitidez prioriza textos, código e documentos com `contentHint = 'text'` e `degradationPreference = 'maintain-resolution'`. Fluidez prioriza movimento com `contentHint = 'motion'` e `maintain-framerate`. São indicações ao navegador, que pode ignorá-las ou não implementá-las.
 
-> [!NOTE]
-> Não há perfil configurado para 60 FPS nem ajuste contínuo de resolução sem degrau. O Screen Room prioriza legibilidade de texto estático e estabilidade da transmissão sobre altas taxas de quadros típicas de jogos eletrônicos.
+## Captura e envio
 
----
+- `getDisplayMedia()` continua chamado na interação do usuário, antes de qualquer espera. Solicita apenas tela/aba e áudio da fonte, sem câmera ou microfone. Não há recaptura automática ao alterar qualidade.
+- A seleção inicial solicita um envelope nativo de 60 FPS (`ideal` e `max`). Antes da prévia, `track.applyConstraints()` aplica o teto escolhido. Mesmo um `ideal: 20` inicial pode fixar a capacidade em 20 no Chromium; o envelope evita que Chromium fixe a capacidade nativa em 20 FPS e impeça aumentos posteriores sem recaptura. Resolução usa `ideal` e `max` desde a seleção. Ao atualizar uma track, os tetos respeitam as capacidades reportadas da fonte. Restrições impossíveis podem ser rejeitadas: a captura existente continua, a falha de verificação aparece no diagnóstico e o feedback não confirma aplicação integral.
+- Atualizações de constraints são serializadas por track. Atualizações dos senders usam a barreira do peer que também protege substituição de tracks e negociação. A configuração mais recente permanece como referência para publicação, retomada, troca de origem, novos espectadores e conexões recriadas.
+- Cada encoding de vídeo recebe `maxBitrate` e `maxFramerate` via `setParameters()`. A preferência de degradação é tentada e, em caso de rejeição, os limites são tentados novamente sem ela. Os parâmetros retornados são conferidos; aceitação não garante desempenho real.
+- Áudio e estado de mudo não são alterados por qualidade. Pausa e troca de origem mantêm desanexação, gerações e limpeza existentes.
 
-## 2. Aplicação Técnica dos Limites
+Ao mudar prioridade ou perfil, mantém-se o FPS válido. Se inválido, escolhe-se o maior permitido que não exceda o anterior; quando isso não existe, usa-se o menor permitido. Assim, Nitidez 20 → Fluidez 30, Fluidez 60 → Nitidez 30, e Fluidez 60 → Econômico 30.
 
-Os limites definidos são aplicados em duas camadas:
+O suporte a captura, constraints, `contentHint`, preferências de degradação e campos de estatísticas varia entre navegadores. Sem `getDisplayMedia()` não é possível apresentar; sem suporte a um ajuste a mídia continua com as limitações do navegador. Nenhum fallback solicita uma nova fonte.
 
-1. **Captura no Navegador:**
-   Ao chamar `navigator.mediaDevices.getDisplayMedia`, as restrições `ideal` e `max` de `frameRate`, `width` e `height` correspondentes ao perfil escolhido são passadas como restrições de mídia.
-2. **Camada de Envio WebRTC:**
-   Em conexões existentes ou ao trocar de qualidade durante a transmissão, a função `PeerManager.applyQuality` atualiza os emissores de vídeo (`RTCRtpSender`) via `sender.setParameters`:
-   ```typescript
-   parameters.encodings[0].maxBitrate = profile.maxBitrate;
-   parameters.encodings[0].maxFramerate = profile.maxFramerate;
-   await sender.setParameters(parameters);
-   ```
+Referências técnicas: [Screen Capture](https://w3c.github.io/mediacapture-screen-share/), [MediaStreamTrack content hints](https://www.w3.org/TR/mst-content-hint/), [WebRTC sender parameters](https://www.w3.org/TR/webrtc/#dom-rtcrtpsender-setparameters).
 
----
+## Proteção automática de rede
 
-## 3. Adaptação Automática Conservadora
+A cada 3 segundos, as estatísticas são consultadas por peer. O gatilho considera a **pior perda de envio** entre espectadores, sem diluição pela média de conexões diferentes. Usa apenas deltas de relatórios `remote-inbound-rtp` ligados por `localId` ao vídeo enviado. O primeiro relatório cria a referência; relatórios repetidos, contadores reiniciados ou substituição de conexão não disparam redução. Receber vídeo com perdas de outro apresentador não reduz a própria qualidade.
 
-O Screen Room adota uma estratégia conservadora de adaptação para evitar degradações bruscas e loops de oscilação de qualidade:
+Uma perda de envio de **5% ou mais**, com cooldown de **20 segundos**, reduz um nível: **Ultra → Equilibrado → Econômico**. Preserva prioridade e limita FPS conforme a matriz (Fluidez Ultra 60 → Equilibrado 60 → Econômico 30). O apresentador recebe uma notificação e a seleção reflete o novo nível solicitado. Sem relatório remoto válido, não se infere perda de envio. Não há recuperação automática de qualidade.
 
-- **Coleta Periódica:**
-  O módulo `StatsCollector` consulta as estatísticas WebRTC de todos os peers a cada **3 segundos** (`RTCPeerConnection.getStats()`).
-- **Gatilho de Degradação:**
-  Se a média de perda de pacotes relatada pelos espectadores for **igual ou superior a 5%** (`lossPercent >= 5`), o sistema aciona uma redução de qualidade em um degrau:
-  - `high` -> `balanced`
-  - `balanced` -> `economy`
-- **Janela de Cooldown:**
-  A redução automática só pode ocorrer no máximo **uma vez a cada 20 segundos**, impedindo rebaixamentos sucessivos em picos momentâneos de perda de pacote.
-- **Feedback Visual:**
-  Ao ocorrer o downgrade automático, uma notificação flutuante informa o apresentador:
-  *"Rede instável: qualidade de transmissão reduzida automaticamente."*
-- **Sem Aumento Automático:**
-  O sistema **nunca aumenta a qualidade de volta automaticamente**. Redes instáveis frequentemente enganam detectores com períodos curtos de calmaria; elevar a taxa de bits provocaria novos descartes de pacotes e congelamento de vídeo. Qualquer elevação de qualidade deve ser decidida manualmente pelo usuário nas Configurações.
+## Diagnóstico e medições
 
----
+Os eventos técnicos distinguem seleção solicitada, captura verificada e parâmetros aceitos pelos senders. `getSettings()` informa resolução e frequência configuradas na track, que não comprovam a frequência codificada. `video-quality-stats` registra por peer FPS de codificação e recepção quando presentes em `framesPerSecond`, dimensões efetivas de envio/recepção, bytes e motivo de limitação do encoder quando disponível. Campos ausentes permanecem ausentes; nunca se copia FPS solicitado para métricas efetivas.
 
-## 4. Controles na Interface
+A gaveta de rede mantém bitrate e perda medidos no intervalo (média das conexões para apresentação), RTT e contagem de conexões. Em peers bidirecionais esse resumo prioriza recepção; ele não é o gatilho de proteção do envio. Eventos técnicos por peer permitem separar as direções.
 
-Durante a transmissão, os controles de performance e mídia estão disponíveis em:
+Captura sintética e WebRTC local não comprovam áudio nativo, permissões interativas do sistema, conectividade entre redes ou qualidade sob congestionamento real.
 
-- **Gaveta de Configurações (Aba Qualidade):** Seleção manual entre os 3 perfis disponíveis (`Alta qualidade`, `Equilibrada` e `Econômica`).
-- **Gaveta de Configurações (Aba Áudio) e Floating Control Dock:** Botão de controle de mudo da tela. Ao mutar, apenas a trilha `audioTrack` da tela capturada é desabilitada (`track.enabled = false`), mantendo o vídeo fluindo normalmente. Não há captura de microfone.
-- **Gaveta de Configurações (Aba Rede & Métricas):** Visualização em tempo real de latência (RTT), perda de pacotes, bitrate atual e contagem de conexões ativas.
+## Custo em WebRTC mesh P2P
 
----
+Cada apresentador envia uma cópia por espectador. Upload aproximado de vídeo é o bitrate efetivo por conexão multiplicado pelo número de espectadores, além de áudio e overhead. Em Ultra, os limites somados chegam a 54 Mbps (Nitidez) ou 72 Mbps (Fluidez) com nove espectadores. Codificação e processamento podem variar por conexão e implementação; não se presume um único encoder compartilhado. 60 FPS aumenta o custo de captura e codificação.
 
-## 5. Limites da Arquitetura P2P Mesh e Capacidade por Sala
+Múltiplos apresentadores controlam independentemente suas transmissões. Com N participantes e M apresentadores, existem até M × (N − 1) fluxos. Espectadores podem receber vários vídeos simultaneamente, elevando download e decodificação mesmo que apenas um esteja no palco.
 
-O Screen Room adota como padrão o limite operacional de **10 participantes simultâneos por sala** (incluindo o apresentador), controlado diretamente no servidor de sinalização (`MAX_PARTICIPANTS_PER_ROOM`).
-
-> [!NOTE]
-> **Controle de Admissão e Reserva Efêmera (Política A):**
-> - **Invariante:** $\text{participantes ativos} + \text{reservas de vaga válidas} \le \text{capacidade máxima (padrão 10)}$.
-> - **Distinção de Contagem:** A presença transmitida aos usuários e utilizada no cálculo de conexões P2P (`count`) reflete estritamente os participantes conectados no momento. O controle de admissão do servidor (`occupiedSlots`) contabiliza tanto os participantes conectados quanto as reservas ativas de vaga.
-> - **Queda involuntária:** Mantém a vaga e a identidade reservadas por 30 segundos, rejeitando novos visitantes com código terminal `4009` (`ROOM_FULL`) e garantindo que o participante original possa retornar sem risco de sala cheia.
-> - **Saída voluntária:** Libera a vaga e destrói o token imediatamente, sem retenção de reserva.
-> - **Expiração:** Ao término dos 30 segundos sem reconexão, a reserva expira e a vaga é liberada para terceiros.
-
-A arquitetura de distribuição de vídeo baseia-se em **WebRTC Mesh direta (P2P)**, sem unidade seletiva de encaminhamento (SFU) no fluxo de mídia:
-
-### 1. Modelo Principal de Transmissão (1 Apresentador + 9 Espectadores)
-No cenário recomendado e prioritário (compartilhamento de tela com múltiplos espectadores):
-- O apresentador codifica o vídeo da tela uma única vez e envia um fluxo P2P independente para cada espectador conectado.
-- A largura de banda de upload exigida do apresentador cresce de forma diretamente proporcional ao número de espectadores conectados ($N - 1$):
-  $$\text{Upload Total Exigido} \approx \text{Bitrate do Perfil} \times (\text{Espectadores})$$
-
-Tabela de consumo de upload do apresentador na capacidade máxima (9 espectadores):
-
-| Perfil de Vídeo | Bitrate por Conexão | Upload Total com 3 Espectadores | Upload Total com 5 Espectadores | Upload Total com 9 Espectadores (Capacidade Máxima) |
-|---|---:|---:|---:|---:|
-| **Econômico** (`economy`) | 800 kbps | ~2,4 Mbps | ~4,0 Mbps | **~7,2 Mbps** |
-| **Equilibrado** (`balanced` — padrão) | 1,5 Mbps | ~4,5 Mbps | ~7,5 Mbps | **~13,5 Mbps** |
-| **Alta Qualidade** (`high`) | 3,0 Mbps | ~9,0 Mbps | ~15,0 Mbps | **~27,0 Mbps** |
-
-> [!TIP]
-> **Consumo nos Espectadores:** Cada espectador recebe apenas o fluxo de download correspondente à transmissão ativa (ex.: 1,5 Mbps no perfil equilibrado). Portanto, o impacto de rede e CPU nos espectadores é leve e constante, independente do número de pessoas na sala.
-
-### 2. Múltiplas Transmissões Simultâneas em Topologia Mesh
-Se múltiplos participantes compartilharem a tela ao mesmo tempo em uma sala com $N$ participantes e $M$ apresentadores:
-- O número total de transmissões ativas que trafegam na rede é:
-  $$\text{Total de Fluxos na Malha} = M \times (N - 1)$$
-- **Exemplo com 2 apresentadores simultâneos ($N = 10$, $M = 2$):**
-  - Cada apresentador envia 9 fluxos de upload (~13,5 Mbps no perfil equilibrado).
-  - Cada um dos 8 demais espectadores baixa 2 fluxos de vídeo (~3,0 Mbps).
-  - Total de 18 fluxos de vídeo trafegando na malha.
-- **Limitação de 10 transmissões simultâneas:** Se todos os 10 participantes tentassem compartilhar a tela simultaneamente em malha completa, seriam gerados $10 \times 9 = 90$ fluxos de vídeo concorrentes, exigindo ~13,5 Mbps de upload e ~13,5 Mbps de download por participante, além de decodificação de 9 vídeos simultâneos no navegador. Isso provocaria estrangulamento severo em conexões residenciais e processadores comuns.
-
-> [!IMPORTANT]
-> O Screen Room foi projetado primariamente como uma aplicação *streaming-first* (um apresentador principal, eventualmente alternado, transmitindo para até 9 espectadores). Não há garantia de qualidade para 10 transmissões de tela ocorrendo concomitantemente em malha mesh P2P sem infraestrutura de SFU.
-> Para casos de uso pós-MVP que exijam mais de 10 participantes ou videoconferência muitos-para-muitos com vídeo constante de todos os membros, a evolução recomendada é a introdução de um SFU (Selective Forwarding Unit, como LiveKit, mediasoup ou Janus).
+O limite padrão permanece 10 participantes, incluindo reservas temporárias de reconexão de 30 segundos para quedas involuntárias. Saídas voluntárias liberam a vaga imediatamente. Não há garantia de desempenho para dez apresentadores simultâneos; este slice não introduz SFU, simulcast ou negociação avançada de codecs.

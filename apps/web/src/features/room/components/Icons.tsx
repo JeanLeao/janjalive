@@ -448,3 +448,101 @@ export function IconRadio({ size = 20, ...props }: IconProps) {
     </svg>
   );
 }
+
+export function IconMinus({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" {...props}><path d="M5 12h14" /></svg>;
+}
+
+export function IconReset({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6" /></svg>;
+}
+
+export function IconCinema({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 8h20M2 16h20" /></svg>;
+}
+
+export function IconPictureInPicture({ size = 20, ...props }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" /></svg>;
+}
+
+export function IconChat({ size = 20, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+export function IconSmile({ size = 20, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+      <line x1="9" x2="9.01" y1="9" y2="9" />
+      <line x1="15" x2="15.01" y1="9" y2="9" />
+    </svg>
+  );
+}
+
+export function IconSend({ size = 20, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <line x1="12" x2="12" y1="19" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+export function IconFlagBrazil({ size = '1em', ...props }: { size?: number | string } & React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={typeof size === 'number' ? size : '1.15em'}
+      height={typeof size === 'number' ? Math.round(size * 0.74) : '0.85em'}
+      viewBox="0 4 36 28"
+      aria-hidden="true"
+      data-testid="flag-brazil"
+      style={{ display: 'inline-block', verticalAlign: '-0.125em', borderRadius: '2px', ...props.style }}
+      {...props}
+    >
+      <path fill="#009B3A" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z" />
+      <path fill="#FEDF01" d="M32.728 18L18 29.124 3.272 18 18 6.875z" />
+      <circle fill="#002776" cx="17.976" cy="17.924" r="6.458" />
+      <path fill="#FFFFFF" d="M12.277 14.887c-.332.621-.558 1.303-.672 2.023 3.995-.29 9.417 1.891 11.744 4.595.402-.604.7-1.28.883-2.004-2.872-2.808-7.917-4.63-11.955-4.614z" />
+      <circle cx="15.5" cy="19.5" r="0.6" fill="#fff" />
+      <circle cx="17.5" cy="20.5" r="0.6" fill="#fff" />
+      <circle cx="19.5" cy="19.5" r="0.5" fill="#fff" />
+      <circle cx="21" cy="18" r="0.5" fill="#fff" />
+      <circle cx="18" cy="22" r="0.5" fill="#fff" />
+    </svg>
+  );
+}

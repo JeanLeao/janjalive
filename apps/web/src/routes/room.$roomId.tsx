@@ -1,3 +1,5 @@
+import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
+import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 import { Box, Alert } from '@mantine/core';
@@ -25,6 +27,7 @@ function RoomPage() {
       ['single', 'multi'].includes(new URLSearchParams(window.location.search).get('demo') || '')
   );
 
+  const [isCinema, setIsCinema] = useState(false);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
@@ -68,7 +71,7 @@ function RoomPage() {
         ctx1.fillText('Firminha — Apresentação de Arquitetura', 120, 180);
         ctx1.fillStyle = '#94a3b8';
         ctx1.font = '28px system-ui, -apple-system, sans-serif';
-        ctx1.fillText('Screen Room • Alta qualidade (1080p) • Áudio da aba ativo', 120, 240);
+        ctx1.fillText('Screen Room • Nitidez · Equilibrado (até 1080p) • Áudio da aba ativo', 120, 240);
 
         // Simulated IDE code window
         ctx1.fillStyle = '#161b22';
@@ -85,7 +88,7 @@ function RoomPage() {
         ctx1.fillStyle = '#7ee787';
         ctx1.fillText('  const peerManager = new PeerManager({ rtcConfig });', 160, 490);
         ctx1.fillStyle = '#79c0ff';
-        ctx1.fillText('  const displayStream = await captureDisplayMedia("high");', 160, 550);
+        ctx1.fillText('  const displayStream = await captureDisplayMedia(DEFAULT_QUALITY);', 160, 550);
         ctx1.fillStyle = '#ffa657';
         ctx1.fillText('  await peerManager.attachLocalStream(displayStream);', 160, 610);
         ctx1.fillStyle = '#e6edf3';
@@ -151,6 +154,25 @@ function RoomPage() {
     enabled: !isDemo,
   });
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  const connected = session.connectionStatus === 'connected';
+  const interactionsUi = useInteractionsUi({
+    roomId, messages: session.chatMessages, error: session.interactionError, pending: session.chatPending,
+    connected, onSendChat: session.sendChat,
+  });
+  const { closePicker } = interactionsUi;
+  useEffect(() => { closePicker(); }, [isCinema, isFullscreen, closePicker]);
+  const localPeerId = session.participants.find((p) => p.isLocal)?.peerId;
+  const interactionActions = (variant: 'header' | 'floating') => (
+    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant} />
+  );
+
   const handleLeave = () => {
     session.stopSharing();
     navigate({ to: '/' });
@@ -172,7 +194,7 @@ function RoomPage() {
   return (
     <Box
       style={{
-        height: '100vh',
+        height: '100dvh',
         width: '100vw',
         display: 'flex',
         flexDirection: 'column',
@@ -254,17 +276,25 @@ function RoomPage() {
       )}
 
       {/* Header */}
-      <RoomHeader
-        roomId={roomId}
-        participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
-        connectionStatus={session.connectionStatus}
-        onOpenParticipants={() => setIsParticipantsOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onLeave={handleLeave}
-      />
+      {!isCinema && (
+        <RoomHeader
+          roomId={roomId}
+          participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
+          connectionStatus={session.connectionStatus}
+          onOpenParticipants={() => setIsParticipantsOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onLeave={handleLeave}
+          interactions={isFullscreen ? null : interactionActions('header')}
+        />
+      )}
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        interactions={<InteractionLayer ui={interactionsUi} messages={session.chatMessages} reactions={session.reactions}
+          error={session.interactionError} pending={session.chatPending} connected={connected} localPeerId={localPeerId} />}
+        interactionAccess={interactionActions('floating')}
+        isCinema={isCinema}
+        onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
         onRetryPeer={session.retryPeer}
         localStream={session.localStream}
@@ -282,10 +312,30 @@ function RoomPage() {
         canShareScreen={canShare}
       />
 
+      {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
+        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+          onChangeQuality={session.changeQuality} stream={session.localStream} pending={session.captureState === 'publishing'}
+          onConfirm={session.publishCapture} onCancel={session.stopSharing} />
+      )}
+
+      {session.pendingStream && (
+        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+          stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
+          onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
+      )}
+
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
+        onSwitchCapture={['sharing', 'paused'].includes(session.captureState) ? session.switchCapture : undefined}
+        switchPending={session.captureState.startsWith('switch-')}
+        switchRestoring={session.captureState === 'switch-restoring'}
+        onCancelSwitch={session.cancelSwitch}
+        capturePending={['requesting', 'preview', 'publishing', 'stopping'].includes(session.captureState)}
+        isPaused={session.captureState === 'paused' || session.captureState.startsWith('switch-')}
+        pausePending={['pausing', 'resuming'].includes(session.captureState)}
+        onTogglePause={session.captureState === 'paused' ? session.publishCapture : session.pauseSharing}
         isSharing={session.isSharing}
-        onToggleShare={session.isSharing ? session.stopSharing : session.startSharing}
+        onToggleShare={session.captureState !== 'idle' ? session.stopSharing : session.startSharing}
         hasAudioTrack={session.hasAudioTrack}
         isAudioMuted={session.isAudioMuted}
         onToggleAudioMute={session.toggleAudioMute}

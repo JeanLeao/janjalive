@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const SharingStateSchema = z.object({
   active: z.boolean(),
+  paused: z.boolean().optional(),
   streamId: z.string().min(1).max(128).optional(),
   hasAudio: z.boolean(),
   audioMuted: z.boolean(),
@@ -17,6 +18,36 @@ export const ParticipantInfoSchema = z.object({
   nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type ParticipantInfo = z.infer<typeof ParticipantInfoSchema>;
+
+// Ephemeral interactions: limits shared by validation, server and UI.
+export const INTERACTION_LIMITS = {
+  textLength: 1000, history: 200, chatBurst: 5, reactionBurst: 8,
+  windowMs: 10_000, reactionDurationMs: 3000, visibleReactions: 6,
+} as const;
+export const REACTIONS = [
+  'applause', 'like', 'heart', 'celebrate',
+  'brazil', 'dislike', 'middle-finger', 'bubbles', 'rocket',
+] as const;
+export const ReactionSchema = z.enum(REACTIONS);
+export type Reaction = z.infer<typeof ReactionSchema>;
+export const ChatTextSchema = z.string().trim().min(1).max(INTERACTION_LIMITS.textLength)
+  .regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/u);
+const RequestIdSchema = z.string().uuid();
+export const SendChatSchema = z.object({ type: z.literal('send-chat'), requestId: RequestIdSchema, text: ChatTextSchema }).strict();
+export const SendReactionSchema = z.object({ type: z.literal('send-reaction'), requestId: RequestIdSchema, reaction: ReactionSchema }).strict();
+const interactionIdentity = {
+  id: z.string().uuid(), requestId: RequestIdSchema, roomId: z.string().min(1),
+  peerId: z.string().min(1), nickname: z.string().min(1).max(32).optional(),
+  timestamp: z.number().int().nonnegative(),
+};
+export const ChatMessageSchema = z.object({ type: z.literal('chat-message'), ...interactionIdentity, text: ChatTextSchema });
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+export const ReactionEventSchema = z.object({ type: z.literal('reaction'), ...interactionIdentity, reaction: ReactionSchema });
+export type ReactionEvent = z.infer<typeof ReactionEventSchema>;
+export const InteractionRejectedSchema = z.object({
+  type: z.literal('interaction-rejected'), requestId: RequestIdSchema,
+  message: z.string(),
+});
 
 // Client -> Server
 export const JoinMessageSchema = z.object({
@@ -47,6 +78,8 @@ export const LeaveMessageSchema = z.object({
 export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  SendChatSchema,
+  SendReactionSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
   SignalRelayMessageSchema,
@@ -124,6 +157,9 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  ChatMessageSchema,
+  ReactionEventSchema,
+  InteractionRejectedSchema,
   PeersMessageSchema,
   SharingUpdatedMessageSchema,
   PeerJoinedMessageSchema,

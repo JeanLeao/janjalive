@@ -7,6 +7,8 @@ import {
   Tooltip,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
+import { usePictureInPicture } from '../hooks/usePictureInPicture';
+import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import {
   formatDisplayName,
@@ -15,6 +17,11 @@ import {
 } from '../utils/avatar';
 import {
   IconScreen,
+  IconCinema,
+  IconPictureInPicture,
+  IconPlus,
+  IconMinus,
+  IconReset,
   IconMaximize,
   IconMinimize,
   IconSignal,
@@ -22,6 +29,11 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  interactions?: React.ReactNode;
+  /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
+  interactionAccess?: React.ReactNode;
+  isCinema?: boolean;
+  onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
   onRetryPeer?: (peerId: string) => void;
   localStream: MediaStream | null;
@@ -37,13 +49,18 @@ export interface RoomStageProps {
 
 interface StreamItem {
   id: string; // 'local' or peerId
-  stream: MediaStream;
+  stream: MediaStream | null;
+  paused?: boolean;
   isLocal: boolean;
   displayName: string;
   hasAudio: boolean;
 }
 
 export function RoomStage({
+  interactions,
+  interactionAccess,
+  isCinema = false,
+  onToggleCinema,
   remoteConnectionStates = {},
   onRetryPeer,
   localStream,
@@ -56,13 +73,14 @@ export function RoomStage({
   onCopyInvite,
   canShareScreen,
 }: RoomStageProps) {
+  const [showStreams, setShowStreams] = useState(false);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Fullscreen change listener
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      setIsFullscreen(!!stageContainerRef.current && document.fullscreenElement === stageContainerRef.current);
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => {
@@ -89,6 +107,7 @@ export function RoomStage({
   if (isSharing && localStream) {
     const localPart = participants.find((p) => p.isLocal);
     streamItems.push({
+      paused: participants.find(p => p.isLocal)?.isPaused,
       id: 'local',
       stream: localStream,
       isLocal: true,
@@ -100,12 +119,20 @@ export function RoomStage({
   for (const remote of remoteStreams) {
     const remotePart = participants.find((p) => p.peerId === remote.peerId);
     streamItems.push({
+      paused: remotePart?.isPaused,
       id: remote.peerId,
       stream: remote.stream,
       isLocal: false,
       displayName: formatDisplayName(remotePart?.nickname, false),
-      hasAudio: remote.stream.getAudioTracks().length > 0,
+      hasAudio: remotePart?.hasAudio ?? remote.stream.getAudioTracks().some(track => track.readyState === 'live'),
     });
+  }
+
+  for (const participant of participants) {
+    if (!participant.isLocal && participant.isSharing && participant.isPaused && !streamItems.some(item => item.id === participant.peerId)) {
+      streamItems.push({ id: participant.peerId, stream: null, paused: true, isLocal: false,
+        displayName: formatDisplayName(participant.nickname, false), hasAudio: false });
+    }
   }
 
   // Active presentation spotlight
@@ -119,6 +146,7 @@ export function RoomStage({
     : [];
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
+  const showAccess = isCinema || isFullscreen;
 
   // Empty state if no stream is active
   if (!activeStream) {
@@ -135,6 +163,9 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        {interactions}
+        {isCinema && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
+        {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
             maxWidth: '440px',
@@ -234,7 +265,34 @@ export function RoomStage({
         minHeight: 0,
       }}
     >
+      {interactions}
       <style>{`
+        .stage-main-container { --stage-control-size: 36px; }
+        .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+        .stage-view-controls {
+          position: absolute;
+          bottom: max(16px, env(safe-area-inset-bottom, 0px), var(--stage-dock-clearance, 0px));
+          right: max(16px, env(safe-area-inset-right, 0px));
+          max-width: calc(100% - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px)));
+          z-index: 20;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 4px;
+          padding: 4px;
+          background: rgba(13, 17, 23, .9);
+          border: 1px solid rgba(255,255,255,.1);
+          border-radius: 8px;
+        }
+        .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
+        @media (max-width: 768px), (pointer: coarse) {
+          .stage-main-container { --stage-control-size: 44px; }
+        }
+        @media (max-width: 560px) {
+          .stage-quality-pill-compact { display: none !important; }
+          .stage-top-right-access { top: 60px !important; }
+        }
         @media (max-width: 768px) {
           .stage-main-container {
             flex-direction: column !important;
@@ -270,12 +328,6 @@ export function RoomStage({
             display: none !important;
           }
         }
-        @media (max-width: 600px) {
-          .fullscreen-toggle-wrapper {
-            bottom: calc(max(16px, env(safe-area-inset-bottom, 16px)) + 58px) !important;
-            right: 12px !important;
-          }
-        }
       `}</style>
       {/* Main Spotlight Canvas */}
       <Box
@@ -293,10 +345,17 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
-          stream={activeStream.stream}
+          stream={activeStream.paused ? null : activeStream.stream}
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
           onRetry={() => onRetryPeer?.(activeStream.id)}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          isCinema={isCinema}
+          onToggleCinema={onToggleCinema}
+          streamCount={secondaryStreams.length}
+          showStreams={showStreams}
+          onToggleStreams={() => setShowStreams(value => !value)}
         />
 
         {/* Top-Left Streamer Badge */}
@@ -314,7 +373,7 @@ export function RoomStage({
             padding: '5px 12px 5px 6px',
             borderRadius: '20px',
             zIndex: 10,
-            pointerEvents: 'none',
+            pointerEvents: 'auto',
           }}
         >
           <Box
@@ -334,78 +393,55 @@ export function RoomStage({
             {getInitials(activeStream.displayName)}
           </Box>
           <Text size="xs" fw={600} c="#fff">
-            {activeStream.displayName} · Transmitindo
+            {activeStream.displayName} · {activeStream.paused ? 'Pausado' : 'Transmitindo'}
           </Text>
           <Box
             style={{
               width: 6,
               height: 6,
               borderRadius: '50%',
-              backgroundColor: '#22c55e',
+              backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
             }}
           />
         </Box>
 
-        {/* Top-Right Quality / Live Pill */}
+        {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
         <Box
+          className={showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right'}
           style={{
             position: 'absolute',
             top: 16,
             right: 16,
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            backgroundColor: 'rgba(13, 17, 23, 0.85)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            padding: '5px 10px',
-            borderRadius: '16px',
-            zIndex: 10,
+            gap: 8,
+            zIndex: 26,
           }}
         >
-          <IconSignal size={13} style={{ color: '#22c55e' }} />
-          <Text size="xs" fw={500} c="#8c959f">
-            {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
-          </Text>
-        </Box>
-
-        {/* Bottom-Right Fullscreen Toggle */}
-        <Box
-          className="fullscreen-toggle-wrapper"
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            right: 16,
-            zIndex: 10,
-          }}
-        >
-          <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
-            <UnstyledButton
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(13, 17, 23, 0.85)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#e6edf3',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isFullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
-            </UnstyledButton>
-          </Tooltip>
+          {showAccess && interactionAccess}
+          <Box
+            className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(13, 17, 23, 0.85)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '5px 10px',
+              borderRadius: '16px',
+            }}
+          >
+            <IconSignal size={13} style={{ color: '#22c55e' }} />
+            <Text size="xs" fw={500} c="#8c959f">
+              {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
+            </Text>
+          </Box>
         </Box>
       </Box>
 
       {/* Multi-Stream Previews (Sidebar on desktop / horizontal carousel on mobile) */}
-      {secondaryStreams.length > 0 && (
+      {secondaryStreams.length > 0 && (!isCinema || showStreams) && (
         <Box
           className="secondary-streams-panel"
           style={{
@@ -467,9 +503,23 @@ function SpotlightVideoPlayer({
   isLocal,
   connectionState,
   onRetry,
+  isCinema,
+  onToggleCinema,
+  streamCount,
+  showStreams,
+  onToggleStreams,
+  isFullscreen,
+  onToggleFullscreen,
 }: {
-  stream: MediaStream;
+  stream: MediaStream | null;
   isLocal: boolean;
+  isCinema: boolean;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onToggleCinema?: () => void;
+  streamCount: number;
+  showStreams: boolean;
+  onToggleStreams: () => void;
   connectionState?: RTCPeerConnectionState;
   onRetry?: () => void;
 }) {
@@ -477,16 +527,116 @@ function SpotlightVideoPlayer({
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
   const [playback, setPlayback] = useState('Conectando');
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
+  const zoom = useVideoZoom(videoRef, stream);
+  const pip = usePictureInPicture(videoRef, stream);
+  const controlsRef = useRef<HTMLDivElement>(null);
+
+  // Lift the bar only when it would overlap the central dock.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const canvas = controls?.parentElement;
+    const dock = controls?.ownerDocument.querySelector<HTMLElement>('.floating-dock-wrapper');
+    if (!controls || !canvas || !dock) return;
+    const positionControls = () => {
+      const bar = controls.getBoundingClientRect();
+      const dockBounds = dock.getBoundingClientRect();
+      const overlapsHorizontally = bar.left < dockBounds.right && bar.right > dockBounds.left;
+      const clearance = !isFullscreen && dockBounds.width > 0 && overlapsHorizontally
+        ? Math.max(0, canvas.getBoundingClientRect().bottom - dockBounds.top + 12)
+        : 0;
+      controls.style.setProperty('--stage-dock-clearance', `${clearance}px`);
+    };
+    const observer = new ResizeObserver(positionControls);
+    observer.observe(controls);
+    observer.observe(canvas);
+    observer.observe(dock);
+    window.addEventListener('resize', positionControls);
+    positionControls();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionControls);
+      controls.style.removeProperty('--stage-dock-clearance');
+    };
+  }, [isFullscreen]);
 
   return (
     <>
+    <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
+      {onToggleCinema && (
+        <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
+          <Button
+            variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
+            aria-pressed={isCinema} aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
+            onClick={onToggleCinema} p={8}
+          ><IconCinema size={18} aria-hidden /></Button>
+        </Tooltip>
+      )}
+      {isCinema && streamCount > 0 && (
+        <Button variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams}>
+          {showStreams ? 'Ocultar' : 'Transmissões'} ({streamCount})
+        </Button>
+      )}
+      <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP)' : 'Janela flutuante indisponível neste navegador ou vídeo'} withArrow>
+        <span
+          tabIndex={!pip.available && !pip.active ? 0 : undefined}
+          aria-label={!pip.available && !pip.active ? 'Janela flutuante indisponível neste navegador ou vídeo' : undefined}
+        >
+          <Button
+            variant={pip.active ? 'filled' : 'subtle'} color={pip.active ? 'blue' : 'gray'}
+            aria-pressed={pip.active} aria-label={pip.active ? 'Fechar janela flutuante' : 'Janela flutuante (PiP)'}
+            disabled={pip.pending || (!pip.available && !pip.active)} aria-busy={pip.pending} loading={pip.pending}
+            onClick={pip.toggle} p={8}
+          ><IconPictureInPicture size={18} aria-hidden /></Button>
+        </span>
+      </Tooltip>
+      <Box
+        className="zoom-controls"
+        role="group"
+        aria-label="Zoom da transmissão"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 2,
+          background: 'rgba(13,17,23,.9)', borderRadius: 8,
+        }}
+      >
+        <Button
+          variant="subtle" color="gray" aria-label="Reduzir zoom"
+          disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconMinus size={16} aria-hidden /></Button>
+        <Text size="xs" aria-live="polite" style={{ minWidth: 32, fontSize: 11, textAlign: 'center' }}>
+          {Math.round(zoom.scale * 100)}%
+        </Text>
+        <Button
+          variant="subtle" color="gray" aria-label="Ampliar zoom"
+          disabled={!stream || zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconPlus size={16} aria-hidden /></Button>
+        <Button
+          variant="subtle" color="gray" aria-label="Restaurar enquadramento"
+          disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom()}
+          style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
+        ><IconReset size={16} aria-hidden /></Button>
+      </Box>
+      <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
+        <Button
+          variant="subtle" color="gray" onClick={onToggleFullscreen} p={8}
+          aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+        >{isFullscreen ? <IconMinimize size={16} aria-hidden /> : <IconMaximize size={16} aria-hidden />}</Button>
+      </Tooltip>
+    </Box>
+    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
     <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
-      <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>
+      {stream && <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>}
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
-    <video
+    <Box ref={zoom.viewportRef} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+    {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
+      <Text c="white">Transmissão pausada</Text>
+      {isLocal && <Text c="dimmed" size="sm">O navegador continua capturando. Retome ou pare pelo controle de compartilhamento.</Text>}
+    </Box>}
+    {stream && <video
       ref={videoRef}
       autoPlay
       playsInline
@@ -499,7 +649,8 @@ function SpotlightVideoPlayer({
         objectFit: 'contain',
         display: 'block',
       }}
-    />
+    />}
+    </Box>
     </>
   );
 }
@@ -513,7 +664,7 @@ function PreviewCard({
   onClick: () => void;
 }) {
   // CRITICAL: Secondary preview thumbnails MUST ALWAYS BE MUTED to prevent duplicate/cacophony audio!
-  const videoRef = useMediaStreamVideo(streamItem.stream, true);
+  const videoRef = useMediaStreamVideo(streamItem.paused ? null : streamItem.stream, true);
 
   return (
     <UnstyledButton
@@ -557,6 +708,7 @@ function PreviewCard({
           }}
         />
 
+        {streamItem.paused && <Text pos="absolute" c="white" size="xs">Pausado</Text>}
         {/* Hover overlay hint */}
         <Box
           style={{

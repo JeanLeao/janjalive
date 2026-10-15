@@ -51,7 +51,7 @@ Abaixo estão os eventos técnicos realmente emitidos pelos módulos do cliente 
 
 ### Captura de Mídia e Áudio
 - `screen-capture-request`: Início da solicitação de tela ao navegador com o perfil selecionado.
-- `screen-captured`: Compartilhamento concedido pelo usuário (informa quantidade de trilhas de vídeo e áudio).
+- `screen-captured`: Compartilhamento concedido pelo usuário (seleção solicitada, settings da captura, contentHint e quantidade de trilhas de vídeo e áudio).
 - `screen-capture-error`: Recusa de permissão ou falha de captura da API `getDisplayMedia`.
 - `screen-stopped`: Compartilhamento de tela interrompido.
 - `screen-audio`: Trilha de áudio da tela mutada ou reativada (`muted: true/false`).
@@ -76,9 +76,13 @@ Abaixo estão os eventos técnicos realmente emitidos pelos módulos do cliente 
 
 ### Métricas e Adaptação Automática
 - `network-stats`: Amostra periódica de métricas de rede (bitrate, perda e latência RTT).
-- `quality-downgrade`: Redução automática do perfil de qualidade acionada por perda de pacotes superior a 5%.
-- `quality-applied`: Aplicação de parâmetros de qualidade aos emissores RTP (`RTCRtpSender`).
-- `quality-apply-skip`: Aviso caso o navegador não permita alterar parâmetros no sender de vídeo.
+- `quality-downgrade`: Redução Ultra → Equilibrado → Econômico, preservando prioridade, por perda de envio igual ou superior a 5% em um espectador, com cooldown de 20 segundos.
+- `quality-selection`: Prioridade, perfil e FPS escolhidos, verificação combinada e settings das capturas (incluindo prévias).
+- `quality-requested`: Configuração solicitada ao gerenciador, settings da captura, `captureVerified` e `sendersAccepted`. Aceitação não comprova FPS ou resolução transmitidos.
+- `quality-preference-error` / `quality-sender-error`: Rejeição de parâmetros; tentativa de fallback sem preferência de degradação ou falha dos limites do sender.
+- `video-quality-stats`: Por peer, FPS e dimensões codificados/recebidos, bitrate medido por direção e motivo de limitação do encoder, quando disponibilizados. Campos ausentes não são preenchidos com os valores solicitados.
+
+O resumo `network-stats` pode priorizar recepção em conexões bidirecionais. O gatilho de redução usa exclusivamente intervalos frescos de `remote-inbound-rtp` associados ao vídeo local enviado; não usa a perda de recepção de outro apresentador. Veja [PERFORMANCE.md](./PERFORMANCE.md) para limites e fallbacks.
 
 ---
 

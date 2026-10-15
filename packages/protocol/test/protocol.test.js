@@ -118,11 +118,7 @@ test('protocol: validates typed signal payloads', () => {
   assert.equal(isIceSignal(answer), false);
 });
 
-test('protocol: exports expected quality profiles', () => {
-  assert.equal(QUALITY_PROFILES.economy.maxFramerate, 15);
-  assert.equal(QUALITY_PROFILES.balanced.maxFramerate, 20);
-  assert.equal(QUALITY_PROFILES.high.maxFramerate, 20);
-});
+
 
 test('protocol: generateSecureRoomId generates high-entropy, valid and unique room IDs', () => {
   const id1 = generateSecureRoomId();
@@ -197,4 +193,17 @@ test('protocol: identifies terminal WebSocket close codes and validates ErrorMes
     reconnectToken: 'sec-token-12345',
   });
   assert.equal(peersWithToken.success, true);
+});
+
+test('protocol: sharing accepts explicit pause and legacy messages without pause', () => {
+  const legacy = { type: 'update-sharing', active: true, hasAudio: true, audioMuted: true };
+  assert.equal(ClientMessageSchema.safeParse(legacy).success, true);
+  const paused = { ...legacy, paused: true, streamId: 'capture-1' };
+  assert.equal(ClientMessageSchema.parse(paused).paused, true);
+  assert.equal(ClientMessageSchema.safeParse({ ...paused, paused: 'yes' }).success, false);
+  const snapshot = ServerMessageSchema.parse({
+    type: 'peers', peers: ['presenter'], count: 1,
+    participants: [{ peerId: 'presenter', sharing: { active: true, paused: true, hasAudio: true, audioMuted: true } }],
+  });
+  assert.equal(snapshot.participants[0].sharing.paused, true);
 });

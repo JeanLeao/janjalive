@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RoomRegistry, RoomCapacityError, UnauthorizedReconnectError } from './room-state.js';
 import {
@@ -8,6 +9,7 @@ import {
   type TurnConfig,
 } from './turn.js';
 import {
+  INTERACTION_LIMITS,
   type ServerMessage,
   ClientMessageSchema,
   normalizeRoom,
@@ -533,6 +535,39 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          return;
+        }
+
+        if (message.type === 'send-chat' || message.type === 'send-reaction') {
+          const reject = (messageText: string) => send(socket, {
+            type: 'interaction-rejected', requestId: message.requestId, message: messageText,
+          });
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) {
+            reject('Entre na sala antes de enviar.');
+            return;
+          }
+          const limits = rooms.interactionBudget(meta.roomId, meta.peerId);
+          const kind = message.type === 'send-chat' ? 'chat' : 'reaction';
+          const now = Date.now();
+          limits[kind] = limits[kind].filter(time => now - time < INTERACTION_LIMITS.windowMs);
+          if (limits[kind].length >= (kind === 'chat' ? INTERACTION_LIMITS.chatBurst : INTERACTION_LIMITS.reactionBurst)) {
+            reject('Muitas interações. Aguarde alguns segundos.');
+            return;
+          }
+          limits[kind].push(now);
+          if (limits.ids.includes(message.requestId)) {
+            reject('Esta interação já foi aceita.');
+            return;
+          }
+          limits.ids = [...limits.ids.slice(-63), message.requestId];
+          const identity = { id: randomUUID(), requestId: message.requestId, ...meta,
+            nickname: rooms.getNickname(meta.roomId, meta.peerId), timestamp: now };
+          if (message.type === 'send-chat') {
+            broadcast(meta.roomId, { type: 'chat-message', ...identity, text: message.text });
+          } else {
+            broadcast(meta.roomId, { type: 'reaction', ...identity, reaction: message.reaction });
+          }
           return;
         }
 

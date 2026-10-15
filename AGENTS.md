@@ -9,7 +9,8 @@ Monorepo TypeScript: `apps/web` (interface e WebRTC), `apps/signaling` (WebSocke
 - Confira o estado do Git e os arquivos locais antes de editar; não presuma equivalência com a branch remota. Preserve alterações preexistentes e arquivos não rastreados.
 - Conclua o trabalho autorizado, incluindo correções e validação pertinentes. Mantenha o diff no escopo, sem refatorações, dependências ou mudanças visuais alheias ao pedido.
 - Resolva detalhes locais com autonomia. Peça decisão apenas para mudanças relevantes de produto, segurança, arquitetura, contratos ou infraestrutura que excedam a autorização existente.
-- Não faça commit, push, merge, deploy ou operações destrutivas de Git sem autorização explícita.
+- Commit e push exigem autorização explícita do proprietário ou do handoff recebido. Quando autorizados, devem se limitar à branch, aos arquivos e ao escopo definidos. Correções de um PR existente podem ser publicadas na mesma branch, desde que essa publicação esteja autorizada no handoff.
+- Merge, deploy, force-push e operações destrutivas de Git exigem autorização específica e não são consequência automática da autorização de commit ou push.
 - Não edite manualmente arquivos gerados, como `apps/web/src/routeTree.gen.ts`; altere a fonte e use a geração existente.
 
 ## Invariantes a preservar
@@ -41,3 +42,5 @@ Consulte apenas o material pertinente à tarefa. Se documentação e implementa�
 - Para mudanças no ciclo de compartilhamento, valide os cenários afetados de início/parada/reinício, entrada tardia, múltiplos apresentadores, reconexão, limpeza e mensagens fora de ordem. Os E2E estão em `apps/web/e2e/sharing.spec.ts`: `pnpm --filter @screen-room/web test:e2e`, com navegador Playwright instalado. A configuração inicia signaling local compilado e web via Vite; a captura é sintética.
 - Captura sintética e mocks não comprovam permissões nativas, captura de áudio real, autoplay ou conectividade STUN/TURN em redes distintas. Declare quais desses cenários foram efetivamente testados.
 - Corrija falhas causadas pela tarefa; reporte falhas preexistentes ou limitações de ambiente. Na entrega, informe mudanças e arquivos afetados, comandos executados e resultados, verificações não realizadas e riscos ou decisões pendentes.
+- Para alterações visuais ou interativas, valide os estados relevantes em desktop e mobile, incluindo responsividade, teclado e entrada por toque quando aplicável. Diferencie tamanho visual dos controles e área efetiva de interação. Preserve a linguagem visual existente, salvo autorização para redesenho.
+- Ao entregar alterações destinadas a um PR, informe o SHA do commit, branch, link do PR, arquivos afetados, testes executados e limitações. Falhas intermitentes devem ser documentadas; não as classifique como preexistentes sem evidência comparativa suficiente.

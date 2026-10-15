@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   Drawer,
   Box,
@@ -7,14 +7,11 @@ import {
   Text,
   UnstyledButton,
   Button,
-  Badge,
   Code,
   Tabs,
 } from '@mantine/core';
-import {
-  QUALITY_PROFILES,
-  type QualityProfileKey,
-} from '@screen-room/protocol';
+import type { QualitySelection } from '@screen-room/protocol';
+import { QualityControls } from './QualityControls';
 import type {
   ConnectionState,
   DiagnosticEntry,
@@ -34,8 +31,8 @@ import {
 export interface SettingsDrawerProps {
   opened: boolean;
   onClose: () => void;
-  quality: QualityProfileKey;
-  onChangeQuality: (newQuality: QualityProfileKey) => void;
+  quality: QualitySelection;
+  onChangeQuality: (newQuality: QualitySelection) => void;
   networkStats: NetworkMetrics | null;
   connectionStatus: ConnectionState;
   diagnostics: DiagnosticEntry[];
@@ -62,24 +59,6 @@ export function SettingsDrawer({
 }: SettingsDrawerProps) {
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const qualityButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-
-  const handleQualityRadioKeyDown = (e: React.KeyboardEvent, currentKey: QualityProfileKey) => {
-    const keys: QualityProfileKey[] = ['high', 'balanced', 'economy'];
-    const currentIndex = keys.indexOf(currentKey);
-    let targetKey: QualityProfileKey | null = null;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault();
-      targetKey = keys[(currentIndex + 1) % keys.length];
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault();
-      targetKey = keys[(currentIndex - 1 + keys.length) % keys.length];
-    }
-    if (targetKey) {
-      onChangeQuality(targetKey);
-      qualityButtonRefs.current[targetKey]?.focus();
-    }
-  };
 
   const handleCopyLogs = async () => {
     if (typeof window !== 'undefined') {
@@ -101,31 +80,6 @@ export function SettingsDrawer({
     }
   };
 
-  const profiles: Array<{
-    key: QualityProfileKey;
-    title: string;
-    specs: string;
-    desc: string;
-  }> = [
-    {
-      key: 'high',
-      title: 'Alta qualidade',
-      specs: '1080p · 20 FPS · 3.0 Mbps',
-      desc: 'Ideal para apresentações de slides detalhadas ou código com leitura nítida.',
-    },
-    {
-      key: 'balanced',
-      title: 'Equilibrada (Recomendada)',
-      specs: '720p · 20 FPS · 1.5 Mbps',
-      desc: 'Bom equilíbrio entre fluidez, nitidez e consumo moderado de banda.',
-    },
-    {
-      key: 'economy',
-      title: 'Econômica',
-      specs: '720p · 15 FPS · 800 kbps',
-      desc: 'Recomendada para conexões lentas ou com oscilação frequente.',
-    },
-  ];
 
   return (
     <Drawer
@@ -228,61 +182,7 @@ export function SettingsDrawer({
         {/* Tab 1: Qualidade */}
         <Tabs.Panel value="quality">
           <Stack gap="md">
-            <div>
-              <Text fw={600} size="sm" c="#fff" mb={4}>
-                Perfil de transmissão
-              </Text>
-              <Text size="xs" c="#8c959f">
-                Selecione a resolução e taxa de bits que melhor se adaptam à sua conexão.
-              </Text>
-            </div>
-
-            <Stack gap="xs" role="radiogroup" aria-label="Perfil de transmissão">
-              {profiles.map((p) => {
-                const isSelected = quality === p.key;
-                return (
-                  <UnstyledButton
-                    key={p.key}
-                    ref={(el) => {
-                      qualityButtonRefs.current[p.key] = el;
-                    }}
-                    onClick={() => onChangeQuality(p.key)}
-                    onKeyDown={(e) => handleQualityRadioKeyDown(e, p.key)}
-                    role="radio"
-                    aria-checked={isSelected}
-                    tabIndex={isSelected ? 0 : -1}
-                    aria-label={`${p.title}, ${p.specs}`}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      backgroundColor: isSelected ? 'rgba(37, 99, 235, 0.12)' : '#161b22',
-                      border: isSelected
-                        ? '1px solid #2563eb'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      transition: 'all 0.15s ease',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Group justify="space-between" align="center" mb={4}>
-                      <Text fw={600} size="sm" c={isSelected ? '#60a5fa' : '#fff'}>
-                        {p.title}
-                      </Text>
-                      <Badge
-                        size="xs"
-                        variant={isSelected ? 'filled' : 'outline'}
-                        color={isSelected ? 'blue' : 'gray'}
-                      >
-                        {p.specs}
-                      </Badge>
-                    </Group>
-                    <Text size="xs" c="#8c959f">
-                      {p.desc}
-                    </Text>
-                  </UnstyledButton>
-                );
-              })}
-            </Stack>
+            <QualityControls quality={quality} onChange={onChangeQuality} />
 
             <Box
               style={{
