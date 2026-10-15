@@ -1,5 +1,6 @@
 import {
   type SharingState,
+  COLLABORATION_LIMITS,
   type ClientMessage,
   type ServerMessage,
   isServerMessage,
@@ -123,7 +124,8 @@ export class SignalingClient {
           if (raw.type === 'peers' && raw.reconnectToken) {
             this.reconnectToken = raw.reconnectToken;
           }
-          this.options.logger?.log('signal-receive', { type: raw.type, count: (raw as any).count });
+          // Pointer traffic must not notify React's diagnostics subscription per movement.
+          if (raw.type !== 'collaboration') this.options.logger?.log('signal-receive', { type: raw.type, count: (raw as any).count });
           this.options.onMessage(raw);
         } else {
           this.options.logger?.log('signal-malformed', { reason: 'invalid-server-message' });
@@ -159,14 +161,17 @@ export class SignalingClient {
   }
 
   send(message: ClientMessage): boolean {
+    const ephemeral = message.type === 'laser' || message.type === 'drawing' || message.type === 'clear-annotations';
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.options.logger?.log('signal-skip', { type: message.type, reason: 'socket-not-open' });
+      if (!ephemeral) this.options.logger?.log('signal-skip', { type: message.type, reason: 'socket-not-open' });
       return false;
     }
 
+    if (ephemeral &&
+        this.socket.bufferedAmount >= COLLABORATION_LIMITS.maxBufferedBytes) return false;
     try {
       this.socket.send(JSON.stringify(message));
-      this.options.logger?.log('signal-send', {
+      if (!ephemeral) this.options.logger?.log('signal-send', {
         type: (message as any).data?.type || message.type,
         target: (message as any).target || '-',
       });

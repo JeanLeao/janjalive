@@ -1,3 +1,5 @@
+import { LiveAnnotations } from '../collaboration/live-annotations';
+import type { CollaborationMessage } from '@screen-room/protocol';
 import { useRoomInteractions } from './useRoomInteractions';
 import type { Reaction } from '@screen-room/protocol';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -44,6 +46,11 @@ export interface UseRoomSessionOptions {
 }
 
 export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomSessionOptions) {
+  const annotations = useMemo(() => new LiveAnnotations(), [roomId]);
+  const serverClockOffsetRef = useRef(0);
+  const collaborationReadyRef = useRef(false);
+  const localPeerRef = useRef('');
+  const collaborationSeqRef = useRef(0);
   const interactions = useRoomInteractions(roomId);
   const interactionsRef = useRef(interactions);
   interactionsRef.current = interactions;
@@ -119,6 +126,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     const unsubscribeLogger = logger.subscribe(setDiagnostics);
 
     const peerId = `p_${crypto.randomUUID().replace(/-/g, '')}`;
+    localPeerRef.current = peerId;
     const initialNick = nicknameRef.current;
     logger.log('session-init', { roomId, peerId, displayName: initialNick || 'Anonymous' });
 
@@ -204,7 +212,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onStateChange: (state) => {
         if (isDisposed) return;
         setConnectionStatus(state);
-        if (state !== 'connected') interactionsRef.current.resetConnection();
+        if (state !== 'connected') {
+          interactionsRef.current.resetConnection();
+          collaborationReadyRef.current = false;
+          annotations.reset();
+        }
         if (state === 'disconnected') peerManager.closeAll();
         if (state === 'connected') {
           signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current);
@@ -213,7 +225,15 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onMessage: (message) => {
         if (isDisposed) return;
         interactionsRef.current.receive(message);
+        if (message.type === 'collaboration') {
+          if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
+        }
         if (message.type === 'peers') {
+          serverClockOffsetRef.current = message.serverTime === undefined ? 0 : Date.now() - message.serverTime;
+          annotations.reset();
+          collaborationReadyRef.current = true;
+          for (const p of message.participants || []) if (p.peerId !== peerId) annotations.setCapture(p.peerId, p.sharing?.active ? p.sharing.streamId : undefined);
+          annotations.setCapture(peerId, sharingIdRef.current);
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
           }
@@ -237,6 +257,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
                 isSharing: Boolean(p.sharing?.active),
                 isPaused: Boolean(p.sharing?.paused),
                 hasAudio: p.sharing?.hasAudio,
+                streamId: p.sharing?.streamId,
               }));
 
             if (!message.participants && message.peers) {
@@ -282,6 +303,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
 
         } else if (message.type === 'peer-left') {
+          annotations.setCapture(message.peerId);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const leaving = prev.find((p) => p.peerId === message.peerId);
@@ -306,8 +328,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             showToast('Participante removeu o nickname.');
           }
         } else if (message.type === 'sharing-updated') {
+          annotations.setCapture(message.peerId, message.active ? message.streamId : undefined);
           peerManager.setRemoteSharing(message.peerId, message.active);
-          setParticipants((prev) => prev.map((p) => p.peerId === message.peerId ? { ...p, isSharing: message.active, isPaused: Boolean(message.paused), hasAudio: message.hasAudio } : p));
+          setParticipants((prev) => prev.map((p) => p.peerId === message.peerId ? { ...p, isSharing: message.active, streamId: message.streamId, isPaused: Boolean(message.paused), hasAudio: message.hasAudio } : p));
         } else if (message.type === 'signal') {
           const { from, data } = message;
           if (data.type === 'reset' && from < peerId) {
@@ -347,6 +370,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     return () => {
       isDisposed = true;
       signalingRoomRef.current = null;
+      collaborationReadyRef.current = false;
+      annotations.reset();
       signalingRef.current = null;
       interactionsRef.current.resetConnection();
       captureGenerationRef.current++;
@@ -360,6 +385,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       }
       transition('idle');
       sharingIdRef.current = undefined;
+      annotations.setCapture(localPeerRef.current);
       switchRef.current?.removePendingListener?.();
       stopAllTracks(switchRef.current?.pending ?? null);
       stopAllTracks(switchRef.current?.previous ?? null);
@@ -375,7 +401,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       peerManager.dispose();
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled]);
+  }, [roomId, showToast, enabled, annotations]);
 
   const stopSharing = useCallback(() => {
     qualityOperationRef.current = null;
@@ -395,6 +421,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     transition('stopping');
     signalingRef.current?.updateSharing({ active: false, hasAudio: false, audioMuted: false });
     sharingIdRef.current = undefined;
+    annotations.setCapture(localPeerRef.current);
     if (localStreamRef.current) {
       stopAllTracks(localStreamRef.current);
       localStreamRef.current = null;
@@ -419,7 +446,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (generation === captureGenerationRef.current) transition('idle');
     });
     loggerRef.current?.log('screen-stopped');
-  }, []);
+  }, [annotations]);
 
   const startSharing = useCallback(async () => {
     if (captureStateRef.current !== 'idle') return;
@@ -486,6 +513,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       // Preview must not reserve the spotlight before publication is confirmed.
       setFeaturedStreamId((current) => current || 'local');
       sharingIdRef.current = crypto.randomUUID();
+      annotations.setCapture(localPeerRef.current, sharingIdRef.current);
       signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
     }
     try {
@@ -500,7 +528,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       stopSharing();
       setErrorMessage('Não foi possível publicar a captura. Compartilhamento encerrado.');
     }
-  }, [stopSharing]);
+  }, [stopSharing, annotations]);
 
   const pauseSharing = useCallback(async () => {
     if (!['sharing', 'publishing', 'resuming'].includes(captureStateRef.current)) return;
@@ -632,6 +660,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setPendingStream(null);
       setHasAudioTrack(stream.getAudioTracks().some(track => track.readyState === 'live'));
       setIsAudioMuted(change.muted);
+      sharingIdRef.current = crypto.randomUUID();
+      annotations.setCapture(localPeerRef.current, sharingIdRef.current);
       transition('sharing');
       signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, hasAudio: stream.getAudioTracks().some(track => track.readyState === 'live'), audioMuted: change.muted });
     } catch {
@@ -639,7 +669,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       stopSharing();
       setErrorMessage('Falha ao publicar a nova origem. Compartilhamento encerrado por segurança.');
     }
-  }, [cancelSwitch, stopSharing]);
+  }, [cancelSwitch, stopSharing, annotations]);
 
   const selectFeaturedStream = useCallback((streamId: string) => {
     setFeaturedStreamId(streamId);
@@ -685,6 +715,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const participantsWithSharing = useMemo(() => {
     return participants.map((p) => ({
       ...p,
+      streamId: p.isLocal ? sharingIdRef.current : p.streamId,
       isPaused: p.isLocal ? captureState !== 'sharing' : p.isPaused,
       isSharing: p.isLocal
         ? isSharing
@@ -736,7 +767,19 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     setErrorMessage(null);
   }, []);
 
+  const sendCollaboration = (event: CollaborationMessage): boolean => {
+    if (!collaborationReadyRef.current || signalingRoomRef.current !== roomId ||
+        event.streamId !== sharingIdRef.current ||
+        (event.type !== 'clear-annotations' && captureStateRef.current !== 'sharing')) return false;
+    const outgoing = { ...event, seq: ++collaborationSeqRef.current };
+    if (!signalingRef.current?.send(outgoing)) return false;
+    annotations.apply(localPeerRef.current, outgoing);
+    return true;
+  };
+
   return {
+    annotations, sendCollaboration,
+    collaborationAvailable: connectionStatus === 'connected' && collaborationReadyRef.current,
     chatMessages: interactions.messages,
     reactions: interactions.reactions,
     interactionError: interactions.error,

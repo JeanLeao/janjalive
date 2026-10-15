@@ -29,3 +29,15 @@ test('contain geometry bounds across aspect ratios and resize', () => {
   }
   assert.equal(fitVideo(800, 600, 0, 0).fittedWidth, 0);
 });
+
+test('normalized coordinates exclude letterbox and undo independent zoom and pan', async () => {
+  const { normalizeVideoPoint } = await import('../src/features/room/utils/video-zoom.ts');
+  const g = fitVideo(800, 600, 1920, 1080);
+  assert.equal(normalizeVideoPoint(0, -250, initialView, g), null);
+  assert.deepEqual(normalizeVideoPoint(-400, -225, initialView, g), { x: 0, y: 0 });
+  assert.deepEqual(normalizeVideoPoint(400, 225, initialView, g), { x: 1, y: 1 });
+  const p = { x: .7, y: .3 }, view = { scale: 2, x: -100, y: 50 };
+  const mapped = normalizeVideoPoint((p.x - .5) * g.fittedWidth * view.scale + view.x, (p.y - .5) * g.fittedHeight * view.scale + view.y, view, g);
+  assert.ok(Math.abs(mapped.x - p.x) < 1e-10 && Math.abs(mapped.y - p.y) < 1e-10);
+  assert.equal(normalizeVideoPoint(0, 0, initialView, fitVideo(0, 0, 0, 0)), null);
+});

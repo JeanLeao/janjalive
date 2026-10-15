@@ -49,6 +49,39 @@ export const InteractionRejectedSchema = z.object({
   message: z.string(),
 });
 
+// F13: bounded live events only; no snapshots or history.
+export const COLLABORATION_LIMITS = {
+  annotationTtlMs: 8000, laserTtlMs: 900, sendIntervalMs: 50,
+  pointsPerEvent: 16, pointsPerStroke: 512, strokesPerCapture: 32,
+  laserPerSecond: 25, drawingPerSecond: 30, clearPerSecond: 3,
+  maxBufferedBytes: 32_768,
+} as const;
+export const NormalizedPointSchema = z.object({
+  x: z.number().finite().min(0).max(1), y: z.number().finite().min(0).max(1),
+}).strict();
+export type NormalizedPoint = z.infer<typeof NormalizedPointSchema>;
+const collaborationBase = {
+  streamId: z.string().min(1).max(128),
+  eventId: z.string().uuid(), seq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+};
+export const LaserMessageSchema = z.object({
+  type: z.literal('laser'), ...collaborationBase, point: NormalizedPointSchema.nullable(),
+}).strict();
+export const DrawingMessageSchema = z.object({
+  type: z.literal('drawing'), ...collaborationBase, strokeId: z.string().uuid(),
+  phase: z.enum(['start', 'move', 'end', 'cancel']),
+  index: z.number().int().min(0).max(COLLABORATION_LIMITS.pointsPerStroke),
+  points: z.array(NormalizedPointSchema).max(COLLABORATION_LIMITS.pointsPerEvent),
+}).strict();
+export const ClearAnnotationsSchema = z.object({ type: z.literal('clear-annotations'), ...collaborationBase }).strict();
+export type CollaborationMessage = z.infer<typeof LaserMessageSchema> | z.infer<typeof DrawingMessageSchema> | z.infer<typeof ClearAnnotationsSchema>;
+export const CollaborationEventSchema = z.object({
+  type: z.literal('collaboration'), roomId: z.string().min(1), peerId: z.string().min(1),
+  timestamp: z.number().int().nonnegative(),
+  event: z.discriminatedUnion('type', [LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema]),
+});
+export type CollaborationEvent = z.infer<typeof CollaborationEventSchema>;
+
 // Client -> Server
 export const JoinMessageSchema = z.object({
   type: z.literal('join'),
@@ -78,6 +111,7 @@ export const LeaveMessageSchema = z.object({
 export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema,
   SendChatSchema,
   SendReactionSchema,
   JoinMessageSchema,
@@ -91,6 +125,7 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 // Server -> Client
 export const PeersMessageSchema = z.object({
   type: z.literal('peers'),
+  serverTime: z.number().int().nonnegative().optional(),
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
@@ -157,6 +192,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  CollaborationEventSchema,
   ChatMessageSchema,
   ReactionEventSchema,
   InteractionRejectedSchema,

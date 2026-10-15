@@ -290,6 +290,7 @@ function RoomPage() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
         interactions={<InteractionLayer ui={interactionsUi} messages={session.chatMessages} reactions={session.reactions}
           error={session.interactionError} pending={session.chatPending} connected={connected} localPeerId={localPeerId} />}
         interactionAccess={interactionActions('floating')}

@@ -13,6 +13,7 @@ export interface RoomParticipant {
   isLocal: boolean;
   isSharing: boolean;
   isPaused?: boolean;
+  streamId?: string;
   hasAudio?: boolean;
 }
 

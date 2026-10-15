@@ -380,17 +380,17 @@ test('F21 local zoom, wheel, pan, fullscreen, touch, selection and restart', asy
     const x = box.x + box.width / 2 + 50, y = box.y + box.height / 2;
     await viewer.mouse.move(x, y); await viewer.mouse.wheel(0, -100);
     await expect(group).toContainText('125%');
-    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBeCloseTo(-12.5);
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v.parentElement!).transform).m41)).toBeCloseTo(-12.5);
     await viewer.mouse.wheel(0, 100); await expect(group).toContainText('100%');
     for (let i = 0; i < 8; i++) await plus.click();
     await expect(group).toContainText('300%'); await expect(plus).toBeDisabled();
     await viewer.mouse.move(x,y); await viewer.mouse.down(); await viewer.mouse.move(x+2000,y+2000); await viewer.mouse.up();
-    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBeGreaterThan(0);
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v.parentElement!).transform).m41)).toBeGreaterThan(0);
     await viewer.getByRole('button', { name: 'Tela cheia', exact: true }).click();
     await expect.poll(() => viewer.evaluate(() => !!document.fullscreenElement)).toBe(true);
     await viewer.getByRole('button', { name: 'Sair da tela cheia' }).click();
     await reset.click();
-    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBe(0);
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v.parentElement!).transform).m41)).toBe(0);
     // Wheel over a control must keep its native default behavior and leave zoom alone.
     expect(await plus.evaluate(el => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })))).toBe(true);
     await expect(group).toContainText('100%');
@@ -1262,4 +1262,147 @@ test('Preview modal maintains visual stability and zero tremor during async qual
   const collapsedAgain = await getMetrics();
   expect(collapsedAgain.dialogBox!.y).toBeCloseTo(initial.dialogBox!.y, 0.1);
   expect(collapsedAgain.videoBox!.y).toBeCloseTo(initial.videoBox!.y, 0.1);
+});
+
+async function annotationPixels(page: Page) {
+  return page.getByTestId('annotation-overlay').evaluate((el: HTMLCanvasElement) => {
+    const { data } = el.getContext('2d')!.getImageData(0, 0, el.width, el.height);
+    let count = 0, minX = el.width, maxX = 0, minY = el.height, maxY = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i]) {
+      count++; const x = (i >> 2) % el.width, y = Math.floor((i >> 2) / el.width);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    return { count, x: (minX + maxX) / (2 * el.width), y: (minY + maxY) / (2 * el.height) };
+  });
+}
+async function drawAnnotation(page: Page) {
+  const tool = page.getByRole('button', { name: 'Desenhar', exact: true });
+  if (await tool.getAttribute('aria-pressed') !== 'true') await tool.click();
+  const b = (await page.getByTestId('zoom-viewport').boundingBox())!;
+  await page.mouse.move(b.x + b.width * .45, b.y + b.height * .5); await page.mouse.down();
+  await page.mouse.move(b.x + b.width * .55, b.y + b.height * .55, { steps: 5 });
+  await page.waitForTimeout(70); await page.mouse.up();
+}
+
+test('F13 laser, geometry, immediate drawing, expiry, clear, late join and reconnect without history', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
+    const errors: string[] = [];
+    for (const p of [host, viewer, late]) { await syntheticCapture(p); p.on('pageerror', e => errors.push(e.message)); }
+    await Promise.all([host.goto('/room/f13-live'), viewer.goto('/room/f13-live')]);
+    await startLive(host); await frames(viewer);
+    await expect(host.getByRole('button', { name: 'Ponteiro laser', exact: true })).toBeEnabled();
+    await expect(viewer.getByRole('button', { name: 'Ponteiro laser', exact: true })).toHaveCount(0);
+    await host.getByRole('button', { name: 'Ponteiro laser', exact: true }).click();
+    const box = (await host.getByTestId('zoom-viewport').boundingBox())!;
+    await host.mouse.move(box.x + box.width * .5, box.y + box.height * .5);
+    await expect.poll(async () => (await annotationPixels(host)).count).toBeGreaterThan(0);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    expect((await annotationPixels(viewer)).x).toBeCloseTo(.5, 1);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBe(0);
+    await host.getByRole('button', { name: 'Ponteiro laser', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Navegar', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // Drawing input in letterbox space must not create a stroke.
+    await host.getByRole('button', { name: 'Desenhar', exact: true }).click();
+    const bar = await host.getByTestId('zoom-viewport').evaluate(el => {
+      const b = el.getBoundingClientRect(), v = el.querySelector('video')!;
+      const ratio = Math.min(b.width / v.videoWidth, b.height / v.videoHeight);
+      const fw = v.videoWidth * ratio, fh = v.videoHeight * ratio;
+      return b.width - fw > 8 ? { x: b.x + (b.width - fw) / 4, y: b.y + b.height * .6 }
+        : { x: b.x + b.width * .6, y: b.y + (b.height - fh) / 4 };
+    });
+    await host.mouse.click(bar.x, bar.y);
+    expect((await annotationPixels(host)).count).toBe(0);
+    // Zoom and pan stay local, content coordinates sent by the host remain normalized.
+    await viewer.getByRole('button', { name: 'Ampliar zoom' }).click();
+    const gestureBox = (await host.getByTestId('zoom-viewport').boundingBox())!;
+    await host.mouse.move(gestureBox.x + gestureBox.width * .45, gestureBox.y + gestureBox.height * .5);
+    await host.mouse.down();
+    await host.mouse.move(gestureBox.x + gestureBox.width * .55, gestureBox.y + gestureBox.height * .55, { steps: 5 });
+    await expect.poll(async () => (await annotationPixels(host)).count).toBeGreaterThan(0);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    expect(await viewer.getByTestId('annotation-overlay').evaluate(el => el.parentElement === document.querySelector('[data-testid="zoom-viewport"] video')?.parentElement)).toBe(true);
+    await late.goto('/room/f13-live'); await frames(late);
+    expect((await annotationPixels(late)).count).toBe(0);
+    await host.mouse.move(gestureBox.x + gestureBox.width * .6, gestureBox.y + gestureBox.height * .55, { steps: 3 });
+    await host.mouse.up();
+    expect((await annotationPixels(late)).count).toBe(0);
+    await viewer.evaluate(() => { for (const ws of (window as any).testSockets) if (ws.readyState === 1) ws.close(4100, 'test reconnect'); });
+    await expect.poll(() => viewer.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1).length)).toBe(1);
+    await frames(viewer); expect((await annotationPixels(viewer)).count).toBe(0);
+    await expect.poll(async () => (await annotationPixels(host)).count, { timeout: 10000 }).toBe(0);
+    await drawAnnotation(host);
+    await expect.poll(async () => (await annotationPixels(late)).count).toBeGreaterThan(0);
+    await host.getByRole('button', { name: 'Limpar minhas anotações' }).click();
+    for (const p of [host, viewer, late]) await expect.poll(async () => (await annotationPixels(p)).count).toBe(0);
+    // Overlay never replaces or adds tracks to the original capture.
+    expect(await host.evaluate(() => {
+      const video = document.querySelector('[data-testid="zoom-viewport"] video') as HTMLVideoElement;
+      return video.srcObject === (window as any).testCapture && (video.srcObject as MediaStream).getVideoTracks().length === 1;
+    })).toBe(true);
+    expect(errors).toEqual([]);
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
+
+test('F13 independent presenters, pause/resume, cancelled and confirmed replacement, fullscreen and Cinema', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
+    for (const p of [host, viewer]) await syntheticCapture(p);
+    await Promise.all([host.goto('/room/f13-captures'), viewer.goto('/room/f13-captures')]);
+    await startLive(host); await frames(viewer); await drawAnnotation(host);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    const captureId = () => viewer.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'sharing-updated').at(-1)?.streamId);
+    const originalId = await captureId();
+    await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Desenhar', exact: true })).toBeDisabled();
+    await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+    await frames(viewer); expect(await captureId()).toBe(originalId);
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    await frames(viewer); expect(await captureId()).toBe(originalId);
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await expect.poll(captureId).not.toBe(originalId); await frames(viewer);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBe(0);
+    await startLive(viewer);
+    await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
+    await drawAnnotation(viewer);
+    await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
+    expect((await annotationPixels(viewer)).count).toBe(0);
+    await host.getByRole('button', { name: 'Limpar minhas anotações' }).click();
+    await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    await viewer.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await expect.poll(() => viewer.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    await viewer.getByRole('button', { name: 'Sair da tela cheia' }).click();
+    await viewer.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    await viewer.screenshot({ path: test.info().outputPath('f13-desktop-cinema.png') });
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
+
+test('F13 mobile tools, keyboard and touch cancellation do not pan or zoom', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  try {
+    const page = await context.newPage(); await syntheticCapture(page); await page.goto('/room/f13-touch'); await startLive(page);
+    const draw = page.getByRole('button', { name: 'Desenhar', exact: true });
+    await draw.focus(); await page.keyboard.press('Enter'); await expect(draw).toHaveAttribute('aria-pressed', 'true');
+    const viewport = page.getByTestId('zoom-viewport'), b = (await viewport.boundingBox())!;
+    expect(await draw.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    const cdp = await context.newCDPSession(page);
+    const p = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x + 30, y: p.y + 20 }] });
+    await expect.poll(async () => (await annotationPixels(page)).count).toBeGreaterThan(0);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await expect.poll(async () => (await annotationPixels(page)).count).toBe(0);
+    await expect(page.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('100%');
+    await viewport.focus(); await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Navegar', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.screenshot({ path: test.info().outputPath('f13-mobile.png') });
+    await cdp.detach();
+  } finally { await context.close(); }
 });

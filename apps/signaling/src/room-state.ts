@@ -1,10 +1,11 @@
-import { normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo } from '@screen-room/protocol';
+import { normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo, type CollaborationMessage, COLLABORATION_LIMITS } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
 export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
 
 export interface ParticipantMeta {
   interactions?: InteractionBudget;
+  collaboration?: { streamId: string; seq: number; laser: number[]; drawing: number[]; clear: number[] };
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
@@ -163,7 +164,26 @@ export class RoomRegistry {
 
   updateSharing(roomId: string, peerId: string, sharing: SharingState): void {
     const meta = this.#rooms.get(roomId)?.get(peerId);
-    if (meta) meta.sharing = sharing;
+    if (meta) {
+      if (!sharing.active || sharing.streamId !== meta.sharing?.streamId) meta.collaboration = undefined;
+      meta.sharing = sharing;
+    }
+  }
+
+  /** Operational counters only: never retain points, strokes or event payloads. */
+  acceptCollaboration(roomId: string, peerId: string, event: CollaborationMessage, now = Date.now()): boolean {
+    const meta = this.#rooms.get(roomId)?.get(peerId);
+    if (!meta?.sharing?.active || meta.sharing.streamId !== event.streamId ||
+        (meta.sharing.paused && event.type !== 'clear-annotations')) return false;
+    const budget = meta.collaboration ||= { streamId: event.streamId, seq: 0, laser: [], drawing: [], clear: [] };
+    if (event.seq <= budget.seq) return false;
+    const kind = event.type === 'laser' ? 'laser' : event.type === 'drawing' ? 'drawing' : 'clear';
+    const max = kind === 'laser' ? COLLABORATION_LIMITS.laserPerSecond : kind === 'drawing' ? COLLABORATION_LIMITS.drawingPerSecond : COLLABORATION_LIMITS.clearPerSecond;
+    budget[kind] = budget[kind].filter(time => now - time < 1000);
+    if (budget[kind].length >= max) return false;
+    budget[kind].push(now);
+    budget.seq = event.seq;
+    return true;
   }
 
   interactionBudget(roomId: string, peerId: string): InteractionBudget {

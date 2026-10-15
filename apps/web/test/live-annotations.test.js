@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { LiveAnnotations } from '../src/features/room/collaboration/live-annotations.ts';
+import { COLLABORATION_LIMITS as L } from '@screen-room/protocol';
+const point = { x: .2, y: .3 };
+const drawing = (seq, phase = 'start', extra = {}) => ({ type: 'drawing', seq, streamId: 's', strokeId: 'stroke', phase, index: phase === 'start' ? 0 : 1, points: [point], ...extra });
+test('expiry uses start deadline, frees resources without receiving more events, independent presenters', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0; const store = new LiveAnnotations(() => now); t.after(() => store.reset());
+  store.setCapture('a', 's'); store.setCapture('b', 's');
+  store.apply('a', drawing(1)); store.apply('b', drawing(1));
+  now = 4000; t.mock.timers.tick(4000); store.apply('a', drawing(2, 'move'));
+  assert.equal(store.captures.get('a').strokes.get('stroke').expires, 8000);
+  now = 8000; t.mock.timers.tick(4000);
+  assert.equal(store.captures.get('a').strokes.size, 0); assert.equal(store.captures.get('b').strokes.size, 0);
+  store.apply('a', drawing(3, 'end', { index: 2 })); assert.equal(store.captures.get('a').strokes.size, 0);
+});
+test('missing, duplicate, out of order, cleared, stale capture and reconnect events do not create segments', t => {
+  const store = new LiveAnnotations(); t.after(() => store.reset()); store.setCapture('a', 's');
+  store.apply('a', drawing(2, 'move')); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.apply('a', drawing(1)); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.apply('a', drawing(3)); store.apply('a', drawing(3));
+  assert.equal(store.captures.get('a').strokes.size, 1);
+  store.apply('a', drawing(4, 'move', { index: 5 })); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.apply('a', drawing(5)); store.apply('a', { type: 'clear-annotations', streamId: 's', seq: 6 });
+  store.apply('a', drawing(7, 'end')); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.setCapture('a', 'new'); store.apply('a', drawing(8)); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.reset(); store.setCapture('a', 's'); store.apply('a', drawing(9, 'move')); assert.equal(store.captures.get('a').strokes.size, 0);
+  store.apply('a', drawing(10), L.annotationTtlMs); assert.equal(store.captures.get('a').strokes.size, 0);
+});
+test('bounded memory, manual clear isolation and laser expiry', t => {
+  let now = 0; const store = new LiveAnnotations(() => now); t.after(() => store.reset());
+  store.setCapture('a', 's'); store.setCapture('b', 's');
+  for (let i = 1; i <= 100; i++) store.apply('a', drawing(i, 'start', { strokeId: String(i) }));
+  assert.equal(store.captures.get('a').strokes.size, L.strokesPerCapture);
+  store.apply('b', drawing(1)); store.apply('a', { type: 'clear-annotations', seq: 101, streamId: 's' });
+  assert.equal(store.captures.get('a').strokes.size, 0); assert.equal(store.captures.get('b').strokes.size, 1);
+  store.apply('a', { type: 'laser', point, seq: 102, streamId: 's' }); now = L.laserTtlMs; store.expire();
+  assert.equal(store.captures.get('a').laser, null);
+});
