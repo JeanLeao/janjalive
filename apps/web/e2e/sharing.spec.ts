@@ -292,3 +292,65 @@ for (const role of ['viewer', 'presenter']) {
     } finally { await a.close(); await b.close(); }
   });
 }
+
+test('F21 local zoom, wheel, pan, fullscreen, touch, selection and restart', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext({ hasTouch: true })]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
+    const errors: string[] = [];
+    for (const page of [host, viewer]) page.on('pageerror', error => errors.push(error.message));
+    await Promise.all([syntheticCapture(host), syntheticCapture(viewer)]);
+    await Promise.all([host.goto('/room/e2e-zoom'), viewer.goto('/room/e2e-zoom')]);
+    await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+    await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+    await frames(viewer);
+    const viewport = viewer.getByTestId('zoom-viewport');
+    const video = viewport.locator('video');
+    const group = viewer.getByRole('group', { name: 'Zoom da transmissão' });
+    const plus = viewer.getByRole('button', { name: 'Ampliar zoom' });
+    const minus = viewer.getByRole('button', { name: 'Reduzir zoom' });
+    const reset = viewer.getByRole('button', { name: 'Restaurar enquadramento' });
+    await expect(group).toContainText('100%');
+    await expect(minus).toBeDisabled();
+    await plus.focus(); await viewer.keyboard.press('Enter');
+    await expect(group).toContainText('125%');
+    await expect(host.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('100%');
+    await reset.click();
+    const box = (await viewport.boundingBox())!;
+    const x = box.x + box.width / 2 + 50, y = box.y + box.height / 2;
+    await viewer.mouse.move(x, y); await viewer.mouse.wheel(0, -100);
+    await expect(group).toContainText('125%');
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBeCloseTo(-12.5);
+    await viewer.mouse.wheel(0, 100); await expect(group).toContainText('100%');
+    for (let i = 0; i < 8; i++) await plus.click();
+    await expect(group).toContainText('300%'); await expect(plus).toBeDisabled();
+    await viewer.mouse.move(x,y); await viewer.mouse.down(); await viewer.mouse.move(x+2000,y+2000); await viewer.mouse.up();
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBeGreaterThan(0);
+    await viewer.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await expect.poll(() => viewer.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    await viewer.getByRole('button', { name: 'Sair da tela cheia' }).click();
+    await reset.click();
+    await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBe(0);
+    // Wheel over a control must keep its native default behavior and leave zoom alone.
+    expect(await plus.evaluate(el => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })))).toBe(true);
+    await expect(group).toContainText('100%');
+    await viewer.setViewportSize({ width: 390, height: 844 });
+    await plus.tap(); await expect(group).toContainText('125%');
+    await frames(viewer);
+    await viewer.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+    await expect(viewer.getByRole('button', { name: /^Destacar transmissão/ })).toBeVisible();
+    await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
+    await expect(group).toContainText('100%');
+    await plus.tap();
+    await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
+    await expect(group).toContainText('100%');
+    await viewer.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    await expect(viewport).toHaveCount(0);
+    await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+    await frames(viewer); await expect(group).toContainText('100%');
+    await viewer.mouse.move(0, 0);
+    await viewer.screenshot({ path: test.info().outputPath('zoom-mobile.png') });
+    expect(errors).toEqual([]);
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
