@@ -238,3 +238,111 @@ test('spectator departure: removePeer cleans up pointers and sequence metadata w
   assert.equal(store.captures.get('a').pointers.size, 1);
   assert.equal(store.captures.get('a').pointers.has('v2'), true);
 });
+
+const specDrawingEvt = (seq, senderPeerId = 'v1', strokeId = 'stroke-1', phase = 'start', index = 0, extra = {}) => ({
+  type: 'spectator-drawing',
+  targetPeerId: 'a',
+  streamId: 's',
+  eventId: `evt-draw-${senderPeerId}-${seq}`,
+  strokeId,
+  seq,
+  phase,
+  index,
+  points: [point],
+  senderPeerId,
+  senderNickname: `User ${senderPeerId}`,
+  ...extra,
+});
+
+test('collaborative drawing: multi-spectator stroke isolation, 8s TTL from start, clear isolation and departure cleanup', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0;
+  const store = new LiveAnnotations(() => now);
+  t.after(() => store.reset());
+  store.setCapture('a', 's');
+
+  // Presenter draws and points
+  store.apply('a', drawing(1, 'start', { strokeId: 'host-stroke' }));
+  store.apply('a', pointerEvt(1, 'v1'));
+
+  // Spectator v1 starts drawing stroke-1 at t=0
+  store.apply('a', specDrawingEvt(1, 'v1', 'stroke-1', 'start', 0));
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 1);
+  const strokeV1 = store.captures.get('a').collaborativeStrokes.get('v1:stroke-1');
+  assert.ok(strokeV1);
+  assert.equal(strokeV1.expires, 8000);
+
+  // Spectator v2 starts drawing with same strokeId 'stroke-1' (isolated by sender key)
+  store.apply('a', specDrawingEvt(1, 'v2', 'stroke-1', 'start', 0));
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 2);
+  assert.ok(store.captures.get('a').collaborativeStrokes.has('v1:stroke-1'));
+  assert.ok(store.captures.get('a').collaborativeStrokes.has('v2:stroke-1'));
+
+  // Move does NOT extend TTL
+  now = 4000;
+  t.mock.timers.tick(4000);
+  store.apply('a', specDrawingEvt(2, 'v1', 'stroke-1', 'move', 1));
+  assert.equal(store.captures.get('a').collaborativeStrokes.get('v1:stroke-1').expires, 8000);
+
+  // Missing batch invalidates stroke
+  store.apply('a', specDrawingEvt(3, 'v1', 'stroke-1', 'move', 5)); // gap in index (expected 2, got 5)
+  assert.equal(store.captures.get('a').collaborativeStrokes.has('v1:stroke-1'), false);
+  // v2 stroke remains intact
+  assert.equal(store.captures.get('a').collaborativeStrokes.has('v2:stroke-1'), true);
+
+  // Presenter clear-annotations wipes presenter strokes, leaves collaborative strokes and pointers intact
+  store.apply('a', pointerEvt(2, 'v1'));
+  store.apply('a', { type: 'clear-annotations', streamId: 's', eventId: 'clear-1', seq: 2 });
+  assert.equal(store.captures.get('a').strokes.size, 0);
+  assert.equal(store.captures.get('a').pointers.size, 1);
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 1);
+
+  // Presenter clear-collaborative-drawings wipes collaborative strokes, leaves pointers intact
+  store.apply('a', { type: 'clear-collaborative-drawings', streamId: 's', eventId: 'clear-collab-1', seq: 3 });
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 0);
+  assert.equal(store.captures.get('a').pointers.size, 1);
+
+  // Spectator v3 draws
+  store.apply('a', specDrawingEvt(1, 'v3', 'stroke-v3', 'start', 0));
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 1);
+
+  // Spectator v3 leaves room -> their strokes and seq metadata are cleaned up immediately
+  store.removePeer('v3');
+  assert.equal(store.captures.get('a').collaborativeStrokes.has('v3:stroke-v3'), false);
+  assert.equal(store.captures.get('a').collaborativeSeqs.has('v3'), false);
+
+  // Automatic TTL expiry for unexpired strokes
+  store.apply('a', specDrawingEvt(1, 'v4', 'stroke-v4', 'start', 0));
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 1);
+  now += 8001;
+  t.mock.timers.tick(8001);
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, 0);
+  assert.equal(store.captures.get('a').collaborativeSeqs.size, 0);
+});
+
+test('collaborative drawing bounds and LRU eviction', t => {
+  const store = new LiveAnnotations();
+  t.after(() => store.reset());
+  store.setCapture('a', 's');
+
+  const maxStrokes = L.collaborativeStrokesPerCapture;
+  const maxTracked = L.trackedDrawersPerCapture;
+  assert.equal(maxStrokes, 32);
+  assert.equal(maxTracked, 24);
+
+  // 50 spectators start strokes
+  for (let i = 1; i <= 50; i++) {
+    store.apply('a', specDrawingEvt(1, `viewer-${i}`, `stroke-${i}`, 'start', 0));
+    assert.ok(store.captures.get('a').collaborativeStrokes.size <= maxStrokes);
+    assert.ok(store.captures.get('a').collaborativeSeqs.size <= maxTracked);
+    assert.ok(store.captures.get('a').collaborativeEventIds.length <= 32);
+  }
+
+  assert.equal(store.captures.get('a').collaborativeStrokes.size, maxStrokes);
+  assert.equal(store.captures.get('a').collaborativeSeqs.size, maxTracked);
+
+  // Oldest viewers evicted from metadata
+  assert.equal(store.captures.get('a').collaborativeSeqs.has('viewer-1'), false);
+  assert.equal(store.captures.get('a').collaborativeSeqs.has('viewer-50'), true);
+});
+

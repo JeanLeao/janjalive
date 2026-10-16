@@ -52,8 +52,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const localPeerRef = useRef('');
   const collaborationSeqRef = useRef(0);
   const pointingSeqRef = useRef(0);
+  const spectatorDrawingSeqRef = useRef(0);
+  const clearCollaborativeSeqRef = useRef(0);
   const [pointingEnabled, setPointingEnabled] = useState<boolean>(true);
   const pointingEnabledRef = useRef<boolean>(true);
+  const [drawingEnabled, setDrawingEnabled] = useState<boolean>(false);
+  const drawingEnabledRef = useRef<boolean>(false);
   const interactions = useRoomInteractions(roomId);
   const interactionsRef = useRef(interactions);
   interactionsRef.current = interactions;
@@ -244,7 +248,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
           peerManager.setParticipants((message.participants?.map((p) => p.peerId) || message.peers).filter((id) => id !== peerId));
           for (const p of message.participants || []) if (p.peerId !== peerId && p.sharing) peerManager.setRemoteSharing(p.peerId, p.sharing.active);
-          signaling.updateSharing({ active: Boolean(sharingIdRef.current), paused: Boolean(sharingIdRef.current) && captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: Boolean(sharingIdRef.current) ? pointingEnabledRef.current : undefined, hasAudio: Boolean(localStreamRef.current?.getAudioTracks().length), audioMuted: switchRef.current?.muted ?? (localStreamRef.current?.getAudioTracks().some((track) => !track.enabled) || false) });
+          signaling.updateSharing({ active: Boolean(sharingIdRef.current), paused: Boolean(sharingIdRef.current) && captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: Boolean(sharingIdRef.current) ? pointingEnabledRef.current : undefined, drawingEnabled: Boolean(sharingIdRef.current) ? drawingEnabledRef.current : undefined, hasAudio: Boolean(localStreamRef.current?.getAudioTracks().length), audioMuted: switchRef.current?.muted ?? (localStreamRef.current?.getAudioTracks().some((track) => !track.enabled) || false) });
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const local = prev.find((p) => p.isLocal) || {
@@ -262,6 +266,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
                 isSharing: Boolean(p.sharing?.active),
                 isPaused: Boolean(p.sharing?.paused),
                 pointingEnabled: p.sharing?.active ? p.sharing.pointingEnabled !== false : undefined,
+                drawingEnabled: p.sharing?.active ? p.sharing.drawingEnabled === true : false,
                 hasAudio: p.sharing?.hasAudio,
                 streamId: p.sharing?.streamId,
               }));
@@ -336,8 +341,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         } else if (message.type === 'sharing-updated') {
           annotations.setCapture(message.peerId, message.active ? message.streamId : undefined);
           if (message.active && message.pointingEnabled === false) annotations.clearPointers(message.peerId);
+          if (message.active && message.drawingEnabled === false) annotations.clearCollaborativeDrawings(message.peerId);
           peerManager.setRemoteSharing(message.peerId, message.active);
-          setParticipants((prev) => prev.map((p) => p.peerId === message.peerId ? { ...p, isSharing: message.active, streamId: message.streamId, isPaused: Boolean(message.paused), pointingEnabled: message.active ? message.pointingEnabled !== false : undefined, hasAudio: message.hasAudio } : p));
+          setParticipants((prev) => prev.map((p) => p.peerId === message.peerId ? { ...p, isSharing: message.active, streamId: message.streamId, isPaused: Boolean(message.paused), pointingEnabled: message.active ? message.pointingEnabled !== false : undefined, drawingEnabled: message.active ? message.drawingEnabled === true : false, hasAudio: message.hasAudio } : p));
         } else if (message.type === 'signal') {
           const { from, data } = message;
           if (data.type === 'reset' && from < peerId) {
@@ -432,6 +438,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     sharingIdRef.current = undefined;
     pointingEnabledRef.current = true;
     setPointingEnabled(true);
+    drawingEnabledRef.current = false;
+    setDrawingEnabled(false);
     annotations.setCapture(localPeerRef.current);
     if (localStreamRef.current) {
       stopAllTracks(localStreamRef.current);
@@ -526,8 +534,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       sharingIdRef.current = crypto.randomUUID();
       pointingEnabledRef.current = true;
       setPointingEnabled(true);
+      drawingEnabledRef.current = false;
+      setDrawingEnabled(false);
       annotations.setCapture(localPeerRef.current, sharingIdRef.current);
-      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
+      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: false, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
     }
     try {
       await peerManagerRef.current?.attachLocalStream(stream);
@@ -535,7 +545,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       transition('sharing');
       sharingIdRef.current ||= crypto.randomUUID();
       setIsSharing(true);
-      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
+      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
@@ -554,7 +564,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setIsSharing(true);
       sharingIdRef.current ||= crypto.randomUUID();
       const stream = localStreamRef.current;
-      signalingRef.current?.updateSharing({ active: true, paused: true, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: Boolean(stream?.getAudioTracks().length), audioMuted: stream?.getAudioTracks().some(track => !track.enabled) || false });
+      signalingRef.current?.updateSharing({ active: true, paused: true, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: Boolean(stream?.getAudioTracks().length), audioMuted: stream?.getAudioTracks().some(track => !track.enabled) || false });
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
@@ -676,9 +686,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       sharingIdRef.current = crypto.randomUUID();
       pointingEnabledRef.current = true;
       setPointingEnabled(true);
+      drawingEnabledRef.current = false;
+      setDrawingEnabled(false);
       annotations.setCapture(localPeerRef.current, sharingIdRef.current);
       transition('sharing');
-      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: true, hasAudio: stream.getAudioTracks().some(track => track.readyState === 'live'), audioMuted: change.muted });
+      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: true, drawingEnabled: false, hasAudio: stream.getAudioTracks().some(track => track.readyState === 'live'), audioMuted: change.muted });
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
@@ -732,12 +744,13 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       ...p,
       streamId: p.isLocal ? sharingIdRef.current : p.streamId,
       pointingEnabled: p.isLocal ? pointingEnabled : p.pointingEnabled,
+      drawingEnabled: p.isLocal ? drawingEnabled : p.drawingEnabled,
       isPaused: p.isLocal ? captureState !== 'sharing' : p.isPaused,
       isSharing: p.isLocal
         ? isSharing
         : p.isSharing || remoteStreams.some((r) => r.peerId === p.peerId),
     }));
-  }, [participants, isSharing, remoteStreams, captureState, pointingEnabled]);
+  }, [participants, isSharing, remoteStreams, captureState, pointingEnabled, drawingEnabled]);
 
   const togglePointingPermission = useCallback(() => {
     if (!sharingIdRef.current || switchRef.current) return;
@@ -751,6 +764,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       paused: captureStateRef.current !== 'sharing',
       streamId: sharingIdRef.current,
       pointingEnabled: nextEnabled,
+      drawingEnabled: drawingEnabledRef.current,
       hasAudio: Boolean(stream?.getAudioTracks().length),
       audioMuted: stream?.getAudioTracks().some((track) => !track.enabled) || false,
     });
@@ -758,12 +772,45 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     showToast(nextEnabled ? 'Apontamentos rápidos ativados.' : 'Apontamentos rápidos desativados.');
   }, [annotations, showToast]);
 
+  const toggleDrawingPermission = useCallback(() => {
+    if (!sharingIdRef.current || switchRef.current) return;
+    const nextEnabled = !drawingEnabledRef.current;
+    drawingEnabledRef.current = nextEnabled;
+    setDrawingEnabled(nextEnabled);
+    if (!nextEnabled) annotations.clearCollaborativeDrawings(localPeerRef.current);
+    const stream = localStreamRef.current;
+    signalingRef.current?.updateSharing({
+      active: true,
+      paused: captureStateRef.current !== 'sharing',
+      streamId: sharingIdRef.current,
+      pointingEnabled: pointingEnabledRef.current,
+      drawingEnabled: nextEnabled,
+      hasAudio: Boolean(stream?.getAudioTracks().length),
+      audioMuted: stream?.getAudioTracks().some((track) => !track.enabled) || false,
+    });
+    loggerRef.current?.log('drawing-permission', { enabled: nextEnabled });
+    showToast(nextEnabled ? 'Desenho colaborativo ativado.' : 'Desenho colaborativo desativado.');
+  }, [annotations, showToast]);
+
+  const clearCollaborativeDrawings = useCallback(() => {
+    if (!sharingIdRef.current || switchRef.current) return;
+    annotations.clearCollaborativeDrawings(localPeerRef.current);
+    const outgoing = {
+      type: 'clear-collaborative-drawings' as const,
+      streamId: sharingIdRef.current,
+      eventId: crypto.randomUUID(),
+      seq: ++clearCollaborativeSeqRef.current,
+    };
+    signalingRef.current?.send(outgoing);
+    showToast('Desenhos dos espectadores limpos.');
+  }, [annotations, showToast]);
+
   const toggleAudioMute = useCallback(() => {
     if (!localStreamRef.current || switchRef.current) return;
     const nextMuted = !isAudioMuted;
     setStreamAudioMuted(localStreamRef.current, nextMuted);
     setIsAudioMuted(nextMuted);
-    if (sharingIdRef.current) signalingRef.current?.updateSharing({ active: true, paused: captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: true, audioMuted: nextMuted });
+    if (sharingIdRef.current) signalingRef.current?.updateSharing({ active: true, paused: captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: true, audioMuted: nextMuted });
     loggerRef.current?.log('screen-audio', { muted: nextMuted });
     showToast(nextMuted ? 'Áudio da tela mutado.' : 'Áudio da tela reativado.');
   }, [isAudioMuted, showToast]);
@@ -816,6 +863,25 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       });
       return true;
     }
+    if (event.type === 'spectator-drawing') {
+      const target = participantsRef.current.find((p) => !p.isLocal && p.peerId === event.targetPeerId);
+      if (!target?.isSharing || target.isPaused || target.streamId !== event.streamId || target.drawingEnabled !== true) return false;
+      const outgoing = { ...event, seq: ++spectatorDrawingSeqRef.current };
+      if (!signalingRef.current?.send(outgoing)) return false;
+      annotations.apply(event.targetPeerId, {
+        ...outgoing,
+        senderPeerId: localPeerRef.current,
+        ...(nicknameRef.current ? { senderNickname: nicknameRef.current } : {}),
+      });
+      return true;
+    }
+    if (event.type === 'clear-collaborative-drawings') {
+      if (event.streamId !== sharingIdRef.current) return false;
+      const outgoing = { ...event, seq: ++clearCollaborativeSeqRef.current };
+      if (!signalingRef.current?.send(outgoing)) return false;
+      annotations.apply(localPeerRef.current, outgoing);
+      return true;
+    }
     if (event.streamId !== sharingIdRef.current ||
         (event.type !== 'clear-annotations' && captureStateRef.current !== 'sharing')) return false;
     const outgoing = { ...event, seq: ++collaborationSeqRef.current };
@@ -829,6 +895,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     collaborationAvailable: connectionStatus === 'connected' && collaborationReadyRef.current,
     pointingEnabled,
     togglePointingPermission,
+    drawingEnabled,
+    toggleDrawingPermission,
+    clearCollaborativeDrawings,
     chatMessages: interactions.messages,
     reactions: interactions.reactions,
     interactionError: interactions.error,

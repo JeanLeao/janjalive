@@ -33,6 +33,9 @@ import {
 export interface RoomStageProps {
   annotations?: AnnotationChannel;
   onTogglePointingPermission?: () => void;
+  drawingEnabled?: boolean;
+  onToggleDrawingPermission?: () => void;
+  onClearCollaborativeDrawings?: () => void;
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
@@ -63,6 +66,9 @@ interface StreamItem {
 export function RoomStage({
   annotations,
   onTogglePointingPermission,
+  drawingEnabled,
+  onToggleDrawingPermission,
+  onClearCollaborativeDrawings,
   interactions,
   interactionAccess,
   isCinema = false,
@@ -357,6 +363,9 @@ export function RoomStage({
           annotationStreamId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.streamId}
           pointingEnabled={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.pointingEnabled !== false}
           onTogglePointingPermission={activeStream.isLocal ? onTogglePointingPermission : undefined}
+          drawingEnabled={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.drawingEnabled === true}
+          onToggleDrawingPermission={activeStream.isLocal ? onToggleDrawingPermission : undefined}
+          onClearCollaborativeDrawings={activeStream.isLocal ? onClearCollaborativeDrawings : undefined}
           stream={activeStream.paused ? null : activeStream.stream}
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
@@ -514,6 +523,9 @@ function SpotlightVideoPlayer({
   annotations, localPeerId, annotationPeerId, annotationStreamId,
   pointingEnabled = true,
   onTogglePointingPermission,
+  drawingEnabled = false,
+  onToggleDrawingPermission,
+  onClearCollaborativeDrawings,
   stream,
   isLocal,
   connectionState,
@@ -532,6 +544,9 @@ function SpotlightVideoPlayer({
   annotationStreamId?: string;
   pointingEnabled?: boolean;
   onTogglePointingPermission?: () => void;
+  drawingEnabled?: boolean;
+  onToggleDrawingPermission?: () => void;
+  onClearCollaborativeDrawings?: () => void;
   stream: MediaStream | null;
   isLocal: boolean;
   isCinema: boolean;
@@ -551,15 +566,18 @@ function SpotlightVideoPlayer({
   const [tool, setTool] = useState<AnnotationTool>('navigate');
   const canAnnotate = Boolean(isLocal && stream && annotationStreamId && annotations?.available);
   const canPoint = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
+  const canDraw = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && drawingEnabled);
   const effectiveTool: AnnotationTool =
     isLocal
       ? canAnnotate && (tool === 'laser' || tool === 'draw')
         ? tool
         : 'navigate'
+      : canDraw && tool === 'draw'
+      ? 'draw'
       : canPoint && tool === 'point'
       ? 'point'
       : 'navigate';
-  useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available, pointingEnabled, isLocal]);
+  useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available, pointingEnabled, drawingEnabled, isLocal]);
   const zoom = useVideoZoom(videoRef, stream, effectiveTool !== 'navigate');
   const pip = usePictureInPicture(videoRef, stream);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -609,6 +627,23 @@ function SpotlightVideoPlayer({
           disabled={!annotations.available} onClick={() => annotations.send({ type: 'clear-annotations', streamId: annotationStreamId, eventId: crypto.randomUUID(), seq: 1 })}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 14 9-10 7 6-9 10H7zM9 20h12M9 9l7 6" /></svg>
         </Button></Tooltip>
+        {onClearCollaborativeDrawings && (
+          <Tooltip label="Limpar desenhos dos espectadores" withArrow>
+            <Button
+              variant="subtle"
+              color="gray"
+              aria-label="Limpar desenhos dos espectadores"
+              p={8}
+              disabled={!annotations.available}
+              onClick={onClearCollaborativeDrawings}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m4 16-1 5 5-1L20 8l-4-4z" />
+                <line x1="2" y1="2" x2="22" y2="22" />
+              </svg>
+            </Button>
+          </Tooltip>
+        )}
         {onTogglePointingPermission && (
           <Tooltip
             label={
@@ -635,9 +670,34 @@ function SpotlightVideoPlayer({
             </Button>
           </Tooltip>
         )}
+        {onToggleDrawingPermission && (
+          <Tooltip
+            label={
+              drawingEnabled
+                ? 'Permitir desenhos dos espectadores (ativo)'
+                : 'Permitir desenhos dos espectadores (desativado)'
+            }
+            withArrow
+          >
+            <Button
+              variant={drawingEnabled ? 'light' : 'subtle'}
+              color={drawingEnabled ? 'blue' : 'gray'}
+              disabled={!annotations.available}
+              aria-pressed={drawingEnabled}
+              aria-label="Permitir desenhos dos espectadores"
+              onClick={onToggleDrawingPermission}
+              p={8}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m4 16-1 5 5-1L20 8l-4-4zM14 6l4 4" />
+                {!drawingEnabled && <path d="M4 4l16 16" />}
+              </svg>
+            </Button>
+          </Tooltip>
+        )}
       </Box>}
       {!isLocal && annotations && annotationPeerId && annotationStreamId && (
-        <Box role="group" aria-label="Apontamento rápido" style={{ display: 'flex', gap: 2 }}>
+        <Box role="group" aria-label="Ferramentas de colaboração" style={{ display: 'flex', gap: 2 }}>
           <Tooltip
             label={
               !pointingEnabled
@@ -674,6 +734,44 @@ function SpotlightVideoPlayer({
                   <circle cx="12" cy="12" r="2.2" />
                 </svg>
                 <span style={{ fontSize: 12, fontWeight: 600 }}>Apontar</span>
+              </Button>
+            </span>
+          </Tooltip>
+          <Tooltip
+            label={
+              !drawingEnabled
+                ? 'Desenho colaborativo desativado pelo apresentador'
+                : effectiveTool === 'draw'
+                ? 'Cancelar desenho (Esc)'
+                : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`
+            }
+            withArrow
+          >
+            <span
+              tabIndex={!canDraw ? 0 : undefined}
+              aria-label={!drawingEnabled ? 'Desenho colaborativo desativado pelo apresentador' : undefined}
+            >
+              <Button
+                variant={effectiveTool === 'draw' ? 'filled' : 'subtle'}
+                color={effectiveTool === 'draw' ? 'blue' : 'gray'}
+                disabled={!canDraw}
+                aria-pressed={effectiveTool === 'draw'}
+                aria-label="Desenhar"
+                onClick={() => {
+                  const next = effectiveTool === 'draw' ? 'navigate' : 'draw';
+                  setTool(next);
+                  if (next === 'draw') {
+                    requestAnimationFrame(() => zoom.viewportRef.current?.focus({ preventScroll: true }));
+                  }
+                }}
+                px={10}
+                py={6}
+                style={{ gap: 6 }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ marginRight: 5 }}>
+                  <path d="m4 16-1 5 5-1L20 8l-4-4zM14 6l4 4" />
+                </svg>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Desenhar</span>
               </Button>
             </span>
           </Tooltip>
