@@ -7,6 +7,7 @@ import {
   Button,
   UnstyledButton,
   Tooltip,
+  Menu,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
@@ -297,9 +298,17 @@ export function RoomStage({
           border: 1px solid rgba(255,255,255,.1);
           border-radius: 8px;
         }
+        .stage-display-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.16); padding-left: 6px; }
+        .stage-annotations-menu { max-width: calc(100vw - 24px); }
+        .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
+        }
+        @media (max-width: 360px) {
+          .stage-view-controls { gap: 2px; }
+          .stage-view-controls > [aria-label="Anotações temporárias"] { gap: 0 !important; }
+          .stage-display-controls { display: contents; }
         }
         @media (max-width: 560px) {
           .stage-quality-pill-compact { display: none !important; }
@@ -623,78 +632,39 @@ function SpotlightVideoPlayer({
             </svg>
           </Button>
         </Tooltip>)}
-        <Tooltip label="Limpar minhas anotações" withArrow><Button variant="subtle" color="gray" aria-label="Limpar minhas anotações" p={8}
-          disabled={!annotations.available} onClick={() => annotations.send({ type: 'clear-annotations', streamId: annotationStreamId, eventId: crypto.randomUUID(), seq: 1 })}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 14 9-10 7 6-9 10H7zM9 20h12M9 9l7 6" /></svg>
-        </Button></Tooltip>
-        {onClearCollaborativeDrawings && (
-          <Tooltip label="Limpar desenhos dos espectadores" withArrow>
-            <Button
-              variant="subtle"
-              color="gray"
-              aria-label="Limpar desenhos dos espectadores"
-              p={8}
-              disabled={!annotations.available}
-              onClick={onClearCollaborativeDrawings}
-            >
+        <Menu key={`${annotationPeerId}:${annotationStreamId}:${isFullscreen}`} position="top-end" offset={8}
+          width={280} closeOnItemClick={false}
+          portalProps={{ target: isFullscreen ? controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined : undefined }}>
+          <Menu.Target>
+            <Button variant="subtle" color="gray" aria-label="Anotações" title="Anotações" p={8}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="m4 16-1 5 5-1L20 8l-4-4z" />
-                <line x1="2" y1="2" x2="22" y2="22" />
+                <path d="M9 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-4M9 15l1-4L19 2l4 4-9 9z" />
               </svg>
             </Button>
-          </Tooltip>
-        )}
-        {onTogglePointingPermission && (
-          <Tooltip
-            label={
-              pointingEnabled
-                ? 'Permitir apontamentos dos espectadores (ativo)'
-                : 'Permitir apontamentos dos espectadores (desativado)'
-            }
-            withArrow
-          >
-            <Button
-              variant={pointingEnabled ? 'light' : 'subtle'}
-              color={pointingEnabled ? 'cyan' : 'gray'}
-              disabled={!annotations.available}
-              aria-pressed={pointingEnabled}
-              aria-label="Permitir apontamentos dos espectadores"
-              onClick={onTogglePointingPermission}
-              p={8}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="7" />
-                <circle cx="12" cy="12" r="2.2" />
-                {!pointingEnabled && <path d="M4 4l16 16" />}
-              </svg>
-            </Button>
-          </Tooltip>
-        )}
-        {onToggleDrawingPermission && (
-          <Tooltip
-            label={
-              drawingEnabled
-                ? 'Permitir desenhos dos espectadores (ativo)'
-                : 'Permitir desenhos dos espectadores (desativado)'
-            }
-            withArrow
-          >
-            <Button
-              variant={drawingEnabled ? 'light' : 'subtle'}
-              color={drawingEnabled ? 'blue' : 'gray'}
-              disabled={!annotations.available}
-              aria-pressed={drawingEnabled}
-              aria-label="Permitir desenhos dos espectadores"
-              onClick={onToggleDrawingPermission}
-              p={8}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="m4 16-1 5 5-1L20 8l-4-4zM14 6l4 4" />
-                {!drawingEnabled && <path d="M4 4l16 16" />}
-              </svg>
-            </Button>
-          </Tooltip>
-        )}
+          </Menu.Target>
+          <Menu.Dropdown className="stage-annotations-menu">
+            <Menu.Label>Permissões dos espectadores</Menu.Label>
+            {onTogglePointingPermission && <Menu.CheckboxItem checked={pointingEnabled}
+              disabled={!annotations.available} onChange={onTogglePointingPermission}
+              rightSection={<span aria-hidden>{pointingEnabled ? 'Ativo' : 'Inativo'}</span>}>
+              Permitir apontamentos
+            </Menu.CheckboxItem>}
+            {onToggleDrawingPermission && <Menu.CheckboxItem checked={Boolean(drawingEnabled)}
+              disabled={!annotations.available} onChange={onToggleDrawingPermission}
+              rightSection={<span aria-hidden>{drawingEnabled ? 'Ativo' : 'Inativo'}</span>}>
+              Permitir desenhos
+            </Menu.CheckboxItem>}
+            <Menu.Divider />
+            <Menu.Label>Limpeza</Menu.Label>
+            <Menu.Item disabled={!annotations.available}
+              onClick={() => annotations.send({ type: 'clear-annotations', streamId: annotationStreamId, eventId: crypto.randomUUID(), seq: 1 })}>
+              Limpar minhas anotações
+            </Menu.Item>
+            {onClearCollaborativeDrawings && <Menu.Item disabled={!annotations.available} onClick={onClearCollaborativeDrawings}>
+              Limpar desenhos dos espectadores
+            </Menu.Item>}
+          </Menu.Dropdown>
+        </Menu>
       </Box>}
       {!isLocal && annotations && annotationPeerId && annotationStreamId && (
         <Box role="group" aria-label="Ferramentas de colaboração" style={{ display: 'flex', gap: 2 }}>
@@ -777,6 +747,7 @@ function SpotlightVideoPlayer({
           </Tooltip>
         </Box>
       )}
+      <Box className="stage-display-controls" role="group" aria-label="Controles de visualização">
       {onToggleCinema && (
         <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
           <Button
@@ -838,6 +809,7 @@ function SpotlightVideoPlayer({
           aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
         >{isFullscreen ? <IconMinimize size={16} aria-hidden /> : <IconMaximize size={16} aria-hidden />}</Button>
       </Tooltip>
+      </Box>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
     <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
