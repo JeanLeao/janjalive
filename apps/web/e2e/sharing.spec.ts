@@ -147,16 +147,43 @@ async function frames(page: Page) {
   } catch (error) {
     const state = await page.evaluate(() => [...document.querySelectorAll('video')].map(v => ({
       paused: v.paused, width: v.videoWidth, time: v.currentTime, frames: v.getVideoPlaybackQuality().totalVideoFrames,
+      presentedCallbacks: (window as any).testRenderedFrames.get(v) || 0,
+      readyState: v.readyState, error: v.error?.code,
       tracks: (v.srcObject as MediaStream | null)?.getTracks().map(t => ({ id: t.id, kind: t.kind, readyState: t.readyState, muted: t.muted })),
     })));
-    const peers = await page.evaluate(() => (window as any).testPeers.map((pc: RTCPeerConnection) => ({
-      state: pc.connectionState, transceivers: pc.getTransceivers().map(t => ({
-        mid: t.mid, direction: t.direction, currentDirection: t.currentDirection,
-        receiver: { id: t.receiver.track.id, muted: t.receiver.track.muted, readyState: t.receiver.track.readyState },
-        sender: t.sender.track?.id,
+    // Do not attach raw signaling messages/SDP: they can contain credentials.
+    // Separate transport, inbound decoding and presentation when the deadline fails.
+    const transport = await page.evaluate(async () => ({
+      visibility: document.visibilityState,
+      sockets: (window as any).testSockets.map((ws: WebSocket) => ({ state: ws.readyState })),
+      messages: ((window as any).testMessages || []).map((m: any) => ({
+        type: m.type, signal: m.type === 'signal' ? m.data?.type : undefined,
       })),
-    })));
-    await test.info().attach('playback-state', { body: JSON.stringify({ state, peers }), contentType: 'application/json' });
+      peers: await Promise.all(((window as any).testPeers as RTCPeerConnection[]).map(async pc => {
+        const inbound: Record<string, unknown>[] = [];
+        if (pc.connectionState !== 'closed') {
+          (await pc.getStats()).forEach(report => {
+            if (report.type === 'inbound-rtp' && report.kind === 'video') inbound.push({
+              trackIdentifier: report.trackIdentifier, packetsReceived: report.packetsReceived,
+              bytesReceived: report.bytesReceived, framesReceived: report.framesReceived,
+              framesDecoded: report.framesDecoded, framesDropped: report.framesDropped,
+              keyFramesDecoded: report.keyFramesDecoded,
+            });
+          });
+        }
+        return {
+          state: pc.connectionState, ice: pc.iceConnectionState, signaling: pc.signalingState,
+          localDescription: pc.localDescription?.type, remoteDescription: pc.remoteDescription?.type,
+          inbound,
+          transceivers: pc.getTransceivers().map(t => ({
+            mid: t.mid, direction: t.direction, currentDirection: t.currentDirection,
+            receiver: { id: t.receiver.track.id, muted: t.receiver.track.muted, readyState: t.receiver.track.readyState },
+            sender: t.sender.track?.id,
+          })),
+        };
+      })),
+    }));
+    await test.info().attach('playback-state', { body: JSON.stringify({ state, transport }), contentType: 'application/json' });
     throw error;
   }
 }
@@ -1733,12 +1760,19 @@ test('F13 collaborative drawing permissions: disabled by default, presenter enab
     await expect(late.getByTestId('collaborative-author-badge')).toHaveCount(0);
 
     // 7. Viewer reconnects: retains permission to draw on the active capture, without history
+    const priorJoins = await viewer.evaluate(() =>
+      ((window as any).testMessages || []).filter((m: any) => m.type === 'peers').length);
     await viewer.evaluate(() => {
-      for (const ws of (window as any).testSockets) {
-        if (ws.readyState === 1) ws.close(4100, 'test reconnect');
+      for (const ws of (window as any).testSockets as WebSocket[]) {
+        // Vite's HMR socket also lives here; closing it can reload the page.
+        if (ws.readyState === WebSocket.OPEN && ws.url.includes('/signal')) ws.close(4100, 'test reconnect');
       }
     });
-    await expect.poll(() => viewer.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1).length)).toBe(1);
+    await expect.poll(() => viewer.evaluate(before => ({
+      sockets: ((window as any).testSockets as WebSocket[])
+        .filter(s => s.url.includes('/signal') && s.readyState === WebSocket.OPEN).length,
+      joinedAgain: ((window as any).testMessages || []).filter((m: any) => m.type === 'peers').length > before,
+    }), priorJoins)).toEqual({ sockets: 1, joinedAgain: true });
     await frames(viewer);
     await expect(viewer.getByRole('button', { name: 'Desenhar', exact: true })).toBeEnabled();
     expect((await annotationPixels(viewer)).count).toBe(0);
