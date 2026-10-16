@@ -551,6 +551,31 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'point') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptPointing(meta.roomId, meta.peerId, message)) return;
+          const targetPeerId = normalizePeer(message.targetPeerId);
+          const senderNickname = rooms.getNickname(meta.roomId, meta.peerId);
+          const event: ServerMessage = {
+            type: 'collaboration',
+            roomId: meta.roomId,
+            peerId: targetPeerId,
+            timestamp: Date.now(),
+            event: {
+              ...message,
+              targetPeerId,
+              senderPeerId: meta.peerId,
+              ...(senderNickname ? { senderNickname } : {}),
+            },
+          };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
         if (message.type === 'send-chat' || message.type === 'send-reaction') {
           const reject = (messageText: string) => send(socket, {
             type: 'interaction-rejected', requestId: message.requestId, message: messageText,
@@ -629,8 +654,8 @@ export function createSignalServer({
           const { roomId, peerId } = socket.meta;
           if (peerSocket(roomId, peerId) !== socket) return;
           const { type, ...sharing } = message;
-          rooms.updateSharing(roomId, peerId, sharing);
-          broadcast(roomId, { type: 'sharing-updated', peerId, ...sharing }, peerId);
+          const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
+          broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           return;
         }
 
