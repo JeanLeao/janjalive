@@ -54,6 +54,7 @@ export const InteractionRejectedSchema = z.object({
 export const COLLABORATION_LIMITS = {
   annotationTtlMs: 8000, laserTtlMs: 900, pointTtlMs: 2600, sendIntervalMs: 50,
   pointsPerEvent: 16, pointsPerStroke: 512, strokesPerCapture: 32, pointersPerCapture: 8,
+  trackedPointersPerCapture: 24,
   laserPerSecond: 25, drawingPerSecond: 30, clearPerSecond: 3, pointPerSecond: 4,
   maxBufferedBytes: 32_768,
 } as const;

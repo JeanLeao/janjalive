@@ -309,7 +309,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
 
         } else if (message.type === 'peer-left') {
-          annotations.setCapture(message.peerId);
+          annotations.removePeer(message.peerId);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const leaving = prev.find((p) => p.peerId === message.peerId);

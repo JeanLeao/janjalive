@@ -9,11 +9,15 @@ export interface SpectatorPointer {
   createdAt: number;
   expires: number;
 }
+export interface PointerSeqMetadata {
+  seq: number;
+  expires: number;
+}
 export interface CaptureAnnotations {
   streamId: string; seq: number; strokes: Map<string, Stroke>;
   laser: { point: NormalizedPoint; expires: number } | null;
   pointers: Map<string, SpectatorPointer>;
-  pointerSeqs: Map<string, number>;
+  pointerSeqs: Map<string, PointerSeqMetadata>;
   pointerEventIds: string[];
 }
 /** Session-owned ephemeral memory; no React renders per event and no history API. */
@@ -32,6 +36,7 @@ export class LiveAnnotations {
       if (capture.laser) deadline = Math.min(deadline, capture.laser.expires);
       for (const stroke of capture.strokes.values()) deadline = Math.min(deadline, stroke.expires);
       for (const ptr of capture.pointers.values()) deadline = Math.min(deadline, ptr.expires);
+      for (const seq of capture.pointerSeqs.values()) deadline = Math.min(deadline, seq.expires);
     }
     this.timer = Number.isFinite(deadline) ? setTimeout(() => { this.timer = null; this.expire(); }, Math.max(1, deadline - this.now())) : null;
   }
@@ -41,6 +46,7 @@ export class LiveAnnotations {
       if (capture.laser && capture.laser.expires <= now) capture.laser = null;
       for (const [id, stroke] of capture.strokes) if (stroke.expires <= now) capture.strokes.delete(id);
       for (const [id, ptr] of capture.pointers) if (ptr.expires <= now) capture.pointers.delete(id);
+      for (const [id, seq] of capture.pointerSeqs) if (seq.expires <= now) capture.pointerSeqs.delete(id);
     }
     this.changed();
   }
@@ -52,6 +58,23 @@ export class LiveAnnotations {
       pointers: new Map(), pointerSeqs: new Map(), pointerEventIds: [],
     });
     this.changed();
+  }
+  removePeer(peerId: string) {
+    let changed = false;
+    if (this.captures.delete(peerId)) {
+      changed = true;
+    }
+    for (const capture of this.captures.values()) {
+      if (capture.pointers.delete(peerId)) {
+        changed = true;
+      }
+      if (capture.pointerSeqs.delete(peerId)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.changed();
+    }
   }
   clearPointers(peerId: string) {
     const capture = this.captures.get(peerId);
@@ -68,14 +91,24 @@ export class LiveAnnotations {
     const now = this.now();
     if (event.type === 'point') {
       if (event.targetPeerId && event.targetPeerId !== peerId) return;
-      const lastSeq = capture.pointerSeqs.get(event.senderPeerId) ?? 0;
-      if (event.seq <= lastSeq || capture.pointerEventIds.includes(event.eventId)) return;
-      capture.pointerSeqs.set(event.senderPeerId, event.seq);
-      capture.pointerEventIds = [...capture.pointerEventIds.slice(-31), event.eventId];
       if (ageMs >= L.pointTtlMs) return;
       for (const [id, ptr] of capture.pointers) {
         if (ptr.expires <= now) capture.pointers.delete(id);
       }
+      for (const [id, seq] of capture.pointerSeqs) {
+        if (seq.expires <= now) capture.pointerSeqs.delete(id);
+      }
+      const lastSeq = capture.pointerSeqs.get(event.senderPeerId)?.seq ?? 0;
+      if (event.seq <= lastSeq || capture.pointerEventIds.includes(event.eventId)) return;
+      const expires = now + L.pointTtlMs - ageMs;
+      const maxTracked = L.trackedPointersPerCapture ?? 24;
+      if (!capture.pointerSeqs.has(event.senderPeerId) && capture.pointerSeqs.size >= maxTracked) {
+        const oldestSeqKey = capture.pointerSeqs.keys().next().value;
+        if (oldestSeqKey !== undefined) capture.pointerSeqs.delete(oldestSeqKey);
+      }
+      capture.pointerSeqs.delete(event.senderPeerId);
+      capture.pointerSeqs.set(event.senderPeerId, { seq: event.seq, expires });
+      capture.pointerEventIds = [...capture.pointerEventIds.slice(-31), event.eventId];
       if (!capture.pointers.has(event.senderPeerId) && capture.pointers.size >= L.pointersPerCapture) {
         const oldestKey = capture.pointers.keys().next().value;
         if (oldestKey !== undefined) capture.pointers.delete(oldestKey);
@@ -87,7 +120,7 @@ export class LiveAnnotations {
         senderNickname: event.senderNickname,
         point: event.point,
         createdAt: now - ageMs,
-        expires: now + L.pointTtlMs - ageMs,
+        expires,
       });
       this.changed();
       return;
