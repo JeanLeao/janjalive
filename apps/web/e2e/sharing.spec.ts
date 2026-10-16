@@ -1275,7 +1275,11 @@ async function annotationPixels(page: Page) {
     return { count, x: (minX + maxX) / (2 * el.width), y: (minY + maxY) / (2 * el.height) };
   });
 }
+async function openAnnotations(page: Page) {
+  if (!await page.getByRole('menu').isVisible()) await page.getByRole('button', { name: 'Anotações', exact: true }).click();
+}
 async function drawAnnotation(page: Page) {
+  if (await page.getByRole('menu').isVisible()) await page.keyboard.press('Escape');
   const tool = page.getByRole('button', { name: 'Desenhar', exact: true });
   if (await tool.getAttribute('aria-pressed') !== 'true') await tool.click();
   const b = (await page.getByTestId('zoom-viewport').boundingBox())!;
@@ -1334,7 +1338,8 @@ test('F13 laser, geometry, immediate drawing, expiry, clear, late join and recon
     await expect.poll(async () => (await annotationPixels(host)).count, { timeout: 10000 }).toBe(0);
     await drawAnnotation(host);
     await expect.poll(async () => (await annotationPixels(late)).count).toBeGreaterThan(0);
-    await host.getByRole('button', { name: 'Limpar minhas anotações' }).click();
+    await openAnnotations(host);
+    await host.getByRole('menuitem', { name: 'Limpar minhas anotações' }).click();
     for (const p of [host, viewer, late]) await expect.poll(async () => (await annotationPixels(p)).count).toBe(0);
     // Overlay never replaces or adds tracks to the original capture.
     expect(await host.evaluate(() => {
@@ -1371,7 +1376,8 @@ test('F13 independent presenters, pause/resume, cancelled and confirmed replacem
     await drawAnnotation(viewer);
     await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
     expect((await annotationPixels(viewer)).count).toBe(0);
-    await host.getByRole('button', { name: 'Limpar minhas anotações' }).click();
+    await openAnnotations(host);
+    await host.getByRole('menuitem', { name: 'Limpar minhas anotações' }).click();
     await viewer.getByRole('button', { name: /^Destacar transmissão/ }).click();
     await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
     await viewer.getByRole('button', { name: 'Tela cheia', exact: true }).click();
@@ -1438,7 +1444,8 @@ test('F13 spectator quick pointing: presenter and spectator visibility, identity
     await expect(viewerPointBtn).toBeEnabled();
     await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'false');
     await expect(viewer.getByRole('button', { name: 'Ponteiro laser', exact: true })).toHaveCount(0);
-    await expect(hostA.getByRole('button', { name: 'Permitir apontamentos dos espectadores', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await openAnnotations(hostA);
+    await expect(hostA.getByRole('menuitemcheckbox', { name: 'Permitir apontamentos', exact: true })).toHaveAttribute('aria-checked', 'true');
 
     // Escape cancels pointing before sending
     await viewerPointBtn.click();
@@ -1499,7 +1506,8 @@ test('F13 spectator quick pointing: presenter and spectator visibility, identity
     // Presenter F13 drawing still works after spectator pointing
     await drawAnnotation(hostA);
     await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
-    await hostA.getByRole('button', { name: 'Limpar minhas anotações', exact: true }).click();
+    await openAnnotations(hostA);
+    await hostA.getByRole('menuitem', { name: 'Limpar minhas anotações', exact: true }).click();
     await expect.poll(async () => (await annotationPixels(viewer)).count).toBe(0);
   } finally {
     await Promise.all(contexts.map((c) => c.close()));
@@ -1518,14 +1526,17 @@ test('F13 spectator pointing permissions: disable/enable, server block, pause/re
     await startLive(host);
     await frames(viewer);
 
-    const permToggle = host.getByRole('button', { name: 'Permitir apontamentos dos espectadores', exact: true });
+    const permToggle = host.getByRole('menuitemcheckbox', { name: 'Permitir apontamentos', exact: true });
     const viewerPointBtn = viewer.getByRole('button', { name: 'Apontar', exact: true });
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
     await expect(viewerPointBtn).toBeEnabled();
 
     // Owner disables pointing -> reflected on viewer UI and enforced by server even on manual WebSocket send
+    await openAnnotations(host);
     await permToggle.click();
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
     await expect(viewerPointBtn).toBeDisabled();
 
     // Manual spoofed point via socket while disabled is blocked by server
@@ -1556,14 +1567,16 @@ test('F13 spectator pointing permissions: disable/enable, server block, pause/re
     await expect(viewer.getByText('Transmissão pausada', { exact: true }).first()).toBeVisible();
     await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
     await frames(viewer);
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
     await expect(viewerPointBtn).toBeDisabled();
 
     // Cancelled source switch preserves disabled permission
     await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
     await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
     await frames(viewer);
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
     await expect(viewerPointBtn).toBeDisabled();
 
     // Reconnect of presenter preserves disabled permission
@@ -1576,21 +1589,26 @@ test('F13 spectator pointing permissions: disable/enable, server block, pause/re
     });
     await expect(host.getByText('Conectado', { exact: true })).toBeVisible({ timeout: 10000 });
     await frames(viewer);
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
     await expect(viewerPointBtn).toBeDisabled();
 
     // Owner re-enables pointing -> viewer can point again
+    await openAnnotations(host);
     await permToggle.click();
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
     await expect(viewerPointBtn).toBeEnabled();
 
     // Owner disables again, then confirms a new capture switch -> new streamId resets to enabled by default
+    await openAnnotations(host);
     await permToggle.click();
     await expect(viewerPointBtn).toBeDisabled();
     await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
     await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
     await frames(viewer);
-    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
     await expect(viewerPointBtn).toBeEnabled();
   } finally {
     await Promise.all(contexts.map((c) => c.close()));
@@ -1648,3 +1666,268 @@ test('F13 spectator pointing: keyboard navigation, Cinema, Fullscreen and mobile
   }
 });
 
+test('F13 collaborative drawing permissions: disabled by default, presenter enables, spectator draws with author badge, presenter clears spectator drawings independently, expiry without renewal, late joiner and reconnect without history', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage();
+    const viewer = await contexts[1].newPage();
+    const late = await contexts[2].newPage();
+    for (const p of [host, viewer, late]) await syntheticCapture(p);
+
+    await viewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Mariana'));
+
+    await Promise.all([host.goto('/room/f13-drawing-perms'), viewer.goto('/room/f13-drawing-perms')]);
+    await startLive(host);
+    await frames(viewer);
+
+    const permToggle = host.getByRole('menuitemcheckbox', { name: 'Permitir desenhos', exact: true });
+    const viewerDrawBtn = viewer.getByRole('button', { name: 'Desenhar', exact: true });
+    const hostClearSpectatorsBtn = host.getByRole('menuitem', { name: 'Limpar desenhos dos espectadores', exact: true });
+    const hostClearOwnBtn = host.getByRole('menuitem', { name: 'Limpar minhas anotações', exact: true });
+
+    // 1. Initially disabled by default on new capture
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
+    await expect(viewerDrawBtn).toBeDisabled();
+
+    // 2. Presenter explicitly enables collaborative drawing
+    await openAnnotations(host);
+    await permToggle.click();
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
+    await expect(viewerDrawBtn).toBeEnabled();
+
+    // 3. Spectator draws; pixels appear and discrete author badge is displayed
+    await drawAnnotation(viewer);
+    await expect.poll(async () => (await annotationPixels(host)).count).toBeGreaterThan(0);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    await expect(host.getByTestId('collaborative-author-badge')).toBeVisible();
+    await expect(host.getByTestId('collaborative-author-badge')).toContainText('Mariana');
+    await expect(viewer.getByTestId('collaborative-author-badge')).toContainText('Mariana (você)');
+
+    // 4. Presenter draws own annotation and clears spectator drawings independently
+    await drawAnnotation(host);
+    await openAnnotations(host);
+    await hostClearSpectatorsBtn.click();
+    // Collaborative author badge is removed immediately
+    await expect(host.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    await expect(viewer.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    // Presenter's own drawing remains visible
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    // Presenter clears own annotations
+    await openAnnotations(host);
+    await hostClearOwnBtn.click();
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBe(0);
+
+    // 5. Expiration without renewal: spectator draws and strokes disappear after TTL
+    await drawAnnotation(viewer);
+    await expect(host.getByTestId('collaborative-author-badge')).toBeVisible();
+    await expect.poll(async () => (await annotationPixels(host)).count, { timeout: 12000 }).toBe(0);
+    await expect(host.getByTestId('collaborative-author-badge')).toHaveCount(0);
+
+    // 6. Late joiner receives current active permission, but no expired or previous drawing history
+    await late.goto('/room/f13-drawing-perms');
+    await frames(late);
+    await expect(late.getByRole('button', { name: 'Desenhar', exact: true })).toBeEnabled();
+    expect((await annotationPixels(late)).count).toBe(0);
+    await expect(late.getByTestId('collaborative-author-badge')).toHaveCount(0);
+
+    // 7. Viewer reconnects: retains permission to draw on the active capture, without history
+    await viewer.evaluate(() => {
+      for (const ws of (window as any).testSockets) {
+        if (ws.readyState === 1) ws.close(4100, 'test reconnect');
+      }
+    });
+    await expect.poll(() => viewer.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1).length)).toBe(1);
+    await frames(viewer);
+    await expect(viewer.getByRole('button', { name: 'Desenhar', exact: true })).toBeEnabled();
+    expect((await annotationPixels(viewer)).count).toBe(0);
+  } finally {
+    await Promise.all(contexts.map((c) => c.close()));
+  }
+});
+
+test('F13 collaborative drawing: revocation, pause/resume, switch cancel/confirm and multi-spectator isolation', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage();
+    const viewerA = await contexts[1].newPage();
+    const viewerB = await contexts[2].newPage();
+    for (const p of [host, viewerA, viewerB]) await syntheticCapture(p);
+
+    await viewerA.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Alice'));
+    await viewerB.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Bob'));
+
+    await Promise.all([
+      host.goto('/room/f13-drawing-lifecycle'),
+      viewerA.goto('/room/f13-drawing-lifecycle'),
+      viewerB.goto('/room/f13-drawing-lifecycle'),
+    ]);
+    await startLive(host);
+    await frames(viewerA);
+    await frames(viewerB);
+
+    const permToggle = host.getByRole('menuitemcheckbox', { name: 'Permitir desenhos', exact: true });
+    const drawBtnA = viewerA.getByRole('button', { name: 'Desenhar', exact: true });
+    const drawBtnB = viewerB.getByRole('button', { name: 'Desenhar', exact: true });
+
+    // Enable collaborative drawing
+    await openAnnotations(host);
+    await permToggle.click();
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
+    await expect(drawBtnA).toBeEnabled();
+    await expect(drawBtnB).toBeEnabled();
+
+    // Multi-spectator drawing: Alice and Bob both draw
+    await drawAnnotation(viewerA);
+    await drawAnnotation(viewerB);
+    await expect(host.getByTestId('collaborative-author-badge').filter({ hasText: 'Alice' })).toBeVisible();
+    await expect(host.getByTestId('collaborative-author-badge').filter({ hasText: 'Bob' })).toBeVisible();
+
+    // Revocation: Presenter disables drawing
+    await openAnnotations(host);
+    await permToggle.click();
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
+
+    // Immediate removal of all collaborative drawings and badges on all clients
+    await expect(host.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    await expect(viewerA.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    await expect(viewerB.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    await expect.poll(async () => (await annotationPixels(host)).count).toBe(0);
+    await expect.poll(async () => (await annotationPixels(viewerA)).count).toBe(0);
+    await expect(drawBtnA).toBeDisabled();
+    await expect(drawBtnB).toBeDisabled();
+
+    // Spoofed drawing attempt over WebSocket while revoked is rejected by server
+    await viewerA.evaluate(() => {
+      const ws = (window as any).testSockets.find((s: WebSocket) => s.readyState === 1);
+      const msg = (window as any).testMessages.findLast((m: any) => m.type === 'sharing-updated');
+      ws?.send(
+        JSON.stringify({
+          type: 'spectator-drawing',
+          targetPeerId: msg.peerId,
+          streamId: msg.streamId,
+          eventId: crypto.randomUUID(),
+          seq: 100,
+          strokeId: crypto.randomUUID(),
+          phase: 'start',
+          index: 0,
+          points: [{ x: 0.5, y: 0.5 }],
+        })
+      );
+    });
+    await host.waitForTimeout(80);
+    await expect(host.getByTestId('collaborative-author-badge')).toHaveCount(0);
+    expect((await annotationPixels(host)).count).toBe(0);
+
+    // Re-enable and test Pause / Resume
+    await openAnnotations(host);
+    await permToggle.click();
+    await expect(drawBtnA).toBeEnabled();
+
+    await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+    await expect(viewerA.getByText('Transmissão pausada', { exact: true }).first()).toBeVisible();
+    await expect(drawBtnA).toBeDisabled();
+
+    await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+    await frames(viewerA);
+    // Permission preserved on resume
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
+    await expect(drawBtnA).toBeEnabled();
+
+    // Cancelled switch preserves permission
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    await frames(viewerA);
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'true');
+    await expect(drawBtnA).toBeEnabled();
+
+    // Confirmed switch resets permission to disabled by default
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await frames(viewerA);
+    await openAnnotations(host);
+    await expect(permToggle).toHaveAttribute('aria-checked', 'false');
+    await expect(drawBtnA).toBeDisabled();
+  } finally {
+    await Promise.all(contexts.map((c) => c.close()));
+  }
+});
+
+for (const width of [1280, 390, 320]) {
+  test(`Annotations menu layout, permissions, keyboard and touch at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 844 }, hasTouch: width < 400 });
+    try {
+      const page = await context.newPage();
+      await syntheticCapture(page); await page.goto(`/room/annotations-menu-${width}`); await startLive(page);
+      const trigger = page.getByRole('button', { name: 'Anotações', exact: true });
+      const menu = page.getByRole('menu');
+      const pointing = page.getByRole('menuitemcheckbox', { name: 'Permitir apontamentos', exact: true });
+      const drawing = page.getByRole('menuitemcheckbox', { name: 'Permitir desenhos', exact: true });
+      const inspect = async (state: string) => {
+        const bar = await page.locator('.stage-view-controls').boundingBox();
+        expect(bar!.x).toBeGreaterThanOrEqual(0); expect(bar!.x + bar!.width).toBeLessThanOrEqual(width);
+        const dock = await page.locator('.floating-dock-wrapper').boundingBox();
+        if (!await page.evaluate(() => !!document.fullscreenElement) && dock && bar!.x < dock.x + dock.width && bar!.x + bar!.width > dock.x) expect(bar!.y + bar!.height).toBeLessThanOrEqual(dock.y);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if (await menu.isVisible()) {
+          const box = (await menu.boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(await drawing.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+        }
+        await page.screenshot({ path: test.info().outputPath(`${state}-${width}.png`), animations: 'disabled' });
+      };
+      await trigger.focus(); await page.keyboard.press('Enter');
+      await expect(menu).toBeVisible();
+      await expect(pointing).toHaveAttribute('aria-checked', 'true');
+      await expect(drawing).toHaveAttribute('aria-checked', 'false');
+      if (width < 400) await drawing.tap(); else {
+        await pointing.focus(); await page.keyboard.press('ArrowDown'); await expect(drawing).toBeFocused();
+        await page.keyboard.press('Space');
+      }
+      await expect(menu).toBeVisible(); await expect(drawing).toHaveAttribute('aria-checked', 'true');
+      await expect(pointing).toHaveAttribute('aria-checked', 'true');
+      await inspect('menu');
+      await page.keyboard.press('Escape'); await expect(menu).toBeHidden(); await expect(trigger).toBeFocused();
+      await inspect('toolbar');
+      const viewerContext = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 844 }, hasTouch: width < 400 });
+      try {
+        const viewer = await viewerContext.newPage(); await syntheticCapture(viewer);
+        await viewer.goto(`/room/annotations-menu-${width}`); await frames(viewer);
+        for (const name of ['Apontar', 'Desenhar']) {
+          const tool = viewer.getByRole('button', { name, exact: true });
+          await expect(tool).toBeEnabled();
+          expect((await tool.boundingBox())!.height).toBeGreaterThanOrEqual(width < 400 ? 44 : 36);
+          if (width < 400) await tool.tap(); else await tool.click();
+          await expect(tool).toHaveAttribute('aria-pressed', 'true');
+          await expect(viewer.getByTestId('zoom-viewport')).toBeFocused();
+          await viewer.keyboard.press('Escape'); await expect(tool).toHaveAttribute('aria-pressed', 'false');
+        }
+        const bar = (await viewer.locator('.stage-view-controls').boundingBox())!;
+        const dock = (await viewer.locator('.floating-dock-wrapper').boundingBox())!;
+        expect(bar.x).toBeGreaterThanOrEqual(0); expect(bar.x + bar.width).toBeLessThanOrEqual(width);
+        expect(bar.y + bar.height).toBeLessThanOrEqual(dock.y);
+        await expect(viewer.getByRole('button', { name: 'Anotações', exact: true })).toHaveCount(0);
+        await viewer.screenshot({ path: test.info().outputPath(`viewer-${width}.png`), animations: 'disabled' });
+      } finally { await viewerContext.close(); }
+      await page.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await openAnnotations(page); await inspect('cinema-menu'); await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await expect(page.getByRole('button', { name: 'Sair da tela cheia', exact: true })).toBeVisible();
+      await openAnnotations(page); await expect(menu).toBeVisible(); await inspect('fullscreen-menu');
+      expect(await menu.evaluate(el => document.fullscreenElement?.contains(el))).toBe(true);
+      await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: 'Sair da tela cheia' }).click();
+      await page.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+      await page.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Desenhar', exact: true })).toBeDisabled();
+      await openAnnotations(page); await inspect('paused-menu');
+    } finally { await context.close(); }
+  });
+}

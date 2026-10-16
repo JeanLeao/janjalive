@@ -551,10 +551,47 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'clear-collaborative-drawings') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptClearCollaborativeDrawings(meta.roomId, meta.peerId, message)) return;
+          const event: ServerMessage = { type: 'collaboration', roomId: meta.roomId, peerId: meta.peerId, timestamp: Date.now(), event: message };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
         if (message.type === 'point') {
           const meta = socket.meta;
           if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
               !rooms.acceptPointing(meta.roomId, meta.peerId, message)) return;
+          const targetPeerId = normalizePeer(message.targetPeerId);
+          const senderNickname = rooms.getNickname(meta.roomId, meta.peerId);
+          const event: ServerMessage = {
+            type: 'collaboration',
+            roomId: meta.roomId,
+            peerId: targetPeerId,
+            timestamp: Date.now(),
+            event: {
+              ...message,
+              targetPeerId,
+              senderPeerId: meta.peerId,
+              ...(senderNickname ? { senderNickname } : {}),
+            },
+          };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
+        if (message.type === 'spectator-drawing') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptSpectatorDrawing(meta.roomId, meta.peerId, message)) return;
           const targetPeerId = normalizePeer(message.targetPeerId);
           const senderNickname = rooms.getNickname(meta.roomId, meta.peerId);
           const event: ServerMessage = {

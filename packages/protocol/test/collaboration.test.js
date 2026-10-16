@@ -84,3 +84,156 @@ test('spectator pointing schemas enforce targetPeerId, normalized coordinates, s
     false
   );
 });
+
+test('spectator drawing and clear collaborative schemas enforce targetPeerId, bounds, strictness and server-derived identity', () => {
+  assert.equal(COLLABORATION_LIMITS.spectatorDrawingPerSecond, 30);
+  assert.equal(COLLABORATION_LIMITS.aggregateCollaborativeDrawingPerSecond, 120);
+  assert.equal(COLLABORATION_LIMITS.collaborativeStrokesPerCapture, 32);
+  assert.equal(COLLABORATION_LIMITS.trackedDrawersPerCapture, 24);
+
+  const strokeId = randomUUID();
+  const specDraw = {
+    type: 'spectator-drawing',
+    targetPeerId: 'host-1',
+    streamId: 'capture-1',
+    eventId: randomUUID(),
+    seq: 1,
+    strokeId,
+    phase: 'start',
+    index: 0,
+    points: [{ x: 0.2, y: 0.3 }],
+  };
+  assert.ok(ClientMessageSchema.safeParse(specDraw).success);
+
+  // Validate phase enum
+  for (const phase of ['start', 'move', 'end', 'cancel']) {
+    assert.ok(ClientMessageSchema.safeParse({ ...specDraw, phase }).success);
+  }
+  assert.equal(ClientMessageSchema.safeParse({ ...specDraw, phase: 'invalid' }).success, false);
+
+  // Bounds on points and index
+  assert.equal(
+    ClientMessageSchema.safeParse({
+      ...specDraw,
+      points: Array(17).fill({ x: 0.2, y: 0.3 }),
+    }).success,
+    false
+  );
+  assert.equal(
+    ClientMessageSchema.safeParse({
+      ...specDraw,
+      index: COLLABORATION_LIMITS.pointsPerStroke + 1,
+    }).success,
+    false
+  );
+  assert.equal(
+    ClientMessageSchema.safeParse({
+      ...specDraw,
+      index: -1,
+    }).success,
+    false
+  );
+
+  // Normalized coordinates bounds
+  for (const badCoord of [
+    { x: -0.01, y: 0.5 },
+    { x: 0.5, y: 1.001 },
+    { x: NaN, y: 0.5 },
+    { x: 0.5, y: Infinity },
+  ]) {
+    assert.equal(
+      ClientMessageSchema.safeParse({
+        ...specDraw,
+        points: [badCoord],
+      }).success,
+      false
+    );
+  }
+
+  // Reject spoofed identity or extra attributes
+  for (const spoof of [
+    { senderPeerId: 'spoofed' },
+    { senderNickname: 'Admin' },
+    { peerId: 'spoofed' },
+    { roomId: 'other' },
+    { targetPeerId: '' },
+    { targetPeerId: 'x'.repeat(65) },
+    { streamId: '' },
+    { seq: 0 },
+    { eventId: 'not-a-uuid' },
+    { strokeId: 'not-a-uuid' },
+  ]) {
+    assert.equal(ClientMessageSchema.safeParse({ ...specDraw, ...spoof }).success, false);
+  }
+
+  // Clear collaborative drawings schema (presenter action)
+  const clearCollab = {
+    type: 'clear-collaborative-drawings',
+    streamId: 'capture-1',
+    eventId: randomUUID(),
+    seq: 5,
+  };
+  assert.ok(ClientMessageSchema.safeParse(clearCollab).success);
+  for (const spoof of [
+    { peerId: 'spoofed' },
+    { roomId: 'other' },
+    { targetPeerId: 'host-1' },
+    { streamId: '' },
+    { seq: 0 },
+    { eventId: 'invalid' },
+  ]) {
+    assert.equal(ClientMessageSchema.safeParse({ ...clearCollab, ...spoof }).success, false);
+  }
+
+  // Server event distribution requires senderPeerId
+  const serverEvent = {
+    type: 'collaboration',
+    roomId: 'r',
+    peerId: 'host-1',
+    timestamp: 300,
+    event: { ...specDraw, senderPeerId: 'viewer-1', senderNickname: 'Lucas' },
+  };
+  assert.ok(CollaborationEventSchema.safeParse(serverEvent).success);
+  assert.equal(
+    CollaborationEventSchema.safeParse({
+      ...serverEvent,
+      event: { ...specDraw }, // missing senderPeerId
+    }).success,
+    false
+  );
+
+  // Server event for clear-collaborative-drawings
+  const clearServerEvent = {
+    type: 'collaboration',
+    roomId: 'r',
+    peerId: 'host-1',
+    timestamp: 301,
+    event: clearCollab,
+  };
+  assert.ok(CollaborationEventSchema.safeParse(clearServerEvent).success);
+
+  // update-sharing with drawingEnabled
+  const updateSharing = ClientMessageSchema.safeParse({
+    type: 'update-sharing',
+    active: true,
+    streamId: 'capture-1',
+    drawingEnabled: true,
+    hasAudio: false,
+    audioMuted: false,
+  });
+  assert.ok(updateSharing.success);
+  assert.equal(updateSharing.data.drawingEnabled, true);
+
+  assert.equal(
+    ClientMessageSchema.safeParse({
+      type: 'update-sharing',
+      active: true,
+      streamId: 'capture-1',
+      drawingEnabled: 'yes',
+      hasAudio: false,
+      audioMuted: false,
+    }).success,
+    false
+  );
+});
+

@@ -214,3 +214,149 @@ test('spectator pointing relay: delivers to presenter and spectators, preserves 
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(reconnectedA.events.filter(e => e.type === 'collaboration').length, 0);
 });
+
+const specDrawMsg = (seq, targetPeerId = 'a', streamId = 's', strokeId = randomUUID(), phase = 'start', index = 0, eventId = randomUUID()) => ({
+  type: 'spectator-drawing',
+  targetPeerId,
+  streamId,
+  eventId,
+  strokeId,
+  seq,
+  phase,
+  index,
+  points: [{ x: 0.25, y: 0.75 }],
+});
+
+const clearCollabMsg = (seq, streamId = 's', eventId = randomUUID()) => ({
+  type: 'clear-collaborative-drawings',
+  streamId,
+  eventId,
+  seq,
+});
+
+test('collaborative drawing: initially disabled, owner toggle, multi-spectator isolation, rate limits, revocation and presenter clear', () => {
+  const rooms = new RoomRegistry();
+  rooms.join('r', 'a', 'HostA');
+  rooms.join('r', 'b', 'ViewerB');
+  rooms.join('r', 'c', 'ViewerC');
+
+  // Start sharing: drawingEnabled is initially false by default
+  rooms.updateSharing('r', 'a', sharing('s1'));
+  const participantA = rooms.getParticipants('r').find(p => p.peerId === 'a');
+  assert.equal(participantA.sharing.drawingEnabled, undefined); // omitted / false
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', specDrawMsg(1, 'a', 's1'), 0), false);
+
+  // Presenter cannot draw on their own capture via delegated spectator-drawing
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'a', specDrawMsg(1, 'a', 's1'), 0), false);
+
+  // Spectator cannot clear collaborative drawings
+  assert.equal(rooms.acceptClearCollaborativeDrawings('r', 'b', clearCollabMsg(1, 's1'), 0), false);
+
+  // Presenter enables collaborative drawing
+  rooms.updateSharing('r', 'a', { ...sharing('s1'), drawingEnabled: true });
+  assert.equal(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.drawingEnabled, true);
+
+  // Spectator drawing now accepted
+  const strokeB = randomUUID();
+  const firstEvt = specDrawMsg(1, 'a', 's1', strokeB, 'start', 0);
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', firstEvt, 0), true);
+
+  // Reject duplicate seq or duplicate eventId
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', firstEvt, 0), false);
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', { ...firstEvt, seq: 2 }, 0), false);
+
+  // Second spectator drawing accepted concurrently with independent sequence and stroke
+  const strokeC = randomUUID();
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'c', specDrawMsg(1, 'a', 's1', strokeC, 'start', 0), 0), true);
+
+  // Presenter laser, drawing and pointing sequences are completely isolated from spectator drawing
+  assert.equal(rooms.acceptCollaboration('r', 'a', laser(5, 's1'), 0), true);
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1, 'a', 's1'), 0), true);
+
+  // Spectator B rate limit (L.spectatorDrawingPerSecond per 1000ms)
+  for (let i = 2; i <= L.spectatorDrawingPerSecond; i++) {
+    assert.equal(rooms.acceptSpectatorDrawing('r', 'b', specDrawMsg(i, 'a', 's1', strokeB, 'move', i - 1), 10), true);
+  }
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', specDrawMsg(L.spectatorDrawingPerSecond + 1, 'a', 's1', strokeB, 'move', 31), 10), false);
+  // Spectator C is still allowed while B is rate-limited
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'c', specDrawMsg(2, 'a', 's1', strokeC, 'move', 1), 10), true);
+
+  // Pause blocks spectator drawing
+  rooms.updateSharing('r', 'a', sharing('s1', true));
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'c', specDrawMsg(3, 'a', 's1', strokeC, 'move', 2), 1010), false);
+
+  // Resume preserves drawingEnabled: true
+  rooms.updateSharing('r', 'a', sharing('s1', false));
+  assert.equal(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.drawingEnabled, true);
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'c', specDrawMsg(3, 'a', 's1', strokeC, 'move', 2), 1020), true);
+
+  // Presenter clears collaborative drawings
+  assert.equal(rooms.acceptClearCollaborativeDrawings('r', 'a', clearCollabMsg(1, 's1'), 1030), true);
+  // Rate limited clears
+  for (let i = 2; i <= L.clearPerSecond; i++) {
+    assert.equal(rooms.acceptClearCollaborativeDrawings('r', 'a', clearCollabMsg(i, 's1'), 1030), true);
+  }
+  assert.equal(rooms.acceptClearCollaborativeDrawings('r', 'a', clearCollabMsg(L.clearPerSecond + 1, 's1'), 1030), false);
+
+  // Revocation: presenter disables collaborative drawing
+  rooms.updateSharing('r', 'a', { ...sharing('s1'), drawingEnabled: false });
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', specDrawMsg(100, 'a', 's1'), 1040), false);
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'c', specDrawMsg(100, 'a', 's1'), 1040), false);
+
+  // New capture resets drawingEnabled to disabled
+  rooms.updateSharing('r', 'a', { ...sharing('s1'), drawingEnabled: true });
+  rooms.updateSharing('r', 'a', sharing('s2', false));
+  assert.equal(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.drawingEnabled, undefined);
+  assert.equal(rooms.acceptSpectatorDrawing('r', 'b', specDrawMsg(1, 'a', 's2'), 1050), false);
+});
+
+test('collaborative drawing relay: distributes server-derived identity, honors revocation and presenter clear', async t => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  t.after(() => app.close());
+
+  const host = await connect(app, 'room-cd', 'h');
+  const viewer1 = await connect(app, 'room-cd', 'v1');
+  const viewer2 = await connect(app, 'room-cd', 'v2');
+  host.send({ type: 'update-nickname', nickname: 'Host Aldo' });
+  viewer1.send({ type: 'update-nickname', nickname: 'Viewer Bob' });
+  await host.next('peer-updated');
+  await viewer1.next('peer-updated');
+
+  // Start sharing with drawingEnabled: true
+  host.send({ type: 'update-sharing', ...sharing('stream-1'), drawingEnabled: true });
+  await viewer1.next('sharing-updated');
+  await viewer2.next('sharing-updated');
+
+  // Viewer 1 draws
+  const stroke1 = randomUUID();
+  viewer1.send(specDrawMsg(1, 'h', 'stream-1', stroke1, 'start', 0));
+  const evtOnHost = await host.next('collaboration');
+  const evtOnV2 = await viewer2.next('collaboration');
+
+  assert.equal(evtOnHost.peerId, 'h');
+  assert.equal(evtOnHost.event.type, 'spectator-drawing');
+  assert.equal(evtOnHost.event.senderPeerId, 'v1');
+  assert.equal(evtOnHost.event.senderNickname, 'Viewer Bob');
+  assert.equal(evtOnHost.event.strokeId, stroke1);
+  assert.equal(evtOnV2.event.senderPeerId, 'v1');
+
+  // Presenter clears collaborative drawings
+  host.send(clearCollabMsg(1, 'stream-1'));
+  const clearOnV1 = await viewer1.next('collaboration');
+  const clearOnV2 = await viewer2.next('collaboration');
+  assert.equal(clearOnV1.peerId, 'h');
+  assert.equal(clearOnV1.event.type, 'clear-collaborative-drawings');
+  assert.equal(clearOnV2.event.type, 'clear-collaborative-drawings');
+
+  // Revoke permission
+  host.send({ type: 'update-sharing', ...sharing('stream-1'), drawingEnabled: false });
+  const updateV1 = await viewer1.next('sharing-updated');
+  assert.equal(updateV1.drawingEnabled, false);
+
+  // Drawing after revocation blocked
+  viewer1.send(specDrawMsg(2, 'h', 'stream-1', stroke1, 'move', 1));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(host.events.filter(e => e.type === 'collaboration').length, 0);
+});
+

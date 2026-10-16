@@ -1,12 +1,19 @@
 import {
   normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
-  type PresenterCollaborationMessage, type PointMessage, COLLABORATION_LIMITS,
+  type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
+  type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
 } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
 export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
 
 export interface PointingSenderBudget {
+  seq: number;
+  times: number[];
+  ids: string[];
+}
+
+export interface SpectatorDrawingSenderBudget {
   seq: number;
   times: number[];
   ids: string[];
@@ -20,7 +27,11 @@ export interface ParticipantMeta {
     laser: number[];
     drawing: number[];
     clear: number[];
+    clearCollaborative?: number[];
+    clearCollaborativeSeq?: number;
     pointingBySender?: Map<string, PointingSenderBudget>;
+    drawingBySender?: Map<string, SpectatorDrawingSenderBudget>;
+    aggregateDrawingTimes?: number[];
   };
   sharing?: SharingState;
   nickname?: string;
@@ -198,12 +209,23 @@ export class RoomRegistry {
         : sameCapture
         ? meta.sharing?.pointingEnabled
         : undefined;
+    const resolvedDrawing =
+      sharing.drawingEnabled !== undefined
+        ? sharing.drawingEnabled
+        : sameCapture
+        ? meta.sharing?.drawingEnabled
+        : undefined;
     const nextSharing: SharingState = sharing.active
       ? {
           ...sharing,
           ...(resolvedPointing !== undefined ? { pointingEnabled: resolvedPointing } : {}),
+          ...(resolvedDrawing !== undefined ? { drawingEnabled: resolvedDrawing } : {}),
         }
       : { ...sharing, active: false };
+    if (nextSharing.drawingEnabled === false && meta.collaboration) {
+      meta.collaboration.drawingBySender?.clear();
+      meta.collaboration.aggregateDrawingTimes = undefined;
+    }
     meta.sharing = nextSharing;
     return nextSharing;
   }
@@ -269,6 +291,82 @@ export class RoomRegistry {
     senderBudget.times.push(now);
     senderBudget.seq = event.seq;
     senderBudget.ids = [...senderBudget.ids.slice(-31), event.eventId];
+    return true;
+  }
+
+  /** Authoritative validation, sequencing and rate limiting for spectator collaborative drawing. */
+  acceptSpectatorDrawing(roomId: string, senderPeerId: string, event: SpectatorDrawingMessage, now = Date.now()): boolean {
+    const participants = this.#rooms.get(roomId);
+    if (!participants || !participants.has(senderPeerId)) return false;
+    let targetPeer: string;
+    try {
+      targetPeer = normalizePeer(event.targetPeerId);
+    } catch {
+      return false;
+    }
+    if (targetPeer === senderPeerId) return false;
+    const targetMeta = participants.get(targetPeer);
+    if (
+      !targetMeta?.sharing?.active ||
+      targetMeta.sharing.paused ||
+      targetMeta.sharing.streamId !== event.streamId ||
+      targetMeta.sharing.drawingEnabled !== true
+    ) {
+      return false;
+    }
+    const collab = (targetMeta.collaboration ||= {
+      streamId: event.streamId,
+      seq: 0,
+      laser: [],
+      drawing: [],
+      clear: [],
+    });
+
+    collab.aggregateDrawingTimes = (collab.aggregateDrawingTimes || []).filter((time) => now - time < 1000);
+    if (collab.aggregateDrawingTimes.length >= COLLABORATION_LIMITS.aggregateCollaborativeDrawingPerSecond) {
+      return false;
+    }
+
+    const bySender = (collab.drawingBySender ||= new Map<string, SpectatorDrawingSenderBudget>());
+    let senderBudget = bySender.get(senderPeerId);
+    if (!senderBudget) {
+      const maxTracked = COLLABORATION_LIMITS.trackedDrawersPerCapture ?? (this.maxParticipants * 2);
+      if (bySender.size >= maxTracked) {
+        for (const [id] of bySender) {
+          if (!participants.has(id)) bySender.delete(id);
+        }
+        if (bySender.size >= maxTracked) {
+          const oldestKey = bySender.keys().next().value;
+          if (oldestKey !== undefined) bySender.delete(oldestKey);
+        }
+      }
+      senderBudget = { seq: 0, times: [], ids: [] };
+      bySender.set(senderPeerId, senderBudget);
+    }
+    if (event.seq <= senderBudget.seq || senderBudget.ids.includes(event.eventId)) return false;
+    senderBudget.times = senderBudget.times.filter((time) => now - time < 1000);
+    if (senderBudget.times.length >= COLLABORATION_LIMITS.spectatorDrawingPerSecond) return false;
+
+    senderBudget.times.push(now);
+    collab.aggregateDrawingTimes.push(now);
+    senderBudget.seq = event.seq;
+    senderBudget.ids = [...senderBudget.ids.slice(-31), event.eventId];
+    return true;
+  }
+
+  /** Presenter-exclusive clear of all spectator collaborative drawings on active capture. */
+  acceptClearCollaborativeDrawings(roomId: string, presenterPeerId: string, event: ClearCollaborativeDrawingsMessage, now = Date.now()): boolean {
+    const meta = this.#rooms.get(roomId)?.get(presenterPeerId);
+    if (!meta?.sharing?.active || meta.sharing.streamId !== event.streamId) return false;
+    const budget = (meta.collaboration ||= { streamId: event.streamId, seq: 0, laser: [], drawing: [], clear: [] });
+    const clearSeq = budget.clearCollaborativeSeq ?? 0;
+    if (event.seq <= clearSeq) return false;
+    budget.clearCollaborative = (budget.clearCollaborative || []).filter((time) => now - time < 1000);
+    if (budget.clearCollaborative.length >= COLLABORATION_LIMITS.clearPerSecond) return false;
+    budget.clearCollaborative.push(now);
+    budget.clearCollaborativeSeq = event.seq;
+    budget.drawingBySender?.clear();
+    budget.aggregateDrawingTimes = undefined;
     return true;
   }
 
