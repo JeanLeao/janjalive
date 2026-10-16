@@ -161,7 +161,7 @@ export class SignalingClient {
   }
 
   send(message: ClientMessage): boolean {
-    const ephemeral = message.type === 'laser' || message.type === 'drawing' || message.type === 'clear-annotations';
+    const ephemeral = message.type === 'laser' || message.type === 'drawing' || message.type === 'clear-annotations' || message.type === 'point';
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       if (!ephemeral) this.options.logger?.log('signal-skip', { type: message.type, reason: 'socket-not-open' });
       return false;

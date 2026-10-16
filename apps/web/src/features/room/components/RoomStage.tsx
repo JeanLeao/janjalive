@@ -32,6 +32,7 @@ import {
 
 export interface RoomStageProps {
   annotations?: AnnotationChannel;
+  onTogglePointingPermission?: () => void;
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
@@ -61,6 +62,7 @@ interface StreamItem {
 
 export function RoomStage({
   annotations,
+  onTogglePointingPermission,
   interactions,
   interactionAccess,
   isCinema = false,
@@ -350,8 +352,11 @@ export function RoomStage({
         <SpotlightVideoPlayer
           key={activeStream.id}
           annotations={annotations}
+          localPeerId={participants.find((p) => p.isLocal)?.peerId}
           annotationPeerId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.peerId}
           annotationStreamId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.streamId}
+          pointingEnabled={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.pointingEnabled !== false}
+          onTogglePointingPermission={activeStream.isLocal ? onTogglePointingPermission : undefined}
           stream={activeStream.paused ? null : activeStream.stream}
           isLocal={activeStream.isLocal}
           connectionState={remoteConnectionStates[activeStream.id]}
@@ -506,7 +511,9 @@ export function RoomStage({
 
 // Spotlight Video Player Component
 function SpotlightVideoPlayer({
-  annotations, annotationPeerId, annotationStreamId,
+  annotations, localPeerId, annotationPeerId, annotationStreamId,
+  pointingEnabled = true,
+  onTogglePointingPermission,
   stream,
   isLocal,
   connectionState,
@@ -520,8 +527,11 @@ function SpotlightVideoPlayer({
   onToggleFullscreen,
 }: {
   annotations?: AnnotationChannel;
+  localPeerId?: string;
   annotationPeerId?: string;
   annotationStreamId?: string;
+  pointingEnabled?: boolean;
+  onTogglePointingPermission?: () => void;
   stream: MediaStream | null;
   isLocal: boolean;
   isCinema: boolean;
@@ -540,8 +550,16 @@ function SpotlightVideoPlayer({
   const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
   const [tool, setTool] = useState<AnnotationTool>('navigate');
   const canAnnotate = Boolean(isLocal && stream && annotationStreamId && annotations?.available);
-  const effectiveTool = canAnnotate ? tool : 'navigate';
-  useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available]);
+  const canPoint = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
+  const effectiveTool: AnnotationTool =
+    isLocal
+      ? canAnnotate && (tool === 'laser' || tool === 'draw')
+        ? tool
+        : 'navigate'
+      : canPoint && tool === 'point'
+      ? 'point'
+      : 'navigate';
+  useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available, pointingEnabled, isLocal]);
   const zoom = useVideoZoom(videoRef, stream, effectiveTool !== 'navigate');
   const pip = usePictureInPicture(videoRef, stream);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -591,7 +609,76 @@ function SpotlightVideoPlayer({
           disabled={!annotations.available} onClick={() => annotations.send({ type: 'clear-annotations', streamId: annotationStreamId, eventId: crypto.randomUUID(), seq: 1 })}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 14 9-10 7 6-9 10H7zM9 20h12M9 9l7 6" /></svg>
         </Button></Tooltip>
+        {onTogglePointingPermission && (
+          <Tooltip
+            label={
+              pointingEnabled
+                ? 'Permitir apontamentos dos espectadores (ativo)'
+                : 'Permitir apontamentos dos espectadores (desativado)'
+            }
+            withArrow
+          >
+            <Button
+              variant={pointingEnabled ? 'light' : 'subtle'}
+              color={pointingEnabled ? 'cyan' : 'gray'}
+              disabled={!annotations.available}
+              aria-pressed={pointingEnabled}
+              aria-label="Permitir apontamentos dos espectadores"
+              onClick={onTogglePointingPermission}
+              p={8}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="7" />
+                <circle cx="12" cy="12" r="2.2" />
+                {!pointingEnabled && <path d="M4 4l16 16" />}
+              </svg>
+            </Button>
+          </Tooltip>
+        )}
       </Box>}
+      {!isLocal && annotations && annotationPeerId && annotationStreamId && (
+        <Box role="group" aria-label="Apontamento rápido" style={{ display: 'flex', gap: 2 }}>
+          <Tooltip
+            label={
+              !pointingEnabled
+                ? 'Apontamentos desativados pelo apresentador'
+                : effectiveTool === 'point'
+                ? 'Cancelar apontamento (Esc)'
+                : 'Apontar um ponto na transmissão'
+            }
+            withArrow
+          >
+            <span
+              tabIndex={!canPoint ? 0 : undefined}
+              aria-label={!pointingEnabled ? 'Apontamentos desativados pelo apresentador' : undefined}
+            >
+              <Button
+                variant={effectiveTool === 'point' ? 'filled' : 'subtle'}
+                color={effectiveTool === 'point' ? 'cyan' : 'gray'}
+                disabled={!canPoint}
+                aria-pressed={effectiveTool === 'point'}
+                aria-label="Apontar"
+                onClick={() => {
+                  const next = effectiveTool === 'point' ? 'navigate' : 'point';
+                  setTool(next);
+                  if (next === 'point') {
+                    requestAnimationFrame(() => zoom.viewportRef.current?.focus({ preventScroll: true }));
+                  }
+                }}
+                px={10}
+                py={6}
+                style={{ gap: 6 }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ marginRight: 5 }}>
+                  <circle cx="12" cy="12" r="7" />
+                  <circle cx="12" cy="12" r="2.2" />
+                </svg>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Apontar</span>
+              </Button>
+            </span>
+          </Tooltip>
+        </Box>
+      )}
       {onToggleCinema && (
         <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
           <Button
@@ -661,7 +748,20 @@ function SpotlightVideoPlayer({
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
-    <Box ref={zoom.viewportRef} tabIndex={effectiveTool !== 'navigate' ? 0 : undefined} aria-label={effectiveTool === 'draw' ? 'Área de desenho; Escape cancela o gesto' : undefined} onKeyDown={event => { if (event.key === 'Escape') setTool('navigate'); }} data-testid="zoom-viewport" style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+    <Box
+      ref={zoom.viewportRef}
+      tabIndex={effectiveTool !== 'navigate' ? 0 : undefined}
+      aria-label={
+        effectiveTool === 'draw'
+          ? 'Área de desenho; Escape cancela o gesto'
+          : effectiveTool === 'point'
+          ? 'Área de apontamento; clique no vídeo, use as setas e Enter para enviar, ou Escape para cancelar'
+          : undefined
+      }
+      onKeyDown={event => { if (event.key === 'Escape') setTool('navigate'); }}
+      data-testid="zoom-viewport"
+      style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
+    >
     {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
       <Text c="white">Transmissão pausada</Text>
       {isLocal && <Text c="dimmed" size="sm">O navegador continua capturando. Retome ou pare pelo controle de compartilhamento.</Text>}
@@ -681,7 +781,17 @@ function SpotlightVideoPlayer({
         display: 'block',
       }}
     />}
-    {annotations && annotationPeerId && annotationStreamId && <AnnotationOverlay channel={annotations} peerId={annotationPeerId} streamId={annotationStreamId} tool={effectiveTool} zoom={zoom} />}
+    {annotations && annotationPeerId && annotationStreamId && (
+      <AnnotationOverlay
+        channel={annotations}
+        peerId={annotationPeerId}
+        streamId={annotationStreamId}
+        tool={effectiveTool}
+        zoom={zoom}
+        localPeerId={localPeerId}
+        onToolComplete={() => setTool('navigate')}
+      />
+    )}
     </div>
     </Box>
     </>

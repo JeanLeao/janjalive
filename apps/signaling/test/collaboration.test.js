@@ -71,3 +71,146 @@ test('relay derives socket identity, isolates rooms, skips history, stale socket
   assert.equal(late.events.filter(e => e.type === 'collaboration').length, 0);
   assert.equal(a.events.filter(e => e.type === 'collaboration').length, 0);
 });
+
+const pointMsg = (seq, targetPeerId = 'a', streamId = 's', eventId = randomUUID()) => ({
+  type: 'point',
+  targetPeerId,
+  streamId,
+  eventId,
+  seq,
+  point: { x: 0.35, y: 0.65 },
+});
+
+test('spectator pointing: default enabled, owner permission control, multi-spectator isolation, deduplication, rate limiting and lifecycle', () => {
+  const rooms = new RoomRegistry();
+  rooms.join('r', 'a', 'HostA');
+  rooms.join('r', 'b', 'ViewerB');
+  rooms.join('r', 'c', 'ViewerC');
+
+  // Cannot point when target is not sharing
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1), 0), false);
+
+  // Start sharing (pointingEnabled defaults to enabled)
+  rooms.updateSharing('r', 'a', sharing('s1'));
+  // Owner cannot point to their own capture via spectator pointing
+  assert.equal(rooms.acceptPointing('r', 'a', pointMsg(1, 'a', 's1'), 0), false);
+  // Invalid room, unknown sender, unknown target, or wrong streamId rejected
+  assert.equal(rooms.acceptPointing('other', 'b', pointMsg(1, 'a', 's1'), 0), false);
+  assert.equal(rooms.acceptPointing('r', 'ghost', pointMsg(1, 'a', 's1'), 0), false);
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1, 'ghost', 's1'), 0), false);
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1, 'a', 'wrong-stream'), 0), false);
+
+  // Presenter laser sequence (seq 10) does not collide with spectator pointing sequence (seq 1)
+  assert.equal(rooms.acceptCollaboration('r', 'a', laser(10, 's1'), 0), true);
+  const firstEvent = pointMsg(1, 'a', 's1');
+  assert.equal(rooms.acceptPointing('r', 'b', firstEvent, 0), true);
+  // Duplicate seq or duplicate eventId rejected
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1, 'a', 's1'), 0), false);
+  assert.equal(rooms.acceptPointing('r', 'b', { ...firstEvent, seq: 2 }, 0), false);
+
+  // Second spectator has independent sequence and rate limit budget
+  assert.equal(rooms.acceptPointing('r', 'c', pointMsg(1, 'a', 's1'), 0), true);
+
+  // Presenter sequence remains intact after spectator points
+  assert.equal(rooms.acceptCollaboration('r', 'a', laser(10, 's1'), 10), false);
+  assert.equal(rooms.acceptCollaboration('r', 'a', laser(11, 's1'), 10), true);
+
+  // Per-spectator rate limit (L.pointPerSecond per 1000ms)
+  for (let i = 2; i <= L.pointPerSecond; i++) {
+    assert.equal(rooms.acceptPointing('r', 'b', pointMsg(i, 'a', 's1'), 10), true);
+  }
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(L.pointPerSecond + 1, 'a', 's1'), 10), false);
+  // Spectator C is still allowed while B is rate-limited
+  assert.equal(rooms.acceptPointing('r', 'c', pointMsg(2, 'a', 's1'), 10), true);
+  // After 1000ms window, B can point again
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(L.pointPerSecond + 1, 'a', 's1'), 1020), true);
+
+  // Owner disables pointing -> blocked on server
+  rooms.updateSharing('r', 'a', { ...sharing('s1'), pointingEnabled: false });
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(10, 'a', 's1'), 1030), false);
+  assert.equal(rooms.acceptPointing('r', 'c', pointMsg(10, 'a', 's1'), 1030), false);
+
+  // Pause and resume of same capture preserves disabled permission when omitted
+  rooms.updateSharing('r', 'a', sharing('s1', true));
+  assert.equal(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.pointingEnabled, false);
+  rooms.updateSharing('r', 'a', sharing('s1', false));
+  assert.equal(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.pointingEnabled, false);
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(11, 'a', 's1'), 1040), false);
+
+  // Owner re-enables pointing -> allowed when not paused, blocked while paused
+  rooms.updateSharing('r', 'a', { ...sharing('s1', false), pointingEnabled: true });
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(12, 'a', 's1'), 1050), true);
+  rooms.updateSharing('r', 'a', sharing('s1', true));
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(13, 'a', 's1'), 1060), false);
+
+  // New capture (new streamId) resets permission to enabled and clears old pointing sequence
+  rooms.updateSharing('r', 'a', { ...sharing('s1', false), pointingEnabled: false });
+  rooms.updateSharing('r', 'a', sharing('s2', false));
+  assert.notEqual(rooms.getParticipants('r').find(p => p.peerId === 'a').sharing.pointingEnabled, false);
+  assert.equal(rooms.acceptPointing('r', 'b', pointMsg(1, 'a', 's2'), 1070), true);
+});
+
+test('spectator pointing relay: delivers to presenter and spectators, preserves disabled permission across reconnect and blocks cross-stream tampering', async t => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  t.after(() => app.close());
+
+  const hostA = await connect(app, 'room-pt', 'a');
+  const hostB = await connect(app, 'room-pt', 'b');
+  const viewer = await connect(app, 'room-pt', 'v');
+  hostA.send({ type: 'update-nickname', nickname: 'Host A' });
+  viewer.send({ type: 'update-nickname', nickname: 'Nina' });
+  await hostA.next('peer-updated');
+  await hostB.next('peer-updated');
+
+  hostA.send({ type: 'update-sharing', ...sharing('stream-a') });
+  hostB.send({ type: 'update-sharing', ...sharing('stream-b') });
+  await viewer.next('sharing-updated');
+  await viewer.next('sharing-updated');
+
+  // Viewer points to Host A -> both Host A (owner) and Host B (spectator of A) receive it with derived sender identity
+  viewer.send(pointMsg(1, 'a', 'stream-a'));
+  const evtOnA = await hostA.next('collaboration');
+  const evtOnB = await hostB.next('collaboration');
+  assert.equal(evtOnA.peerId, 'a');
+  assert.equal(evtOnA.event.type, 'point');
+  assert.equal(evtOnA.event.senderPeerId, 'v');
+  assert.equal(evtOnA.event.senderNickname, 'Nina');
+  assert.deepEqual(evtOnA.event.point, { x: 0.35, y: 0.65 });
+  assert.equal(evtOnB.event.senderPeerId, 'v');
+
+  // Host B (who is also presenting stream-b) points to Host A's stream-a
+  hostB.send(pointMsg(1, 'a', 'stream-a'));
+  const evtFromPresenterB = await hostA.next('collaboration');
+  assert.equal(evtFromPresenterB.peerId, 'a');
+  assert.equal(evtFromPresenterB.event.senderPeerId, 'b');
+
+  // Host A disables pointing on stream-a
+  hostA.send({ type: 'update-sharing', ...sharing('stream-a'), pointingEnabled: false });
+  const updated = await viewer.next('sharing-updated');
+  assert.equal(updated.peerId, 'a');
+  assert.equal(updated.pointingEnabled, false);
+
+  // Late joiner receives pointingEnabled: false in initial peers snapshot
+  const late = await connect(app, 'room-pt', 'late');
+  assert.equal(late.peers.participants.find(p => p.peerId === 'a').sharing.pointingEnabled, false);
+
+  // Manual point attempt by viewer to stream-a is blocked on server, while stream-b remains enabled
+  viewer.send(pointMsg(2, 'a', 'stream-a'));
+  viewer.send(pointMsg(1, 'b', 'stream-b'));
+  const evtOnStreamB = await hostB.next('collaboration');
+  assert.equal(evtOnStreamB.peerId, 'b');
+  assert.equal(evtOnStreamB.event.streamId, 'stream-b');
+  assert.equal(hostA.events.filter(e => e.type === 'collaboration').length, 1);
+  assert.equal(hostA.events.find(e => e.type === 'collaboration').peerId, 'b');
+  hostA.events.length = 0;
+
+  // Reconnect of Host A (both active session replacement and involuntary drop recovery) preserves pointingEnabled: false without opening a window
+  const reconnectedA = await connect(app, 'room-pt', 'a', hostA.peers.reconnectToken);
+  viewer.send(pointMsg(3, 'a', 'stream-a'));
+  reconnectedA.send({ type: 'update-sharing', ...sharing('stream-a') }); // even if update-sharing omits pointingEnabled
+  await viewer.next('sharing-updated');
+  viewer.send(pointMsg(4, 'a', 'stream-a'));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(reconnectedA.events.filter(e => e.type === 'collaboration').length, 0);
+});

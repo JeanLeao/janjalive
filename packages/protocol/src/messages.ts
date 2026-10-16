@@ -4,6 +4,7 @@ export const SharingStateSchema = z.object({
   active: z.boolean(),
   paused: z.boolean().optional(),
   streamId: z.string().min(1).max(128).optional(),
+  pointingEnabled: z.boolean().optional(),
   hasAudio: z.boolean(),
   audioMuted: z.boolean(),
 });
@@ -51,9 +52,10 @@ export const InteractionRejectedSchema = z.object({
 
 // F13: bounded live events only; no snapshots or history.
 export const COLLABORATION_LIMITS = {
-  annotationTtlMs: 8000, laserTtlMs: 900, sendIntervalMs: 50,
-  pointsPerEvent: 16, pointsPerStroke: 512, strokesPerCapture: 32,
-  laserPerSecond: 25, drawingPerSecond: 30, clearPerSecond: 3,
+  annotationTtlMs: 8000, laserTtlMs: 900, pointTtlMs: 2600, sendIntervalMs: 50,
+  pointsPerEvent: 16, pointsPerStroke: 512, strokesPerCapture: 32, pointersPerCapture: 8,
+  trackedPointersPerCapture: 24,
+  laserPerSecond: 25, drawingPerSecond: 30, clearPerSecond: 3, pointPerSecond: 4,
   maxBufferedBytes: 32_768,
 } as const;
 export const NormalizedPointSchema = z.object({
@@ -74,11 +76,23 @@ export const DrawingMessageSchema = z.object({
   points: z.array(NormalizedPointSchema).max(COLLABORATION_LIMITS.pointsPerEvent),
 }).strict();
 export const ClearAnnotationsSchema = z.object({ type: z.literal('clear-annotations'), ...collaborationBase }).strict();
-export type CollaborationMessage = z.infer<typeof LaserMessageSchema> | z.infer<typeof DrawingMessageSchema> | z.infer<typeof ClearAnnotationsSchema>;
+export const PointMessageSchema = z.object({
+  type: z.literal('point'), targetPeerId: z.string().min(1).max(64),
+  ...collaborationBase, point: NormalizedPointSchema,
+}).strict();
+export type PointMessage = z.infer<typeof PointMessageSchema>;
+export const PointCollaborationEventSchema = PointMessageSchema.extend({
+  senderPeerId: z.string().min(1).max(64),
+  senderNickname: z.string().trim().min(1).max(32).optional(),
+}).strict();
+export type PointCollaborationEvent = z.infer<typeof PointCollaborationEventSchema>;
+export type PresenterCollaborationMessage = z.infer<typeof LaserMessageSchema> | z.infer<typeof DrawingMessageSchema> | z.infer<typeof ClearAnnotationsSchema>;
+export type CollaborationMessage = PresenterCollaborationMessage | PointMessage;
+export type CollaborationEventPayload = PresenterCollaborationMessage | PointCollaborationEvent;
 export const CollaborationEventSchema = z.object({
   type: z.literal('collaboration'), roomId: z.string().min(1), peerId: z.string().min(1),
   timestamp: z.number().int().nonnegative(),
-  event: z.discriminatedUnion('type', [LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema]),
+  event: z.discriminatedUnion('type', [LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, PointCollaborationEventSchema]),
 });
 export type CollaborationEvent = z.infer<typeof CollaborationEventSchema>;
 
@@ -111,7 +125,7 @@ export const LeaveMessageSchema = z.object({
 export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
-  LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema,
+  LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, PointMessageSchema,
   SendChatSchema,
   SendReactionSchema,
   JoinMessageSchema,

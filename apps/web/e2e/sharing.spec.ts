@@ -1406,3 +1406,245 @@ test('F13 mobile tools, keyboard and touch cancellation do not pan or zoom', asy
     await cdp.detach();
   } finally { await context.close(); }
 });
+
+test('F13 spectator quick pointing: presenter and spectator visibility, identity badge, auto-return to navigate, zoom/pan/letterbox, multi-presenter and F13 isolation', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const hostA = await contexts[0].newPage();
+    const viewer = await contexts[1].newPage();
+    const hostB = await contexts[2].newPage();
+    for (const [p, nick] of [
+      [hostA, 'Firminha'],
+      [viewer, 'Marina'],
+      [hostB, 'Lucas'],
+    ] as const) {
+      await syntheticCapture(p);
+      await p.addInitScript((name) => sessionStorage.setItem('screen_room_display_name', name), nick);
+    }
+
+    await Promise.all([
+      hostA.goto('/room/f13-spectator-pointing'),
+      viewer.goto('/room/f13-spectator-pointing'),
+      hostB.goto('/room/f13-spectator-pointing'),
+    ]);
+
+    await startLive(hostA);
+    await frames(viewer);
+    await frames(hostB);
+
+    // Spectator sees "Apontar" and does not see presenter tools; presenter sees permission toggle
+    const viewerPointBtn = viewer.getByRole('button', { name: 'Apontar', exact: true });
+    await expect(viewerPointBtn).toBeVisible();
+    await expect(viewerPointBtn).toBeEnabled();
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(viewer.getByRole('button', { name: 'Ponteiro laser', exact: true })).toHaveCount(0);
+    await expect(hostA.getByRole('button', { name: 'Permitir apontamentos dos espectadores', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+    // Escape cancels pointing before sending
+    await viewerPointBtn.click();
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'true');
+    await viewer.keyboard.press('Escape');
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(hostA.getByTestId('spectator-pointer-marker')).toHaveCount(0);
+
+    // Letterbox clicks must not fire pointing or exit point mode prematurely
+    await viewerPointBtn.click();
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'true');
+    const letterboxPos = await viewer.getByTestId('zoom-viewport').evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      const v = el.querySelector('video')!;
+      const ratio = Math.min(b.width / v.videoWidth, b.height / v.videoHeight);
+      const fw = v.videoWidth * ratio;
+      const fh = v.videoHeight * ratio;
+      return b.width - fw > 8
+        ? { x: b.x + (b.width - fw) / 4, y: b.y + b.height * 0.5 }
+        : { x: b.x + b.width * 0.5, y: b.y + (b.height - fh) / 4 };
+    });
+    await viewer.mouse.click(letterboxPos.x, letterboxPos.y);
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(hostA.getByTestId('spectator-pointer-marker')).toHaveCount(0);
+
+    // Independent zoom on hostA and viewer; viewer clicks video content to point
+    await hostA.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+    await viewer.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+    const vbox = (await viewer.getByTestId('zoom-viewport').boundingBox())!;
+    await viewer.mouse.click(vbox.x + vbox.width * 0.5, vbox.y + vbox.height * 0.5);
+
+    // Auto-returns to navigate mode immediately after pointing
+    await expect(viewerPointBtn).toHaveAttribute('aria-pressed', 'false');
+
+    // Marker and participant identification appear on viewer, presenter (hostA), and other participant (hostB)
+    await expect(viewer.getByTestId('spectator-pointer-marker')).toContainText('Marina (você)');
+    await expect(hostA.getByTestId('spectator-pointer-marker')).toContainText('Marina');
+    await expect(hostB.getByTestId('spectator-pointer-marker')).toContainText('Marina');
+    await expect.poll(async () => (await annotationPixels(hostA)).count).toBeGreaterThan(0);
+    await viewer.screenshot({ path: test.info().outputPath('f13-pointing-viewer-desktop.png') });
+    await hostA.screenshot({ path: test.info().outputPath('f13-pointing-presenter-desktop.png') });
+
+    // Presenter (hostB) sharing their own screen can also watch hostA and point on hostA's stream
+    await startLive(hostB);
+    await frames(hostB);
+    const hostBPointBtn = hostB.getByRole('button', { name: 'Apontar', exact: true });
+    await expect(hostBPointBtn).toBeEnabled();
+    await hostBPointBtn.click();
+    const hbox = (await hostB.getByTestId('zoom-viewport').boundingBox())!;
+    await hostB.mouse.click(hbox.x + hbox.width * 0.4, hbox.y + hbox.height * 0.4);
+    await expect(hostBPointBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(hostA.getByTestId('spectator-pointer-marker').filter({ hasText: 'Lucas' })).toBeVisible();
+
+    // Markers expire automatically without leaving history
+    await expect(hostA.getByTestId('spectator-pointer-marker')).toHaveCount(0, { timeout: 6000 });
+    await expect(viewer.getByTestId('spectator-pointer-marker')).toHaveCount(0);
+
+    // Presenter F13 drawing still works after spectator pointing
+    await drawAnnotation(hostA);
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
+    await hostA.getByRole('button', { name: 'Limpar minhas anotações', exact: true }).click();
+    await expect.poll(async () => (await annotationPixels(viewer)).count).toBe(0);
+  } finally {
+    await Promise.all(contexts.map((c) => c.close()));
+  }
+});
+
+test('F13 spectator pointing permissions: disable/enable, server block, pause/resume, switch cancel/confirm, late join and reconnect', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage();
+    const viewer = await contexts[1].newPage();
+    const late = await contexts[2].newPage();
+    for (const p of [host, viewer, late]) await syntheticCapture(p);
+
+    await Promise.all([host.goto('/room/f13-pointing-perms'), viewer.goto('/room/f13-pointing-perms')]);
+    await startLive(host);
+    await frames(viewer);
+
+    const permToggle = host.getByRole('button', { name: 'Permitir apontamentos dos espectadores', exact: true });
+    const viewerPointBtn = viewer.getByRole('button', { name: 'Apontar', exact: true });
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(viewerPointBtn).toBeEnabled();
+
+    // Owner disables pointing -> reflected on viewer UI and enforced by server even on manual WebSocket send
+    await permToggle.click();
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(viewerPointBtn).toBeDisabled();
+
+    // Manual spoofed point via socket while disabled is blocked by server
+    await viewer.evaluate(() => {
+      const ws = (window as any).testSockets.find((s: WebSocket) => s.readyState === 1);
+      const msg = (window as any).testMessages.findLast((m: any) => m.type === 'sharing-updated');
+      ws?.send(
+        JSON.stringify({
+          type: 'point',
+          targetPeerId: msg.peerId,
+          streamId: msg.streamId,
+          eventId: crypto.randomUUID(),
+          seq: 99,
+          point: { x: 0.5, y: 0.5 },
+        })
+      );
+    });
+    await host.waitForTimeout(80);
+    await expect(host.getByTestId('spectator-pointer-marker')).toHaveCount(0);
+
+    // Late joiner receives disabled permission immediately
+    await late.goto('/room/f13-pointing-perms');
+    await frames(late);
+    await expect(late.getByRole('button', { name: 'Apontar', exact: true })).toBeDisabled();
+
+    // Pause and resume preserve disabled permission
+    await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+    await expect(viewer.getByText('Transmissão pausada', { exact: true }).first()).toBeVisible();
+    await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+    await frames(viewer);
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(viewerPointBtn).toBeDisabled();
+
+    // Cancelled source switch preserves disabled permission
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    await frames(viewer);
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(viewerPointBtn).toBeDisabled();
+
+    // Reconnect of presenter preserves disabled permission
+    await host.evaluate(() => {
+      const socket = (window as any).testSockets.find((s: WebSocket) => s.readyState === WebSocket.OPEN && s.url.includes('/signal')) as WebSocket;
+      const onclose = socket.onclose!;
+      socket.onclose = null;
+      socket.onmessage = null;
+      onclose.call(socket, new CloseEvent('close', { code: 1006 }));
+    });
+    await expect(host.getByText('Conectado', { exact: true })).toBeVisible({ timeout: 10000 });
+    await frames(viewer);
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(viewerPointBtn).toBeDisabled();
+
+    // Owner re-enables pointing -> viewer can point again
+    await permToggle.click();
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(viewerPointBtn).toBeEnabled();
+
+    // Owner disables again, then confirms a new capture switch -> new streamId resets to enabled by default
+    await permToggle.click();
+    await expect(viewerPointBtn).toBeDisabled();
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await frames(viewer);
+    await expect(permToggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(viewerPointBtn).toBeEnabled();
+  } finally {
+    await Promise.all(contexts.map((c) => c.close()));
+  }
+});
+
+test('F13 spectator pointing: keyboard navigation, Cinema, Fullscreen and mobile touch', async ({ browser }) => {
+  const hostContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  try {
+    const host = await hostContext.newPage();
+    const mobileViewer = await mobileContext.newPage();
+    await syntheticCapture(host);
+    await syntheticCapture(mobileViewer);
+    await mobileViewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Clara'));
+
+    await Promise.all([host.goto('/room/f13-pointing-modes'), mobileViewer.goto('/room/f13-pointing-modes')]);
+    await startLive(host);
+    await frames(mobileViewer);
+
+    const pointBtn = mobileViewer.getByRole('button', { name: 'Apontar', exact: true });
+    expect((await pointBtn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+    // Keyboard positioning and submission in Cinema mode
+    await mobileViewer.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    await pointBtn.focus();
+    await mobileViewer.keyboard.press('Enter');
+    await expect(pointBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(mobileViewer.getByTestId('pointing-reticle')).toBeVisible();
+    await mobileViewer.keyboard.press('ArrowRight');
+    await mobileViewer.keyboard.press('ArrowUp');
+    await mobileViewer.keyboard.press('Enter');
+    await expect(pointBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(host.getByTestId('spectator-pointer-marker')).toContainText('Clara');
+    await mobileViewer.screenshot({ path: test.info().outputPath('f13-pointing-mobile-cinema.png') });
+
+    // Wait for expiry, then test touch pointing in Fullscreen mode
+    await expect(host.getByTestId('spectator-pointer-marker')).toHaveCount(0, { timeout: 6000 });
+    await mobileViewer.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await expect.poll(() => mobileViewer.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    await pointBtn.tap();
+    await expect(pointBtn).toHaveAttribute('aria-pressed', 'true');
+    const b = (await mobileViewer.getByTestId('zoom-viewport').boundingBox())!;
+    const cdp = await mobileContext.newCDPSession(mobileViewer);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: b.x + b.width * 0.5, y: b.y + b.height * 0.5 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(pointBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(host.getByTestId('spectator-pointer-marker')).toContainText('Clara');
+    await cdp.detach();
+  } finally {
+    await Promise.all([hostContext.close(), mobileContext.close()]);
+  }
+});
+

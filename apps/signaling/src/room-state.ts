@@ -1,11 +1,27 @@
-import { normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo, type CollaborationMessage, COLLABORATION_LIMITS } from '@screen-room/protocol';
+import {
+  normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
+  type PresenterCollaborationMessage, type PointMessage, COLLABORATION_LIMITS,
+} from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
 export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
 
+export interface PointingSenderBudget {
+  seq: number;
+  times: number[];
+  ids: string[];
+}
+
 export interface ParticipantMeta {
   interactions?: InteractionBudget;
-  collaboration?: { streamId: string; seq: number; laser: number[]; drawing: number[]; clear: number[] };
+  collaboration?: {
+    streamId: string;
+    seq: number;
+    laser: number[];
+    drawing: number[];
+    clear: number[];
+    pointingBySender?: Map<string, PointingSenderBudget>;
+  };
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
@@ -13,6 +29,7 @@ export interface ParticipantMeta {
 
 export interface RecoveryReservation {
   interactions?: InteractionBudget;
+  sharing?: SharingState;
   reconnectToken: string;
   nickname?: string;
   timer: NodeJS.Timeout;
@@ -95,7 +112,14 @@ export class RoomRegistry {
         ? reconnectToken.trim()
         : crypto.randomUUID());
 
-    participants.set(peer, { interactions: existingMeta?.interactions ?? reservation?.interactions, nickname: cleanNickname, reconnectToken: token, ...(existingMeta?.sharing ? { sharing: existingMeta.sharing } : {}) });
+    const preservedSharing = existingMeta?.sharing ?? reservation?.sharing;
+    participants.set(peer, {
+      interactions: existingMeta?.interactions ?? reservation?.interactions,
+      nickname: cleanNickname,
+      reconnectToken: token,
+      ...(preservedSharing ? { sharing: preservedSharing } : {}),
+      ...(existingMeta?.collaboration ? { collaboration: existingMeta.collaboration } : {}),
+    });
     return existingPeers;
   }
 
@@ -137,6 +161,7 @@ export class RoomRegistry {
         reconnectToken: existingMeta.reconnectToken,
         nickname: existingMeta.nickname,
         interactions: existingMeta.interactions,
+        sharing: existingMeta.sharing,
         timer,
         expiresAt: Date.now() + graceMs,
       });
@@ -162,16 +187,29 @@ export class RoomRegistry {
     }));
   }
 
-  updateSharing(roomId: string, peerId: string, sharing: SharingState): void {
+  updateSharing(roomId: string, peerId: string, sharing: SharingState): SharingState | undefined {
     const meta = this.#rooms.get(roomId)?.get(peerId);
-    if (meta) {
-      if (!sharing.active || sharing.streamId !== meta.sharing?.streamId) meta.collaboration = undefined;
-      meta.sharing = sharing;
-    }
+    if (!meta) return undefined;
+    const sameCapture = Boolean(sharing.active && sharing.streamId && sharing.streamId === meta.sharing?.streamId);
+    if (!sameCapture) meta.collaboration = undefined;
+    const resolvedPointing =
+      sharing.pointingEnabled !== undefined
+        ? sharing.pointingEnabled
+        : sameCapture
+        ? meta.sharing?.pointingEnabled
+        : undefined;
+    const nextSharing: SharingState = sharing.active
+      ? {
+          ...sharing,
+          ...(resolvedPointing !== undefined ? { pointingEnabled: resolvedPointing } : {}),
+        }
+      : { ...sharing, active: false };
+    meta.sharing = nextSharing;
+    return nextSharing;
   }
 
   /** Operational counters only: never retain points, strokes or event payloads. */
-  acceptCollaboration(roomId: string, peerId: string, event: CollaborationMessage, now = Date.now()): boolean {
+  acceptCollaboration(roomId: string, peerId: string, event: PresenterCollaborationMessage, now = Date.now()): boolean {
     const meta = this.#rooms.get(roomId)?.get(peerId);
     if (!meta?.sharing?.active || meta.sharing.streamId !== event.streamId ||
         (meta.sharing.paused && event.type !== 'clear-annotations')) return false;
@@ -183,6 +221,54 @@ export class RoomRegistry {
     if (budget[kind].length >= max) return false;
     budget[kind].push(now);
     budget.seq = event.seq;
+    return true;
+  }
+
+  /** Independent per-spectator validation and deduplication for quick pointing. */
+  acceptPointing(roomId: string, senderPeerId: string, event: PointMessage, now = Date.now()): boolean {
+    const participants = this.#rooms.get(roomId);
+    if (!participants || !participants.has(senderPeerId)) return false;
+    let targetPeer: string;
+    try {
+      targetPeer = normalizePeer(event.targetPeerId);
+    } catch {
+      return false;
+    }
+    if (targetPeer === senderPeerId) return false;
+    const targetMeta = participants.get(targetPeer);
+    if (
+      !targetMeta?.sharing?.active ||
+      targetMeta.sharing.paused ||
+      targetMeta.sharing.streamId !== event.streamId ||
+      targetMeta.sharing.pointingEnabled === false
+    ) {
+      return false;
+    }
+    const collab = (targetMeta.collaboration ||= {
+      streamId: event.streamId,
+      seq: 0,
+      laser: [],
+      drawing: [],
+      clear: [],
+    });
+    const bySender = (collab.pointingBySender ||= new Map<string, PointingSenderBudget>());
+    let senderBudget = bySender.get(senderPeerId);
+    if (!senderBudget) {
+      if (bySender.size >= this.maxParticipants * 2) {
+        for (const [id] of bySender) {
+          if (!participants.has(id)) bySender.delete(id);
+        }
+        if (bySender.size >= this.maxParticipants * 2) return false;
+      }
+      senderBudget = { seq: 0, times: [], ids: [] };
+      bySender.set(senderPeerId, senderBudget);
+    }
+    if (event.seq <= senderBudget.seq || senderBudget.ids.includes(event.eventId)) return false;
+    senderBudget.times = senderBudget.times.filter((time) => now - time < 1000);
+    if (senderBudget.times.length >= COLLABORATION_LIMITS.pointPerSecond) return false;
+    senderBudget.times.push(now);
+    senderBudget.seq = event.seq;
+    senderBudget.ids = [...senderBudget.ids.slice(-31), event.eventId];
     return true;
   }
 
