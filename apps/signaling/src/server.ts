@@ -9,7 +9,7 @@ import {
   type TurnConfig,
 } from './turn.js';
 import {
-  INTERACTION_LIMITS,
+  INTERACTION_LIMITS, COLLABORATION_LIMITS,
   type ServerMessage,
   ClientMessageSchema,
   normalizeRoom,
@@ -519,6 +519,7 @@ export function createSignalServer({
 
           send(socket, {
             type: 'peers',
+            serverTime: Date.now(),
             peers,
             count,
             participants,
@@ -535,6 +536,80 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          return;
+        }
+
+        if (message.type === 'laser' || message.type === 'drawing' || message.type === 'clear-annotations') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptCollaboration(meta.roomId, meta.peerId, message)) return;
+          const event: ServerMessage = { type: 'collaboration', roomId: meta.roomId, peerId: meta.peerId, timestamp: Date.now(), event: message };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
+        if (message.type === 'clear-collaborative-drawings') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptClearCollaborativeDrawings(meta.roomId, meta.peerId, message)) return;
+          const event: ServerMessage = { type: 'collaboration', roomId: meta.roomId, peerId: meta.peerId, timestamp: Date.now(), event: message };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
+        if (message.type === 'point') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptPointing(meta.roomId, meta.peerId, message)) return;
+          const targetPeerId = normalizePeer(message.targetPeerId);
+          const senderNickname = rooms.getNickname(meta.roomId, meta.peerId);
+          const event: ServerMessage = {
+            type: 'collaboration',
+            roomId: meta.roomId,
+            peerId: targetPeerId,
+            timestamp: Date.now(),
+            event: {
+              ...message,
+              targetPeerId,
+              senderPeerId: meta.peerId,
+              ...(senderNickname ? { senderNickname } : {}),
+            },
+          };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
+          return;
+        }
+
+        if (message.type === 'spectator-drawing') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket ||
+              !rooms.acceptSpectatorDrawing(meta.roomId, meta.peerId, message)) return;
+          const targetPeerId = normalizePeer(message.targetPeerId);
+          const senderNickname = rooms.getNickname(meta.roomId, meta.peerId);
+          const event: ServerMessage = {
+            type: 'collaboration',
+            roomId: meta.roomId,
+            peerId: targetPeerId,
+            timestamp: Date.now(),
+            event: {
+              ...message,
+              targetPeerId,
+              senderPeerId: meta.peerId,
+              ...(senderNickname ? { senderNickname } : {}),
+            },
+          };
+          for (const peerId of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peerId);
+            if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
+          }
           return;
         }
 
@@ -614,9 +689,10 @@ export function createSignalServer({
             return;
           }
           const { roomId, peerId } = socket.meta;
+          if (peerSocket(roomId, peerId) !== socket) return;
           const { type, ...sharing } = message;
-          rooms.updateSharing(roomId, peerId, sharing);
-          broadcast(roomId, { type: 'sharing-updated', peerId, ...sharing }, peerId);
+          const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
+          broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           return;
         }
 

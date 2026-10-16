@@ -11,7 +11,7 @@ test('F21 geometry, stream replacement, wheel scope and touch navigation', async
   const group = page.getByRole('group', { name: 'Zoom da transmissão' });
   const plus = page.getByRole('button', { name: 'Ampliar zoom' });
   const matrix = () => video.evaluate(v => {
-    const m = new DOMMatrix(getComputedStyle(v).transform);
+    const m = new DOMMatrix(getComputedStyle(v.parentElement!).transform);
     return { x: m.m41, y: m.m42, scale: m.a };
   });
   for (const [width, height] of [[1280,720], [800,600], [1600,600], [600,1000]]) {
@@ -55,7 +55,7 @@ test('F21 geometry, stream replacement, wheel scope and touch navigation', async
     const video = v as HTMLVideoElement;
     const viewport = video.parentElement!;
     const fit = Math.min(viewport.clientWidth / video.videoWidth, viewport.clientHeight / video.videoHeight);
-    const m = new DOMMatrix(getComputedStyle(video).transform);
+    const m = new DOMMatrix(getComputedStyle(video.parentElement!).transform);
     return Math.abs(m.m41) <= Math.max(0, (video.videoWidth * fit * m.a - viewport.clientWidth) / 2) + 1
       && Math.abs(m.m42) <= Math.max(0, (video.videoHeight * fit * m.a - viewport.clientHeight) / 2) + 1;
   })).toBe(true);

@@ -13,6 +13,9 @@ export interface RoomParticipant {
   isLocal: boolean;
   isSharing: boolean;
   isPaused?: boolean;
+  streamId?: string;
+  pointingEnabled?: boolean;
+  drawingEnabled?: boolean;
   hasAudio?: boolean;
 }
 

@@ -74,7 +74,7 @@ for (const mobile of [false, true]) {
       await page.mouse.down();
       await page.mouse.move(bounds.x + bounds.width / 2 - 30, bounds.y + bounds.height / 2);
       await page.mouse.up();
-      await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v).transform).m41)).toBeLessThan(0);
+      await expect.poll(() => video.evaluate(v => new DOMMatrix(getComputedStyle(v.parentElement!).transform).m41)).toBeLessThan(0);
       await page.getByRole('button', { name: 'Tela cheia', exact: true }).click();
       await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
       await expect(page.getByRole('button', { name: 'Sair do Modo Cinema' })).toBeVisible();

@@ -16,3 +16,11 @@ export function zoomAt(view: ZoomView, delta: number, g: ZoomGeometry, x = 0, y 
   const ratio = scale / view.scale;
   return constrainView({ scale, x: x - (x - view.x) * ratio, y: y - (y - view.y) * ratio }, g);
 }
+
+/** Input is relative to the viewport center, before undoing local pan/zoom. */
+export function normalizeVideoPoint(x: number, y: number, view: ZoomView, g: ZoomGeometry) {
+  if (!g.fittedWidth || !g.fittedHeight) return null;
+  const point = { x: ((x - view.x) / view.scale) / g.fittedWidth + .5,
+    y: ((y - view.y) / view.scale) / g.fittedHeight + .5 };
+  return point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1 ? point : null;
+}
