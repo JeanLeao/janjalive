@@ -4,7 +4,7 @@ import { QualityControls } from './QualityControls';
 import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import classes from './CapturePreview.module.css';
-import { IconChevronDown, IconVolume, IconVolumeMute } from './Icons';
+import { IconChevronDown, IconInfo, IconVolume, IconVolumeMute } from './Icons';
 
 export function CapturePreview({ stream, pending, replacing = false, onConfirm, onCancel, quality, onChangeQuality, qualityPending = false, qualityNotice }: {
   quality: QualitySelection; onChangeQuality?: (quality: QualitySelection) => void; qualityPending?: boolean; qualityNotice?: string | null;
@@ -84,6 +84,12 @@ export function CapturePreview({ stream, pending, replacing = false, onConfirm, 
             <Text size="xs">A captura observada não indica a resolução enviada ou recebida. A fonte, o navegador e a rede podem limitar a qualidade.</Text>
           </Stack>
         </details>
+        <Group gap={6} mt="xs" c="#8b949e" style={{ fontSize: 12 }}>
+          <IconInfo size={14} aria-hidden />
+          <Text size="xs" c="#8b949e">
+            Participantes da sala podem salvar imagens da tela compartilhada.
+          </Text>
+        </Group>
 
         <div role="status" aria-live="polite" aria-atomic="true" className={classes.statusArea}>
           {qualityPending && <Text size="xs" c="#c9d1d9">Aplicando qualidade…</Text>}

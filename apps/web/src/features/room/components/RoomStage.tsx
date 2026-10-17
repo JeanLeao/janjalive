@@ -13,6 +13,7 @@ import type { RemoteStreamEntry, RoomParticipant } from '../types';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
+import { useVideoScreenshot } from '../hooks/useVideoScreenshot';
 import {
   formatDisplayName,
   getAvatarColor,
@@ -22,6 +23,8 @@ import {
   IconScreen,
   IconCinema,
   IconPictureInPicture,
+  IconCamera,
+  IconCheck,
   IconPlus,
   IconMinus,
   IconReset,
@@ -608,6 +611,14 @@ function SpotlightVideoPlayer({
   useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available, pointingEnabled, drawingEnabled, isLocal]);
   const zoom = useVideoZoom(videoRef, stream, effectiveTool !== 'navigate');
   const pip = usePictureInPicture(videoRef, stream);
+  const screenshot = useVideoScreenshot({
+    videoRef,
+    stream,
+    streamId: isLocal ? 'local' : remotePeerId,
+    isPaused: !stream,
+    connectionState,
+    isLocal,
+  });
   const controlsRef = useRef<HTMLDivElement>(null);
 
   // Lift the bar only when it would overlap the central dock.
@@ -794,6 +805,57 @@ function SpotlightVideoPlayer({
           ><IconPictureInPicture size={18} aria-hidden /></Button>
         </span>
       </Tooltip>
+      <Tooltip
+        label={
+          screenshot.feedback === 'success'
+            ? 'Download da imagem iniciado'
+            : screenshot.feedback === 'error'
+            ? 'Falha ao salvar imagem'
+            : !screenshot.canCapture
+            ? 'Captura indisponível no momento'
+            : 'Salvar imagem'
+        }
+        withArrow
+      >
+        <span
+          tabIndex={!screenshot.canCapture && screenshot.feedback !== 'success' ? 0 : undefined}
+          aria-label={!screenshot.canCapture && screenshot.feedback !== 'success' ? 'Captura indisponível no momento' : undefined}
+        >
+          <Button
+            variant={screenshot.feedback === 'success' ? 'filled' : 'subtle'}
+            color={screenshot.feedback === 'success' ? 'teal' : 'gray'}
+            aria-label="Salvar imagem"
+            disabled={!screenshot.canCapture || screenshot.isCapturing}
+            aria-busy={screenshot.isCapturing}
+            loading={screenshot.isCapturing}
+            onClick={screenshot.captureScreenshot}
+            p={8}
+          >
+            {screenshot.feedback === 'success' ? (
+              <IconCheck size={18} aria-hidden />
+            ) : (
+              <IconCamera size={18} aria-hidden />
+            )}
+          </Button>
+        </span>
+      </Tooltip>
+      <Box
+        role="status"
+        aria-live="polite"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {screenshot.feedbackMessage}
+      </Box>
       <Box
         className="zoom-controls"
         role="group"

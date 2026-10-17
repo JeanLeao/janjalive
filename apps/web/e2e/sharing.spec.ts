@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import fs from 'node:fs';
 
 async function syntheticCapture(page: Page) {
   await page.addInitScript(() => {
@@ -2028,3 +2029,172 @@ test('F18 missing presentation API keeps playback and decoded evidence available
     expect(events.some(event => event.includes(' first-frame-presented '))).toBe(false);
   } finally { await context.close(); }
 });
+
+test('F30 privacy notice appears in capture preview without blocking confirmation', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await syntheticCapture(page);
+    await page.goto('/room/e2e-f30-notice');
+    await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+
+    // Verify privacy notice is clearly present
+    const notice = page.getByText('Participantes da sala podem salvar imagens da tela compartilhada.', { exact: true });
+    await expect(notice).toBeVisible();
+
+    // Verify it doesn't block confirmation
+    const confirmBtn = page.getByRole('button', { name: 'Entrar ao vivo', exact: true });
+    await expect(confirmBtn).toBeEnabled();
+    await confirmBtn.click();
+
+    // Verify live state
+    await expect(page.getByText(/Transmitindo/)).toBeVisible();
+    await page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+  } finally {
+    await context.close();
+  }
+});
+
+test('F30 screenshot captures unzoomed frame in PNG, disables on pause, and works in cinema mode', async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const viewerContext = await browser.newContext();
+  try {
+    const host = await hostContext.newPage();
+    const viewer = await viewerContext.newPage();
+    await syntheticCapture(host);
+    await syntheticCapture(viewer);
+
+    await Promise.all([
+      host.goto('/room/e2e-f30-capture'),
+      viewer.goto('/room/e2e-f30-capture'),
+    ]);
+    await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+
+    // Start sharing
+    await startLive(host);
+    await frames(viewer);
+
+    // 1. Viewer saves screenshot
+    const viewerBtn = viewer.getByRole('button', { name: 'Salvar imagem', exact: true });
+    await expect(viewerBtn).toBeEnabled();
+
+    const viewerDownloadPromise = viewer.waitForEvent('download');
+    await viewerBtn.click();
+    const viewerDownload = await viewerDownloadPromise;
+    expect(viewerDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+    const viewerFilePath = test.info().outputPath('viewer-screenshot.png');
+    await viewerDownload.saveAs(viewerFilePath);
+    const viewerBuffer = fs.readFileSync(viewerFilePath);
+
+    // Validate PNG signature: 89 50 4E 47 0D 0A 1A 0A
+    expect(viewerBuffer[0]).toBe(0x89);
+    expect(viewerBuffer[1]).toBe(0x50);
+    expect(viewerBuffer[2]).toBe(0x4e);
+    expect(viewerBuffer[3]).toBe(0x47);
+    // Validate width and height from PNG IHDR chunk (synthetic capture creates 640x360)
+    expect(viewerBuffer.readUInt32BE(16)).toBe(640);
+    expect(viewerBuffer.readUInt32BE(20)).toBe(360);
+
+    // 2. Presenter saves screenshot of own featured stream
+    const hostBtn = host.getByRole('button', { name: 'Salvar imagem', exact: true });
+    await expect(hostBtn).toBeEnabled();
+
+    const hostDownloadPromise = host.waitForEvent('download');
+    await hostBtn.click();
+    const hostDownload = await hostDownloadPromise;
+    expect(hostDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+    const hostFilePath = test.info().outputPath('host-screenshot.png');
+    await hostDownload.saveAs(hostFilePath);
+    const hostBuffer = fs.readFileSync(hostFilePath);
+    expect(hostBuffer.readUInt32BE(16)).toBe(640);
+    expect(hostBuffer.readUInt32BE(20)).toBe(360);
+
+    // 3. Zooming in preserves intrinsic resolution and does not alter image dimensions
+    await viewer.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+    await expect(viewer.getByText('125%')).toBeVisible();
+
+    const zoomedDownloadPromise = viewer.waitForEvent('download');
+    await viewerBtn.click();
+    const zoomedDownload = await zoomedDownloadPromise;
+    const zoomedFilePath = test.info().outputPath('viewer-zoomed.png');
+    await zoomedDownload.saveAs(zoomedFilePath);
+    const zoomedBuffer = fs.readFileSync(zoomedFilePath);
+    // The exported image must be the raw decoded 640x360 frame, not zoomed or cropped by CSS
+    expect(zoomedBuffer.readUInt32BE(16)).toBe(640);
+    expect(zoomedBuffer.readUInt32BE(20)).toBe(360);
+
+    // 4. Cinema mode allows screenshot
+    await viewer.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: 'Sair do Modo Cinema', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+    await viewer.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+
+    // 5. Pause disables screenshot button on both peers
+    await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeDisabled();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeDisabled();
+
+    // Resume re-enables screenshot
+    await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+
+    // Cleanup
+    await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+  } finally {
+    await hostContext.close();
+    await viewerContext.close();
+  }
+});
+
+for (const width of [390, 320]) {
+  test(`F30 screenshot controls responsive layout and touch targets at ${width}px`, async ({ browser }) => {
+    const hostContext = await browser.newContext();
+    const viewerContext = await browser.newContext({
+      viewport: { width, height: 844 },
+      hasTouch: true,
+    });
+    try {
+      const host = await hostContext.newPage();
+      const viewer = await viewerContext.newPage();
+      await syntheticCapture(host);
+      await syntheticCapture(viewer);
+
+      await Promise.all([
+        host.goto(`/room/e2e-f30-mobile-${width}`),
+        viewer.goto(`/room/e2e-f30-mobile-${width}`),
+      ]);
+      await startLive(host);
+      await frames(viewer);
+
+      const btn = viewer.getByRole('button', { name: 'Salvar imagem', exact: true });
+      await expect(btn).toBeVisible();
+      await expect(btn).toBeEnabled();
+
+      const box = await btn.boundingBox();
+      expect(box).not.toBeNull();
+      // On mobile / coarse pointer, controls should have at least 44px height for touch ergonomics
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+
+      // Verify controls bar stays within viewport width
+      const bar = await viewer.locator('.stage-view-controls').boundingBox();
+      expect(bar).not.toBeNull();
+      expect(bar!.x).toBeGreaterThanOrEqual(0);
+      expect(bar!.x + bar!.width).toBeLessThanOrEqual(width);
+
+      // Tap to save image on touch device
+      const downloadPromise = viewer.waitForEvent('download');
+      await btn.tap();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    } finally {
+      await hostContext.close();
+      await viewerContext.close();
+    }
+  });
+}
+
