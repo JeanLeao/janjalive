@@ -41,7 +41,7 @@ Uma perda de envio de **5% ou mais**, com cooldown de **20 segundos**, reduz um 
 
 Os eventos técnicos distinguem seleção solicitada, captura verificada e parâmetros aceitos pelos senders. `getSettings()` informa resolução e frequência configuradas na track, que não comprovam a frequência codificada. `video-quality-stats` registra por peer FPS de codificação e recepção quando presentes em `framesPerSecond`, dimensões efetivas de envio/recepção, bytes e motivo de limitação do encoder quando disponível. Campos ausentes permanecem ausentes; nunca se copia FPS solicitado para métricas efetivas.
 
-A gaveta de rede mantém bitrate e perda medidos no intervalo (média das conexões para apresentação), RTT e contagem de conexões. Em peers bidirecionais esse resumo prioriza recepção; ele não é o gatilho de proteção do envio. Eventos técnicos por peer permitem separar as direções.
+A gaveta de rede mostra médias apenas das medições válidas de bitrate, perda e RTT; ausência de medição não contribui como zero. O bitrate exige dois contadores compatíveis. A primeira perda válida usa contadores acumulados; as seguintes usam deltas com tráfego, sem produzir 0% em intervalos sem pacotes ou sem contador de perdas. A contagem considera `connectionState=connected`, independentemente da disponibilidade de RTP. Os detalhes por peer distinguem ausência de amostra, campo não fornecido, estatística indisponível e medição ainda não estabelecida. Em peers bidirecionais esse resumo prioriza recepção; ele não é o gatilho de proteção do envio. Eventos técnicos por peer permitem separar as direções.
 
 Captura sintética e WebRTC local não comprovam áudio nativo, permissões interativas do sistema, conectividade entre redes ou qualidade sob congestionamento real.
 

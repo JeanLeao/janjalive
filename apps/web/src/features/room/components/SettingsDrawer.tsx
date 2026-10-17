@@ -57,6 +57,7 @@ export function SettingsDrawer({
   isSharing,
   initialTab = 'quality',
 }: SettingsDrawerProps) {
+  const measurementLabel = { unavailable: 'Estatísticas indisponíveis', 'no-report': 'Sem amostra', unsupported: 'Campo não fornecido pelo navegador', pending: 'Medição ainda não estabelecida', measured: 'Medido' };
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
@@ -297,7 +298,7 @@ export function SettingsDrawer({
                   Latência (RTT)
                 </Text>
                 <Text size="lg" fw={700} c="#fff" mt={4}>
-                  {networkStats?.rttMs ? `${networkStats.rttMs} ms` : '–'}
+                  {networkStats?.rttMs != null ? `${networkStats.rttMs} ms` : '–'}
                 </Text>
               </Box>
 
@@ -315,10 +316,10 @@ export function SettingsDrawer({
                 <Text
                   size="lg"
                   fw={700}
-                  c={networkStats && networkStats.lossPercent > 5 ? '#f87171' : '#22c55e'}
+                  c={networkStats?.lossPercent != null && networkStats.lossPercent > 5 ? '#f87171' : '#e6edf3'}
                   mt={4}
                 >
-                  {networkStats ? `${networkStats.lossPercent.toFixed(1)}%` : '0%'}
+                  {networkStats?.lossPercent != null ? `${networkStats.lossPercent.toFixed(1)}%` : '–'}
                 </Text>
               </Box>
 
@@ -334,7 +335,7 @@ export function SettingsDrawer({
                   Taxa de bits
                 </Text>
                 <Text size="lg" fw={700} c="#fff" mt={4}>
-                  {networkStats?.bitrateKbps ? `${networkStats.bitrateKbps} kbps` : '–'}
+                  {networkStats?.bitrateKbps != null ? `${networkStats.bitrateKbps} kbps` : '–'}
                 </Text>
               </Box>
 
@@ -347,13 +348,36 @@ export function SettingsDrawer({
                 }}
               >
                 <Text size="xs" c="#8c959f">
-                  Conexões ativas
+                  Conexões WebRTC estabelecidas
                 </Text>
                 <Text size="lg" fw={700} c="#fff" mt={4}>
-                  {networkStats ? networkStats.activeConnections : (connectionStatus === 'connected' ? 1 : 0)}
+                  {networkStats?.activeConnections ?? '–'}
                 </Text>
               </Box>
             </Box>
+
+            <Text size="xs" c="#8c959f">
+              WebSocket: {connectionStatus}. Resumo das amostras disponíveis; não confirma todos os participantes.
+              {' '}– indica medição indisponível ou ainda não estabelecida.
+            </Text>
+            {networkStats?.peers.map(peer => (
+              <Box key={peer.peerId} style={{ overflowWrap: 'anywhere' }}>
+                <Text size="sm" fw={600}>{peer.peerId}</Text>
+                <Text size="xs" c="#8c959f">
+                  WebRTC: {peer.connection} · ICE: {peer.ice} · SDP: {peer.signaling}
+                  {' · '}{peer.negotiated ? 'Descrições aplicadas' : 'Negociação ainda não estabelecida'}
+                </Text>
+                <Text size="xs" c="#8c959f">
+                  Recepção: {peer.receiving === null ? 'Indeterminada' : peer.receiving ? 'Bytes recebidos' : 'Sem bytes medidos'}
+                  {' · '}Frames decodificados: {peer.framesDecoded ?? '–'}
+                  {' · '}Perda: {peer.lossPercent === null ? measurementLabel[peer.measurement.loss] : `${peer.lossPercent.toFixed(1)}%`}
+                  {' · '}RTT: {peer.rttMs === null ? measurementLabel[peer.measurement.rtt] : `${peer.rttMs} ms`}
+                  {' · '}Bitrate: {peer.bitrateKbps === null ? measurementLabel[peer.measurement.bitrate] : `${peer.bitrateKbps} kbps`}
+                  {peer.stats === 'unavailable' && ' · Estatísticas indisponíveis'}
+                </Text>
+              </Box>
+            ))}
+            <Text size="xs" c="#8c959f">Apresentação no palco: consulte first-frame-presented nos eventos. Sem callback suportado, permanece indeterminada. Prévia local e miniaturas não são observadas.</Text>
 
             {/* Diagnostic Event Logs */}
             <Box

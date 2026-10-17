@@ -32,6 +32,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
   onTogglePointingPermission?: () => void;
   drawingEnabled?: boolean;
@@ -65,6 +66,7 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  onVideoPresented,
   annotations,
   onTogglePointingPermission,
   drawingEnabled,
@@ -366,6 +368,8 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
+          onVideoPresented={onVideoPresented}
+          remotePeerId={activeStream.isLocal ? undefined : activeStream.id}
           annotations={annotations}
           localPeerId={participants.find((p) => p.isLocal)?.peerId}
           annotationPeerId={participants.find(p => activeStream.isLocal ? p.isLocal : p.peerId === activeStream.id)?.peerId}
@@ -529,6 +533,7 @@ export function RoomStage({
 
 // Spotlight Video Player Component
 function SpotlightVideoPlayer({
+  onVideoPresented, remotePeerId,
   annotations, localPeerId, annotationPeerId, annotationStreamId,
   pointingEnabled = true,
   onTogglePointingPermission,
@@ -547,6 +552,8 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  remotePeerId?: string;
+  onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
   localPeerId?: string;
   annotationPeerId?: string;
@@ -571,7 +578,7 @@ function SpotlightVideoPlayer({
   // CRITICAL: Local video MUST ALWAYS be muted to prevent acoustic feedback loop!
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
   const [playback, setPlayback] = useState('Conectando');
-  const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback);
+  const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined);
   const [tool, setTool] = useState<AnnotationTool>('navigate');
   const canAnnotate = Boolean(isLocal && stream && annotationStreamId && annotations?.available);
   const canPoint = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);

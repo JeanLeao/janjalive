@@ -1965,3 +1965,66 @@ for (const width of [1280, 390, 320]) {
     } finally { await context.close(); }
   });
 }
+
+for (const width of [1280, 390]) {
+  test(`F18 connectivity and remote presentation diagnostics ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width === 390 });
+    const host = await context.newPage(), viewer = await context.newPage();
+    const hostEvents: string[] = [], viewerEvents: string[] = [];
+    host.on('console', message => hostEvents.push(message.text()));
+    viewer.on('console', message => viewerEvents.push(message.text()));
+    try {
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await host.goto(`/room/e2e-f18-${width}`);
+      await viewer.goto(`/room/e2e-f18-${width}`);
+      await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+      const openNetwork = async () => {
+        const trigger = viewer.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+        await trigger.focus(); await viewer.keyboard.press('Enter');
+        await viewer.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+        const tab = viewer.getByRole('tab', { name: /Rede/ });
+        if (width === 390) await tab.tap(); else await tab.click();
+      };
+      await openNetwork();
+      const dialog = viewer.getByRole('dialog');
+      await expect(dialog).toContainText('WebSocket: connected');
+      await expect(dialog.getByText('0', { exact: true })).toBeVisible();
+      await viewer.keyboard.press('Escape');
+      await startLive(host); await frames(viewer);
+      await expect.poll(() => viewerEvents.some(event => event.includes(' first-frame-presented '))).toBe(true);
+      await expect.poll(() => viewerEvents.some(event => event.includes(' first-frame ') && event.includes('evidence=decoded'))).toBe(true);
+      expect(hostEvents.some(event => event.includes(' first-frame-presented '))).toBe(false);
+      await openNetwork();
+      await expect(dialog).toContainText('WebRTC: connected');
+      await expect(dialog).toContainText('Frames decodificados:');
+      await expect(dialog).toContainText('Bytes recebidos');
+      await dialog.screenshot({ path: `/tmp/f18-network-${width}.png` });
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await viewer.keyboard.press('Escape');
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(viewer.locator('video')).toHaveCount(0);
+    } finally { await context.close(); }
+  });
+}
+
+test('F18 missing presentation API keeps playback and decoded evidence available', async ({ browser }) => {
+  const context = await browser.newContext();
+  const host = await context.newPage(), viewer = await context.newPage();
+  const events: string[] = [];
+  viewer.on('console', message => events.push(message.text()));
+  try {
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await viewer.addInitScript(() => {
+      Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });
+    });
+    await Promise.all([host.goto('/room/e2e-f18-no-callback'), viewer.goto('/room/e2e-f18-no-callback')]);
+    await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+    await startLive(host);
+    await expect.poll(() => viewer.evaluate(() => {
+      const video = document.querySelector('video');
+      return !!video && !video.paused && video.videoWidth > 0;
+    })).toBe(true);
+    await expect.poll(() => events.some(event => event.includes(' first-frame ') && event.includes('evidence=decoded'))).toBe(true);
+    expect(events.some(event => event.includes(' first-frame-presented '))).toBe(false);
+  } finally { await context.close(); }
+});

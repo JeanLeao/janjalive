@@ -290,6 +290,7 @@ function RoomPage() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        onVideoPresented={session.onVideoPresented}
         annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
         onTogglePointingPermission={session.togglePointingPermission}
         drawingEnabled={session.drawingEnabled}
