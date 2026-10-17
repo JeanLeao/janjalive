@@ -1,3 +1,4 @@
+import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -6,6 +7,225 @@ import {
   captureVideoFrame,
   downloadBlob,
 } from '../src/features/room/utils/screenshot.ts';
+import { useVideoScreenshot } from '../src/features/room/hooks/useVideoScreenshot.ts';
+
+function renderHook(hookFn, initialProps) {
+  let currentProps = initialProps;
+  const states = [];
+  const refs = [];
+  const effects = [];
+  let result;
+  let isMounted = true;
+  let isRendering = false;
+  let dirty = false;
+
+  let statesIdx = 0;
+  let refsIdx = 0;
+  let effectsIdx = 0;
+
+  const dispatcher = {
+    useState(init) {
+      const idx = statesIdx++;
+      if (!(idx in states)) {
+        states[idx] = typeof init === 'function' ? init() : init;
+      }
+      const setState = (val) => {
+        if (!isMounted) return;
+        const next = typeof val === 'function' ? val(states[idx]) : val;
+        if (!Object.is(states[idx], next)) {
+          states[idx] = next;
+          if (isRendering) {
+            dirty = true;
+          } else {
+            render();
+          }
+        }
+      };
+      return [states[idx], setState];
+    },
+    useRef(init) {
+      const idx = refsIdx++;
+      if (!(idx in refs)) {
+        refs[idx] = { current: init };
+      }
+      return refs[idx];
+    },
+    useEffect(create, deps) {
+      const idx = effectsIdx++;
+      const prev = effects[idx];
+      const changed =
+        !prev ||
+        !deps ||
+        !prev.deps ||
+        deps.length !== prev.deps.length ||
+        deps.some((d, i) => !Object.is(d, prev.deps[i]));
+      effects[idx] = { create, deps, cleanup: prev?.cleanup, changed };
+    },
+  };
+
+  function flushEffects() {
+    for (const ef of effects) {
+      if (ef.changed) {
+        ef.changed = false;
+        if (typeof ef.cleanup === 'function') ef.cleanup();
+        ef.cleanup = ef.create();
+      }
+    }
+  }
+
+  function render() {
+    isRendering = true;
+    do {
+      dirty = false;
+      statesIdx = 0;
+      refsIdx = 0;
+      effectsIdx = 0;
+      const internals =
+        React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      const prevH = internals.H;
+      internals.H = dispatcher;
+      try {
+        result = hookFn(currentProps);
+      } finally {
+        internals.H = prevH;
+      }
+      flushEffects();
+    } while (dirty);
+    isRendering = false;
+  }
+
+  render();
+
+  return {
+    get current() {
+      return result;
+    },
+    rerender(nextProps) {
+      currentProps = { ...currentProps, ...nextProps };
+      render();
+    },
+    unmount() {
+      isMounted = false;
+      for (const ef of effects) {
+        if (typeof ef.cleanup === 'function') {
+          ef.cleanup();
+          ef.cleanup = undefined;
+        }
+      }
+    },
+  };
+}
+
+function createMockVideo(overrides = {}) {
+  const listeners = new Map();
+  return {
+    videoWidth: 1920,
+    videoHeight: 1080,
+    readyState: 4,
+    addEventListener(ev, fn) {
+      if (!listeners.has(ev)) listeners.set(ev, new Set());
+      listeners.get(ev).add(fn);
+    },
+    removeEventListener(ev, fn) {
+      listeners.get(ev)?.delete(fn);
+    },
+    dispatchEvent(ev) {
+      for (const fn of listeners.get(ev) || []) fn();
+    },
+    ...overrides,
+  };
+}
+
+function createMockStream(id = 'stream-1') {
+  const trackListeners = new Map();
+  const streamListeners = new Map();
+  const track = {
+    id: `track-${id}`,
+    kind: 'video',
+    readyState: 'live',
+    addEventListener(ev, fn) {
+      if (!trackListeners.has(ev)) trackListeners.set(ev, new Set());
+      trackListeners.get(ev).add(fn);
+    },
+    removeEventListener(ev, fn) {
+      trackListeners.get(ev)?.delete(fn);
+    },
+    stop() {
+      this.readyState = 'ended';
+      for (const fn of trackListeners.get('ended') || []) fn();
+    },
+  };
+  return {
+    id,
+    track,
+    getVideoTracks: () => [track],
+    addEventListener(ev, fn) {
+      if (!streamListeners.has(ev)) streamListeners.set(ev, new Set());
+      streamListeners.get(ev).add(fn);
+    },
+    removeEventListener(ev, fn) {
+      streamListeners.get(ev)?.delete(fn);
+    },
+  };
+}
+
+function setupControlledDomEnvironment() {
+  const pendingEncodings = [];
+  const downloads = [];
+  const originalDocument = globalThis.document;
+  const originalURL = globalThis.URL;
+
+  globalThis.URL = {
+    createObjectURL: (blob) => `blob:mock-${blob.size}-${downloads.length}`,
+    revokeObjectURL: () => {},
+  };
+
+  globalThis.document = {
+    createElement: (tag) => {
+      if (tag === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: (type) =>
+            type === '2d' ? { drawImage: () => {} } : null,
+          toBlob: (cb, mimeType = 'image/png') => {
+            pendingEncodings.push({
+              resolve: (blob = new Blob(['png-bytes'], { type: mimeType })) =>
+                cb(blob),
+              fail: () => cb(null),
+            });
+          },
+        };
+      }
+      if (tag === 'a') {
+        return {
+          style: {},
+          href: '',
+          download: '',
+          click() {
+            downloads.push({ href: this.href, download: this.download });
+          },
+        };
+      }
+      return {};
+    },
+    body: {
+      appendChild: () => {},
+      removeChild: () => {},
+    },
+  };
+
+  return {
+    pendingEncodings,
+    downloads,
+    restore() {
+      if (originalDocument === undefined) delete globalThis.document;
+      else globalThis.document = originalDocument;
+      if (originalURL === undefined) delete globalThis.URL;
+      else globalThis.URL = originalURL;
+    },
+  };
+}
 
 test('formatScreenshotFilename formats predictable filename with zero-padding', () => {
   const fixedDate = new Date(2026, 9, 17, 14, 30, 0); // Month is 0-indexed: 9 = October
@@ -245,8 +465,6 @@ test('downloadBlob manages object URL lifecycle and triggers anchor download', a
 });
 
 test('screenshot draws only video element and does not include overlays', async () => {
-  // Verify that captureVideoFrame strictly takes HTMLVideoElement and draws it
-  // and does NOT touch or composite any other DOM element (like annotation canvas or toolbars)
   let drawnSource = null;
   globalThis.document = {
     createElement: (tag) => {
@@ -273,92 +491,242 @@ test('screenshot draws only video element and does not include overlays', async 
   }
 });
 
-test('concurrency guard discards download if stream or featured peer changes during capture', async () => {
-  let downloadTriggered = false;
-  let delayResolve = null;
-
-  globalThis.document = {
-    createElement: (tag) => {
-      if (tag === 'canvas') {
-        return {
-          width: 0,
-          height: 0,
-          getContext: () => ({ drawImage: () => {} }),
-          toBlob: (cb) => {
-            // Emulate async encoding delay
-            new Promise((resolve) => {
-              delayResolve = () => {
-                cb(new Blob(['data'], { type: 'image/png' }));
-                resolve();
-              };
-            });
-          },
-        };
-      }
-      return {};
-    },
-  };
-
+test('useVideoScreenshot: capture followed by pause discards obsolete download and feedback', async () => {
+  const env = setupControlledDomEnvironment();
   try {
-    const video = { videoWidth: 1920, videoHeight: 1080, readyState: 3 };
-    const streamA = { getVideoTracks: () => [{ readyState: 'live' }] };
-    const streamB = { getVideoTracks: () => [{ readyState: 'live' }] };
+    const video = createMockVideo();
+    const videoRef = { current: video };
+    const stream = createMockStream('s1');
 
-    let currentStream = streamA;
-    let currentStreamId = 'peer-1';
-    let generation = 0;
-    let isPaused = false;
+    const hook = renderHook(useVideoScreenshot, {
+      videoRef,
+      stream,
+      streamId: 'peer-1',
+      isPaused: false,
+      connectionState: 'connected',
+      isLocal: false,
+    });
 
-    // Simulate hook capture logic
-    const runCapture = async () => {
-      const capturedStream = currentStream;
-      const capturedStreamId = currentStreamId;
-      const currentGen = ++generation;
+    assert.equal(hook.current.canCapture, true);
+    const capturePromise = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+    assert.equal(env.pendingEncodings.length, 1);
 
-      const blob = await captureVideoFrame(video);
+    // Pause transmission while PNG encoding is in flight
+    hook.rerender({ isPaused: true, stream: null });
+    assert.equal(hook.current.canCapture, false);
+    assert.equal(hook.current.isCapturing, false);
 
-      // Guard check
-      if (
-        currentGen !== generation ||
-        currentStream !== capturedStream ||
-        currentStreamId !== capturedStreamId ||
-        isPaused
-      ) {
-        return false;
-      }
-      downloadTriggered = true;
-      return true;
-    };
+    // Finish async PNG encoding
+    env.pendingEncodings[0].resolve();
+    const ok = await capturePromise;
 
-    // Scenario 1: Stream switched while capture is in flight
-    const promise1 = runCapture();
-    // Presenter or feature switched
-    currentStream = streamB;
-    currentStreamId = 'peer-2';
-    delayResolve();
-    const result1 = await promise1;
-    assert.equal(result1, false);
-    assert.equal(downloadTriggered, false);
-
-    // Scenario 2: Paused while capture is in flight
-    currentStream = streamB;
-    currentStreamId = 'peer-2';
-    const promise2 = runCapture();
-    isPaused = true;
-    delayResolve();
-    const result2 = await promise2;
-    assert.equal(result2, false);
-    assert.equal(downloadTriggered, false);
-
-    // Scenario 3: Normal un-interrupted capture
-    isPaused = false;
-    const promise3 = runCapture();
-    delayResolve();
-    const result3 = await promise3;
-    assert.equal(result3, true);
-    assert.equal(downloadTriggered, true);
+    assert.equal(ok, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+    assert.equal(hook.current.feedbackMessage, null);
+    hook.unmount();
   } finally {
-    delete globalThis.document;
+    env.restore();
   }
 });
+
+test('useVideoScreenshot: capture followed by stream or featured presenter switch discards obsolete download', async () => {
+  const env = setupControlledDomEnvironment();
+  try {
+    const video = createMockVideo();
+    const videoRef = { current: video };
+    const streamA = createMockStream('sA');
+    const streamB = createMockStream('sB');
+
+    const hook = renderHook(useVideoScreenshot, {
+      videoRef,
+      stream: streamA,
+      streamId: 'peer-1',
+      isPaused: false,
+      connectionState: 'connected',
+      isLocal: false,
+    });
+
+    // 1. Replace MediaStream object on same presenter (e.g. F27 source switch)
+    const capture1 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+    hook.rerender({ stream: streamB, streamId: 'peer-1' });
+    assert.equal(hook.current.isCapturing, false);
+    assert.equal(hook.current.canCapture, true);
+
+    env.pendingEncodings[0].resolve();
+    assert.equal(await capture1, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+
+    // 2. Switch featured streamId
+    const capture2 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+    hook.rerender({ stream: streamB, streamId: 'peer-2' });
+    assert.equal(hook.current.isCapturing, false);
+
+    env.pendingEncodings[1].resolve();
+    assert.equal(await capture2, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+
+    // 3. Stop track in place without prop rerender yet (native track ended event)
+    const capture3 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+    streamB.track.stop();
+    assert.equal(hook.current.canCapture, false);
+    assert.equal(hook.current.isCapturing, false);
+
+    env.pendingEncodings[2].resolve();
+    assert.equal(await capture3, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+
+    hook.unmount();
+  } finally {
+    env.restore();
+  }
+});
+
+test('useVideoScreenshot: capture followed by connection loss discards obsolete download and suppresses error feedback', async () => {
+  const env = setupControlledDomEnvironment();
+  try {
+    const video = createMockVideo();
+    const videoRef = { current: video };
+    const stream = createMockStream('s-conn');
+
+    const hook = renderHook(useVideoScreenshot, {
+      videoRef,
+      stream,
+      streamId: 'peer-1',
+      isPaused: false,
+      connectionState: 'connected',
+      isLocal: false,
+    });
+
+    // 1. Encoding resolves after connection drops to disconnected
+    const capture1 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+
+    hook.rerender({ connectionState: 'disconnected' });
+    assert.equal(hook.current.canCapture, false);
+    assert.equal(hook.current.isCapturing, false);
+
+    env.pendingEncodings[0].resolve();
+    assert.equal(await capture1, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+    assert.equal(hook.current.feedbackMessage, null);
+
+    // 2. Restore connection, start capture, then fail connection AND fail encoding: stale error is suppressed
+    hook.rerender({ connectionState: 'connected' });
+    assert.equal(hook.current.canCapture, true);
+
+    const capture2 = hook.current.captureScreenshot();
+    hook.rerender({ connectionState: 'failed' });
+    env.pendingEncodings[1].fail();
+    assert.equal(await capture2, false);
+    assert.equal(env.downloads.length, 0);
+    assert.equal(hook.current.feedback, 'idle');
+    assert.equal(hook.current.feedbackMessage, null);
+
+    hook.unmount();
+  } finally {
+    env.restore();
+  }
+});
+
+test('useVideoScreenshot: capture followed by unmount discards obsolete download', async () => {
+  const env = setupControlledDomEnvironment();
+  try {
+    const video = createMockVideo();
+    const videoRef = { current: video };
+    const stream = createMockStream('s-unmount');
+
+    const hook = renderHook(useVideoScreenshot, {
+      videoRef,
+      stream,
+      streamId: 'peer-1',
+      isPaused: false,
+      connectionState: 'connected',
+      isLocal: false,
+    });
+
+    const capturePromise = hook.current.captureScreenshot();
+    assert.equal(env.pendingEncodings.length, 1);
+
+    hook.unmount();
+
+    env.pendingEncodings[0].resolve();
+    const ok = await capturePromise;
+    assert.equal(ok, false);
+    assert.equal(env.downloads.length, 0);
+  } finally {
+    env.restore();
+  }
+});
+
+test('useVideoScreenshot: uninterrupted capture downloads PNG and valid capture works after invalidation', async () => {
+  const env = setupControlledDomEnvironment();
+  try {
+    const video = createMockVideo();
+    const videoRef = { current: video };
+    const streamA = createMockStream('s-valid-1');
+    const streamB = createMockStream('s-valid-2');
+
+    const hook = renderHook(useVideoScreenshot, {
+      videoRef,
+      stream: streamA,
+      streamId: 'peer-1',
+      isPaused: false,
+      connectionState: 'connected',
+      isLocal: false,
+    });
+
+    // 1. Normal uninterrupted capture
+    const validPromise1 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+    env.pendingEncodings[0].resolve();
+    assert.equal(await validPromise1, true);
+    assert.equal(env.downloads.length, 1);
+    assert.match(env.downloads[0].download, /^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+    assert.equal(hook.current.isCapturing, false);
+    assert.equal(hook.current.feedback, 'success');
+    assert.equal(hook.current.feedbackMessage, 'Download da imagem iniciado');
+
+    // 2. Start capture, invalidate via pause, then resume with new stream and capture again
+    const invalidatedPromise = hook.current.captureScreenshot();
+    hook.rerender({ isPaused: true, stream: null });
+    assert.equal(hook.current.canCapture, false);
+    assert.equal(hook.current.isCapturing, false);
+    assert.equal(hook.current.feedback, 'idle');
+
+    // Resume with streamB before first encoding even finishes
+    hook.rerender({ isPaused: false, stream: streamB });
+    assert.equal(hook.current.canCapture, true);
+
+    const validPromise2 = hook.current.captureScreenshot();
+    assert.equal(hook.current.isCapturing, true);
+
+    // Resolve the stale first encoding: must NOT download or clear isCapturing of the second capture
+    env.pendingEncodings[1].resolve();
+    assert.equal(await invalidatedPromise, false);
+    assert.equal(env.downloads.length, 1);
+    assert.equal(hook.current.isCapturing, true);
+
+    // Resolve the new valid encoding: must download and report success
+    env.pendingEncodings[2].resolve();
+    assert.equal(await validPromise2, true);
+    assert.equal(env.downloads.length, 2);
+    assert.equal(hook.current.isCapturing, false);
+    assert.equal(hook.current.feedback, 'success');
+    assert.equal(hook.current.feedbackMessage, 'Download da imagem iniciado');
+
+    hook.unmount();
+  } finally {
+    env.restore();
+  }
+});
+
 

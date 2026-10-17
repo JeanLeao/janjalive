@@ -4,7 +4,7 @@ import {
   downloadBlob,
   formatScreenshotFilename,
   isScreenshotAvailable,
-} from '../utils/screenshot';
+} from '../utils/screenshot.ts';
 
 export interface UseVideoScreenshotOptions {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -38,21 +38,48 @@ export function useVideoScreenshot({
   const isConnectionValid =
     isLocal || connectionState === undefined || connectionState === 'connected';
 
-  // Check and update capture availability
+  // Keep latest live state in a ref so async resume after await never reads stale render closures
+  const latestStateRef = useRef({
+    stream,
+    streamId,
+    isPaused,
+    isConnectionValid,
+  });
+  latestStateRef.current = {
+    stream,
+    streamId,
+    isPaused,
+    isConnectionValid,
+  };
+
+  const clearFeedbackTimer = () => {
+    if (feedbackTimerRef.current) {
+      clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+    }
+  };
+
+  // Check and update capture availability against current live state
   const checkAvailability = () => {
     const video = videoRef.current;
+    const current = latestStateRef.current;
     const available =
-      isConnectionValid && isScreenshotAvailable(video, stream, isPaused);
+      current.isConnectionValid &&
+      isScreenshotAvailable(video, current.stream, current.isPaused);
     setCanCapture(available);
   };
 
   useEffect(() => {
     disposedRef.current = false;
+    // Invalidate any in-flight screenshot and reset feedback/loading when transmission state or source changes
+    generationRef.current += 1;
+    clearFeedbackTimer();
+    setIsCapturing(false);
+    setFeedback('idle');
+    setFeedbackMessage(null);
+
     const video = videoRef.current;
-
     checkAvailability();
-
-    if (!video) return;
 
     const events = [
       'loadedmetadata',
@@ -62,68 +89,135 @@ export function useVideoScreenshot({
       'waiting',
       'emptied',
     ];
-    const handleVideoEvent = () => {
-      if (!disposedRef.current) {
-        checkAvailability();
+    const handleStateChange = () => {
+      if (disposedRef.current) return;
+      const current = latestStateRef.current;
+      const available =
+        current.isConnectionValid &&
+        isScreenshotAvailable(videoRef.current, current.stream, current.isPaused);
+      setCanCapture(available);
+      if (!available) {
+        generationRef.current += 1;
+        setIsCapturing(false);
       }
     };
 
-    events.forEach((ev) => video.addEventListener(ev, handleVideoEvent));
+    if (video) {
+      events.forEach((ev) => video.addEventListener(ev, handleStateChange));
+    }
+
+    const watchedTracks = new Set<MediaStreamTrack>();
+    const syncTracks = () => {
+      if (stream) {
+        for (const track of stream.getVideoTracks()) {
+          if (!watchedTracks.has(track) && typeof track.addEventListener === 'function') {
+            watchedTracks.add(track);
+            track.addEventListener('ended', handleStateChange);
+          }
+        }
+      }
+      handleStateChange();
+    };
+
+    if (stream) {
+      for (const track of stream.getVideoTracks()) {
+        if (typeof track.addEventListener === 'function') {
+          watchedTracks.add(track);
+          track.addEventListener('ended', handleStateChange);
+        }
+      }
+      if (typeof stream.addEventListener === 'function') {
+        stream.addEventListener('addtrack', syncTracks);
+        stream.addEventListener('removetrack', handleStateChange);
+      }
+    }
 
     return () => {
-      events.forEach((ev) => video.removeEventListener(ev, handleVideoEvent));
+      generationRef.current += 1;
+      if (video) {
+        events.forEach((ev) => video.removeEventListener(ev, handleStateChange));
+      }
+      for (const track of watchedTracks) {
+        if (typeof track.removeEventListener === 'function') {
+          track.removeEventListener('ended', handleStateChange);
+        }
+      }
+      if (stream && typeof stream.removeEventListener === 'function') {
+        stream.removeEventListener('addtrack', syncTracks);
+        stream.removeEventListener('removetrack', handleStateChange);
+      }
     };
   }, [videoRef, stream, isPaused, isConnectionValid, streamId]);
 
   useEffect(() => {
     return () => {
       disposedRef.current = true;
-      if (feedbackTimerRef.current) {
-        clearTimeout(feedbackTimerRef.current);
-      }
+      generationRef.current += 1;
+      clearFeedbackTimer();
     };
   }, []);
 
   const captureScreenshot = async (): Promise<boolean> => {
     const video = videoRef.current;
+    const initial = latestStateRef.current;
     if (
       !video ||
-      !isConnectionValid ||
-      !isScreenshotAvailable(video, stream, isPaused)
+      !initial.isConnectionValid ||
+      !isScreenshotAvailable(video, initial.stream, initial.isPaused)
     ) {
+      clearFeedbackTimer();
       setFeedback('error');
       setFeedbackMessage('Captura de imagem indisponível no momento');
+      feedbackTimerRef.current = setTimeout(() => {
+        if (!disposedRef.current) {
+          setFeedback('idle');
+          setFeedbackMessage(null);
+        }
+      }, 3000);
       return false;
     }
 
+    clearFeedbackTimer();
+    setFeedback('idle');
+    setFeedbackMessage(null);
     setIsCapturing(true);
-    const currentStream = stream;
-    const currentStreamId = streamId;
+
+    const capturedVideo = video;
+    const capturedStream = initial.stream;
+    const capturedStreamId = initial.streamId;
     const generation = ++generationRef.current;
 
-    try {
-      const blob = await captureVideoFrame(video);
+    const isStillValid = () => {
+      const current = latestStateRef.current;
+      return (
+        !disposedRef.current &&
+        generation === generationRef.current &&
+        videoRef.current === capturedVideo &&
+        current.stream === capturedStream &&
+        current.streamId === capturedStreamId &&
+        !current.isPaused &&
+        current.isConnectionValid &&
+        isScreenshotAvailable(capturedVideo, current.stream, current.isPaused)
+      );
+    };
 
-      // Verify state hasn't changed or become obsolete during async encoding
-      if (
-        disposedRef.current ||
-        generation !== generationRef.current ||
-        stream !== currentStream ||
-        streamId !== currentStreamId ||
-        isPaused
-      ) {
+    try {
+      const blob = await captureVideoFrame(capturedVideo);
+
+      // Verify live state hasn't changed or become obsolete during async encoding
+      if (!isStillValid()) {
         return false;
       }
 
       const filename = formatScreenshotFilename();
       downloadBlob(blob, filename);
 
-      if (!disposedRef.current) {
+      if (generation === generationRef.current && !disposedRef.current) {
         setFeedback('success');
         setFeedbackMessage('Download da imagem iniciado');
-        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        clearFeedbackTimer();
         feedbackTimerRef.current = setTimeout(() => {
-          if (!disposedRef.current) {
+          if (!disposedRef.current && generation === generationRef.current) {
             setFeedback('idle');
             setFeedbackMessage(null);
           }
@@ -131,13 +225,14 @@ export function useVideoScreenshot({
       }
       return true;
     } catch (err) {
-      if (!disposedRef.current) {
+      // Suppress error feedback if the operation was already invalidated
+      if (isStillValid()) {
         console.error('Screenshot capture failed:', err);
         setFeedback('error');
         setFeedbackMessage('Falha ao salvar imagem');
-        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        clearFeedbackTimer();
         feedbackTimerRef.current = setTimeout(() => {
-          if (!disposedRef.current) {
+          if (!disposedRef.current && generation === generationRef.current) {
             setFeedback('idle');
             setFeedbackMessage(null);
           }
@@ -145,7 +240,7 @@ export function useVideoScreenshot({
       }
       return false;
     } finally {
-      if (!disposedRef.current) {
+      if (!disposedRef.current && generation === generationRef.current) {
         setIsCapturing(false);
       }
     }
