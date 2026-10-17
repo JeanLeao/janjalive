@@ -1,3 +1,4 @@
+import { HandCount } from './HandCount';
 import React, { useState } from 'react';
 import {
   Button,
@@ -35,6 +36,7 @@ export interface FloatingControlDockProps {
   onToggleAudioMute: () => void;
   onOpenParticipants: () => void;
   participantCount: number;
+  raisedHandCount?: number;
   onOpenSettings: () => void;
   onLeave: () => void;
   canShareScreen?: boolean | null;
@@ -56,6 +58,7 @@ export function FloatingControlDock({
   onToggleAudioMute,
   onOpenParticipants,
   participantCount,
+  raisedHandCount = 0,
   onOpenSettings,
   onLeave,
   canShareScreen,
@@ -242,7 +245,7 @@ export function FloatingControlDock({
         <Tooltip label={`Participantes (${participantCount})`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <UnstyledButton
             onClick={onOpenParticipants}
-            aria-label={`Ver participantes (${participantCount})`}
+            aria-label={`Ver participantes (${participantCount})${raisedHandCount ? `, ${raisedHandCount} ${raisedHandCount === 1 ? 'mão levantada' : 'mãos levantadas'}` : ''}`}
             className="floating-dock-btn"
             style={{
               width: 42,
@@ -260,6 +263,7 @@ export function FloatingControlDock({
             }}
           >
             <IconUsers size={18} />
+            {raisedHandCount > 0 && <span style={{ position: 'absolute', top: -8, right: -8, background: '#161b22', borderRadius: 8, padding: '1px 3px' }}><HandCount count={raisedHandCount} /></span>}
           </UnstyledButton>
         </Tooltip>
 

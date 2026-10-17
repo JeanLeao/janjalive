@@ -1,3 +1,4 @@
+import { HandCount } from './HandCount';
 import React, { useState } from 'react';
 import {
   Box,
@@ -22,6 +23,7 @@ import {
 export interface RoomHeaderProps {
   roomId: string;
   participantCount: number;
+  raisedHandCount?: number;
   connectionStatus: ConnectionState;
   onOpenParticipants: () => void;
   onOpenSettings: () => void;
@@ -33,6 +35,7 @@ export interface RoomHeaderProps {
 export function RoomHeader({
   roomId,
   participantCount,
+  raisedHandCount = 0,
   connectionStatus,
   onOpenParticipants,
   onOpenSettings,
@@ -115,6 +118,10 @@ export function RoomHeader({
           .room-header-root {
             padding: 0 0.65rem !important;
           }
+          .room-header-context { gap: 0 !important; margin-right: 6px; }
+          .room-header-brand-title { display: none !important; }
+          .room-header-room-pill { min-width: 0; flex-shrink: 1 !important; }
+          .room-header-room-pill svg { flex-shrink: 0; }
           .room-header-status-label {
             display: none !important;
           }
@@ -124,6 +131,11 @@ export function RoomHeader({
           .room-header-actions {
             gap: 4px !important;
           }
+        }
+        @media (max-width: 360px) {
+          .room-header-root { flex-wrap: wrap; height: auto !important; padding-block: 6px !important; gap: 6px; }
+          .room-header-context { flex-basis: 100% !important; }
+          .room-header-actions { margin-left: auto; }
         }
         @media (max-width: 420px) {
           .room-header-pill-prefix {
@@ -135,7 +147,7 @@ export function RoomHeader({
         }
       `}</style>
       {/* Left: Brand & Room Context Pill */}
-      <Group gap="xs" align="center" wrap="nowrap" style={{ minWidth: 0 }}>
+      <Group gap="xs" align="center" wrap="nowrap" className="room-header-context" style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
         <Group gap="xs" align="center" wrap="nowrap">
           <Box
             className="room-header-brand-mark"
@@ -166,6 +178,7 @@ export function RoomHeader({
         <Tooltip label={copied ? 'Link copiado!' : 'Clique para copiar o link da sala'} withArrow>
           <UnstyledButton
             onClick={handleCopyLink}
+            className="room-header-room-pill"
             aria-label="Copiar link da sala"
             style={{
               display: 'flex',
@@ -181,7 +194,7 @@ export function RoomHeader({
               transition: 'background-color 0.15s ease, border-color 0.15s ease',
             }}
           >
-            <Text size="xs" c="#8c959f" fw={500}>
+            <Text size="xs" c="#8c959f" fw={500} truncate>
               <span className="room-header-pill-prefix">sala • </span><span style={{ color: '#e6edf3', fontWeight: 600 }}>{shortRoomId}</span>
             </Text>
             {copied ? (
@@ -194,7 +207,7 @@ export function RoomHeader({
       </Group>
 
       {/* Right: Participant Count, Settings, Status */}
-      <Group gap="xs" align="center" wrap="nowrap" className="room-header-actions">
+      <Group gap="xs" align="center" wrap="nowrap" className="room-header-actions" style={{ flexShrink: 0 }}>
         {/* Connection status pill */}
         <Tooltip label={`Status da conexão: ${getStatusLabel()}`} withArrow>
           <Box
@@ -229,7 +242,7 @@ export function RoomHeader({
         <Tooltip label="Ver participantes" withArrow>
           <UnstyledButton
             onClick={onOpenParticipants}
-            aria-label={`Ver participantes (${participantCount})`}
+            aria-label={`Ver participantes (${participantCount})${raisedHandCount ? `, ${raisedHandCount} ${raisedHandCount === 1 ? 'mão levantada' : 'mãos levantadas'}` : ''}`}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -250,6 +263,7 @@ export function RoomHeader({
             <Text size="xs" fw={600}>
               {participantCount}
             </Text>
+            <HandCount count={raisedHandCount} />
           </UnstyledButton>
         </Tooltip>
 

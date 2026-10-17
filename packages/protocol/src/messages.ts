@@ -33,6 +33,25 @@ export const StageSelectedMessageSchema = z.object({
 export type StageSelectedMessage = z.infer<typeof StageSelectedMessageSchema>;
 export const STAGE_SELECTION_LIMITS = { perSecond: 5 } as const;
 
+// F38: server-owned order and per-session compare-and-set version.
+export const HandStateSchema = z.object({
+  peerId: z.string().min(1),
+  order: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable(),
+  version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict();
+export type HandState = z.infer<typeof HandStateSchema>;
+export const SetHandSchema = z.object({
+  type: z.literal('set-hand'), raised: z.boolean(),
+  version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict();
+export const HandsSnapshotSchema = z.object({
+  type: z.literal('hands-snapshot'), roomId: z.string().min(1),
+  revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  hands: z.array(HandStateSchema).max(1000),
+}).strict();
+export type HandsSnapshot = z.infer<typeof HandsSnapshotSchema>;
+export const HAND_LIMITS = { burst: 6, windowMs: 10_000 } as const;
+
 // Participant presence info
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
@@ -188,6 +207,7 @@ export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
+  SetHandSchema,
   SendChatSchema,
   SendReactionSchema,
   JoinMessageSchema,
@@ -278,6 +298,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  HandsSnapshotSchema,
   CollaborationEventSchema,
   ChatMessageSchema,
   ReactionEventSchema,

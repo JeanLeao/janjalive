@@ -10,6 +10,7 @@ export interface RemoteStreamEntry {
 export interface RoomParticipant {
   peerId: string;
   nickname?: string;
+  handOrder?: number | null;
   isLocal: boolean;
   isSharing: boolean;
   isPaused?: boolean;

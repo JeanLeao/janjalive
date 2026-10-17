@@ -10,6 +10,8 @@ function connect(url) {
     const waiters = [];
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
+      // F38 snapshots are verified in hands.test.js; these queues assert presence/relay ordering.
+      if (parsed.type === 'hands-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {

@@ -170,7 +170,8 @@ function RoomPage() {
   useEffect(() => { closePicker(); }, [isCinema, isFullscreen, closePicker]);
   const localPeerId = session.participants.find((p) => p.isLocal)?.peerId;
   const interactionActions = (variant: 'header' | 'floating') => (
-    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant} />
+    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant}
+      handRaised={session.participants.some(p => p.isLocal && p.handOrder != null)} handReady={session.handReady} onToggleHand={session.toggleHand} />
   );
 
   const handleLeave = () => {
@@ -279,6 +280,7 @@ function RoomPage() {
       {!isCinema && (
         <RoomHeader
           roomId={roomId}
+          raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
           participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
           connectionStatus={session.connectionStatus}
           onOpenParticipants={() => setIsParticipantsOpen(true)}
@@ -346,6 +348,7 @@ function RoomPage() {
         isAudioMuted={session.isAudioMuted}
         onToggleAudioMute={session.toggleAudioMute}
         onOpenParticipants={() => setIsParticipantsOpen(true)}
+        raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
         participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onLeave={handleLeave}

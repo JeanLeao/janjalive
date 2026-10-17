@@ -18,6 +18,7 @@ import {
   formatDisplayName,
 } from '../utils/avatar';
 import {
+  IconHand,
   IconClose,
   IconScreen,
   IconEdit,
@@ -160,7 +161,7 @@ export function ParticipantsDrawer({
             <Text size="xs" c="#8c959f" role="status" data-follow-status={followStatus}>{statusLabel}</Text>
             {followActions}
           </Box>}
-          {participants.map((part) => {
+          {[...participants].sort((a, b) => (a.handOrder ?? Infinity) - (b.handOrder ?? Infinity) || a.peerId.localeCompare(b.peerId)).map((part) => {
             const displayName = formatDisplayName(part.nickname, part.isLocal);
             const { bg, text } = getAvatarColor(part.nickname || 'Visitante');
 
@@ -177,6 +178,7 @@ export function ParticipantsDrawer({
                   border: '1px solid rgba(255, 255, 255, 0.05)',
                 }}
               >
+                {part.handOrder != null && <Group gap={6} mb={4} c="#93c5fd"><IconHand size={14} aria-hidden /><Text size="xs">Mão levantada</Text></Group>}
                 <Group gap="sm" style={{ flex: 1, minWidth: 0 }}>
                   <Box
                     style={{

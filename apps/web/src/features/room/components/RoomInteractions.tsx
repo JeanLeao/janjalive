@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Popover } from '@mantine/core';
 import { INTERACTION_LIMITS, REACTIONS, type ChatMessage, type Reaction, type ReactionEvent } from '@screen-room/protocol';
 import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar';
-import { IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
+import { IconHand, IconCheck, IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
 import classes from './RoomInteractions.module.css';
 
 const labels: Record<Reaction, string> = {
@@ -80,7 +80,8 @@ export function useInteractionsUi({ roomId, messages, error, pending, connected,
 export type InteractionsUi = ReturnType<typeof useInteractionsUi>;
 
 /** Acesso social compacto (chat + reações): no header ou como controle contextual no Cinema/tela cheia. */
-export function InteractionActions({ ui, connected, onSendReaction, variant }: {
+export function InteractionActions({ ui, connected, onSendReaction, variant, handRaised = false, handReady = false, onToggleHand }: {
+  handRaised?: boolean; handReady?: boolean; onToggleHand?: () => void;
   ui: InteractionsUi; connected: boolean; onSendReaction: (reaction: Reaction) => void; variant: 'header' | 'floating';
 }) {
   const { unread, opened, picker } = ui;
@@ -107,6 +108,12 @@ export function InteractionActions({ ui, connected, onSendReaction, variant }: {
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />
       {unread > 0 && <span className={classes.badge} aria-hidden="true">{badge}</span>}
+    </button>
+    <button type="button" className={`${classes.action} ${classes.handAction}`} disabled={!connected || !handReady}
+      aria-label={handRaised ? 'Abaixar mão' : 'Levantar mão'} title={handRaised ? 'Abaixar mão' : 'Levantar mão'}
+      aria-pressed={handRaised} data-active={handRaised || undefined} onClick={onToggleHand}>
+      <IconHand size={18} aria-hidden />
+      {handRaised && <IconCheck size={10} className={classes.handCheck} aria-hidden />}
     </button>
     <span className={classes.divider} aria-hidden="true" />
     <Popover opened={picker} onChange={ui.setPicker} position="bottom-end" offset={8}

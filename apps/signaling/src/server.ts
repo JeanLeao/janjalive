@@ -314,6 +314,7 @@ export function createSignalServer({
         type: 'peer-left', peerId, count,
         ...(effectiveVoluntary ? {} : { reconnectGraceMs: Math.max(1, Math.round(recoveryGraceMs)) }),
       }, peerId);
+      broadcast(roomId, rooms.handsSnapshot(roomId));
       for (const { presenterPeerId, seq } of clearedSelections) {
         if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
       }
@@ -545,6 +546,7 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          broadcast(normalizedRoom, rooms.handsSnapshot(normalizedRoom));
           const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
           if (restoredSelection) {
             broadcast(
@@ -627,6 +629,18 @@ export function createSignalServer({
             const target = peerSocket(meta.roomId, peerId);
             if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
           }
+          return;
+        }
+
+        if (message.type === 'set-hand') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          if (!rooms.setHand(meta.roomId, meta.peerId, message.raised, message.version)) {
+            send(socket, { type: 'error', code: 'HAND_REJECTED', message: 'Não foi possível alterar a mão. Aguarde alguns segundos e tente novamente.' });
+            send(socket, rooms.handsSnapshot(meta.roomId));
+            return;
+          }
+          broadcast(meta.roomId, rooms.handsSnapshot(meta.roomId));
           return;
         }
 
