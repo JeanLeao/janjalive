@@ -3,9 +3,19 @@ export function observeVideoPresentation(video: HTMLVideoElement, stream: MediaS
   let active = true;
   let handle: number | undefined;
   if (typeof video.requestVideoFrameCallback === 'function') {
-    handle = video.requestVideoFrameCallback(() => {
-      if (active && video.srcObject === stream && !video.paused) onPresented();
-    });
+    const observeFrame = () => {
+      handle = video.requestVideoFrameCallback(() => {
+        if (!active || video.srcObject !== stream) return;
+        handle = undefined;
+        if (video.paused) {
+          observeFrame();
+          return;
+        }
+        active = false;
+        onPresented();
+      });
+    };
+    observeFrame();
   }
   return () => {
     active = false;
