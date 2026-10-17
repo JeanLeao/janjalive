@@ -10,6 +10,8 @@ import {
   Menu,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
+import type { FollowStatus } from '../hooks/follow-presenter';
+import { FollowControls, followControlsVisible } from './FollowControls';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
@@ -50,6 +52,13 @@ export interface RoomStageProps {
   remoteStreams: RemoteStreamEntry[];
   featuredStreamId: string | null;
   onSelectFeaturedStream: (streamId: string) => void;
+  /** F29 follow mode; all optional so the stage works unchanged without it. */
+  followPresenterId?: string | null;
+  followStatus?: FollowStatus;
+  onFollowPresenter?: (presenterId: string) => void;
+  onResumeFollowing?: () => void;
+  onStopFollowing?: () => void;
+  onIndicateStage?: (stageId: string) => void;
   participants: RoomParticipant[];
   onStartSharing: () => void;
   onCopyInvite: () => void;
@@ -83,6 +92,12 @@ export function RoomStage({
   remoteStreams,
   featuredStreamId,
   onSelectFeaturedStream,
+  followPresenterId = null,
+  followStatus = 'off',
+  onFollowPresenter,
+  onResumeFollowing,
+  onStopFollowing,
+  onIndicateStage,
   participants,
   onStartSharing,
   onCopyInvite,
@@ -102,6 +117,21 @@ export function RoomStage({
       document.removeEventListener('fullscreenchange', handleFsChange);
     };
   }, []);
+
+  // The follow row sits under the streamer badge; playback messages below it are pushed down by its measured height.
+  const followRowRef = useRef<HTMLDivElement | null>(null);
+  const [followRowBottom, setFollowRowBottom] = useState(0);
+  const followRowShown = Boolean(onFollowPresenter);
+  useEffect(() => {
+    const row = followRowRef.current;
+    if (!row) { setFollowRowBottom(0); return; }
+    const measure = () => setFollowRowBottom(row.offsetTop + row.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  });
 
   const toggleFullscreen = async () => {
     if (!stageContainerRef.current) return;
@@ -161,6 +191,18 @@ export function RoomStage({
     : [];
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
+  const activeRemotePresenter = activeStream && !activeStream.isLocal && activeStream.id !== followPresenterId
+    ? { id: activeStream.id, name: activeStream.displayName }
+    : undefined;
+  const followControlsProps = {
+    status: followStatus,
+    followedName: followPresenterId
+      ? formatDisplayName(participants.find((p) => p.peerId === followPresenterId)?.nickname, false)
+      : undefined,
+    viewedPresenter: activeRemotePresenter,
+    canIndicate: Boolean(isSharing && localStream && activeStream && onIndicateStage),
+  };
+  const showFollowRow = followRowShown && followControlsVisible(followControlsProps);
   const showAccess = isCinema || isFullscreen;
 
   // Empty state if no stream is active
@@ -303,6 +345,10 @@ export function RoomStage({
         .stage-display-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.16); padding-left: 6px; }
         .stage-annotations-menu { max-width: calc(100vw - 24px); }
         .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
+        .follow-controls { position: absolute; top: 56px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
+        .follow-controls button { min-height: var(--stage-control-size); }
+        .follow-chip { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; border-radius: 16px; background: rgba(13, 17, 23, .85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.1); }
+        .follow-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
@@ -388,6 +434,7 @@ export function RoomStage({
           isCinema={isCinema}
           onToggleCinema={onToggleCinema}
           streamCount={secondaryStreams.length}
+          overlayTop={showFollowRow && followRowBottom ? Math.max(60, followRowBottom + 8) : 60}
           showStreams={showStreams}
           onToggleStreams={() => setShowStreams(value => !value)}
         />
@@ -438,6 +485,17 @@ export function RoomStage({
             }}
           />
         </Box>
+
+        {showFollowRow && (
+          <FollowControls
+            ref={followRowRef}
+            {...followControlsProps}
+            onFollow={(id) => onFollowPresenter?.(id)}
+            onResume={() => onResumeFollowing?.()}
+            onStop={() => onStopFollowing?.()}
+            onIndicate={() => onIndicateStage?.(activeStream.id)}
+          />
+        )}
 
         {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
         <Box
@@ -547,11 +605,13 @@ function SpotlightVideoPlayer({
   isCinema,
   onToggleCinema,
   streamCount,
+  overlayTop = 60,
   showStreams,
   onToggleStreams,
   isFullscreen,
   onToggleFullscreen,
 }: {
+  overlayTop?: number;
   remotePeerId?: string;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
@@ -818,8 +878,8 @@ function SpotlightVideoPlayer({
       </Tooltip>
       </Box>
     </Box>
-    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
-    <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
+    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 48, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
+    <Box style={{ position: 'absolute', top: overlayTop, left: 12, zIndex: 2 }}>
       {stream && <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>}
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}

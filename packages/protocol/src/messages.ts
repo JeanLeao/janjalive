@@ -13,10 +13,31 @@ export type SharingState = z.infer<typeof SharingStateSchema>;
 export const UpdateSharingMessageSchema = SharingStateSchema.extend({ type: z.literal('update-sharing') });
 export const SharingUpdatedMessageSchema = SharingStateSchema.extend({ type: z.literal('sharing-updated'), peerId: z.string().min(1) });
 
+// F29: a presenter's current stage indication. `seq` is assigned by the server and only grows per presenter.
+export const StageIndicationSchema = z.object({
+  targetPeerId: z.string().min(1).max(64),
+  seq: z.number().int().nonnegative(),
+}).strict();
+export type StageIndication = z.infer<typeof StageIndicationSchema>;
+export const IndicateStageMessageSchema = z.object({
+  type: z.literal('indicate-stage'),
+  targetPeerId: z.string().min(1).max(64),
+}).strict();
+export type IndicateStageMessage = z.infer<typeof IndicateStageMessageSchema>;
+export const StageIndicatedMessageSchema = z.object({
+  type: z.literal('stage-indicated'),
+  peerId: z.string().min(1),
+  targetPeerId: z.string().min(1).max(64).nullable(),
+  seq: z.number().int().nonnegative(),
+}).strict();
+export type StageIndicatedMessage = z.infer<typeof StageIndicatedMessageSchema>;
+export const STAGE_INDICATION_LIMITS = { perSecond: 5 } as const;
+
 // Participant presence info
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
   sharing: SharingStateSchema.optional(),
+  indication: StageIndicationSchema.optional(),
   nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type ParticipantInfo = z.infer<typeof ParticipantInfoSchema>;
@@ -171,6 +192,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   SendReactionSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
+  IndicateStageMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
   LeaveMessageSchema,
@@ -200,6 +222,8 @@ export const PeerLeftMessageSchema = z.object({
   type: z.literal('peer-left'),
   peerId: z.string(),
   count: z.number().int().nonnegative(),
+  /** Present only for involuntary drops: the identity stays reserved for this long. */
+  reconnectGraceMs: z.number().int().positive().optional(),
 });
 export type PeerLeftMessage = z.infer<typeof PeerLeftMessageSchema>;
 
@@ -253,6 +277,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   InteractionRejectedSchema,
   PeersMessageSchema,
   SharingUpdatedMessageSchema,
+  StageIndicatedMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,
   PeerUpdatedMessageSchema,

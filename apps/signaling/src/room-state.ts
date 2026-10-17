@@ -2,6 +2,7 @@ import {
   normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
+  type StageIndication, STAGE_INDICATION_LIMITS,
 } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
@@ -36,11 +37,17 @@ export interface ParticipantMeta {
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
+  /** F29: ephemeral stage indication; `indicationSeq` only grows so stale updates stay detectable. */
+  indication?: StageIndication;
+  indicationSeq?: number;
+  indicationTimes?: number[];
 }
 
 export interface RecoveryReservation {
   interactions?: InteractionBudget;
   sharing?: SharingState;
+  indication?: StageIndication;
+  indicationSeq?: number;
   reconnectToken: string;
   nickname?: string;
   timer: NodeJS.Timeout;
@@ -130,7 +137,11 @@ export class RoomRegistry {
       reconnectToken: token,
       ...(preservedSharing ? { sharing: preservedSharing } : {}),
       ...(existingMeta?.collaboration ? { collaboration: existingMeta.collaboration } : {}),
+      ...((existingMeta?.indication ?? reservation?.indication) ? { indication: existingMeta?.indication ?? reservation?.indication } : {}),
+      ...((existingMeta?.indicationSeq ?? reservation?.indicationSeq) !== undefined ? { indicationSeq: existingMeta?.indicationSeq ?? reservation?.indicationSeq } : {}),
     });
+    const restored = participants.get(peer)!;
+    if (restored.indication && !this.#validIndication(participants, restored)) restored.indication = undefined;
     return existingPeers;
   }
 
@@ -173,6 +184,8 @@ export class RoomRegistry {
         nickname: existingMeta.nickname,
         interactions: existingMeta.interactions,
         sharing: existingMeta.sharing,
+        indication: existingMeta.indication,
+        indicationSeq: existingMeta.indicationSeq,
         timer,
         expiresAt: Date.now() + graceMs,
       });
@@ -194,8 +207,56 @@ export class RoomRegistry {
     return Array.from(participants.entries()).map(([peerId, meta]) => ({
       peerId,
       ...(meta.sharing ? { sharing: meta.sharing } : {}),
+      ...(meta.indication && this.#validIndication(participants, meta) ? { indication: meta.indication } : {}),
       ...(meta.nickname ? { nickname: meta.nickname } : {}),
     }));
+  }
+
+  #validIndication(participants: Map<string, ParticipantMeta>, presenter: ParticipantMeta): boolean {
+    const indication = presenter.indication;
+    return Boolean(indication && presenter.sharing?.active && participants.get(indication.targetPeerId)?.sharing?.active);
+  }
+
+  /** The valid indication currently held by a connected presenter, if any. */
+  getIndication(roomId: unknown, peerId: unknown): StageIndication | undefined {
+    const participants = this.#rooms.get(normalizeRoom(roomId));
+    const meta = participants?.get(normalizePeer(peerId));
+    return participants && meta?.indication && this.#validIndication(participants, meta) ? meta.indication : undefined;
+  }
+
+  /**
+   * F29: the sender (actively sharing) points followers at a currently shared stream of the room.
+   * Identity comes from the authenticated socket, never from the payload.
+   */
+  indicateStage(roomId: string, senderPeerId: string, targetPeerId: string, now = Date.now()): StageIndication | undefined {
+    const participants = this.#rooms.get(roomId);
+    const meta = participants?.get(senderPeerId);
+    if (!participants || !meta?.sharing?.active) return undefined;
+    let target: string;
+    try { target = normalizePeer(targetPeerId); } catch { return undefined; }
+    if (!participants.get(target)?.sharing?.active) return undefined;
+    meta.indicationTimes = (meta.indicationTimes ?? []).filter((time) => now - time < 1000);
+    if (meta.indicationTimes.length >= STAGE_INDICATION_LIMITS.perSecond) return undefined;
+    meta.indicationTimes.push(now);
+    meta.indicationSeq = (meta.indicationSeq ?? 0) + 1;
+    meta.indication = { targetPeerId: target, seq: meta.indicationSeq };
+    return meta.indication;
+  }
+
+  /**
+   * Drops indications that point at `peerId` (its stream ended or it left) and, when
+   * `includeOwn` is set, the one it issued itself. Returns the cleared presenters with a fresh seq.
+   */
+  clearIndications(roomId: string, peerId: string, includeOwn: boolean): Array<{ presenterPeerId: string; seq: number }> {
+    const cleared: Array<{ presenterPeerId: string; seq: number }> = [];
+    for (const [presenterPeerId, meta] of this.#rooms.get(roomId) ?? []) {
+      if (!meta.indication) continue;
+      if (meta.indication.targetPeerId !== peerId && !(includeOwn && presenterPeerId === peerId)) continue;
+      meta.indicationSeq = (meta.indicationSeq ?? 0) + 1;
+      meta.indication = undefined;
+      cleared.push({ presenterPeerId, seq: meta.indicationSeq });
+    }
+    return cleared;
   }
 
   updateSharing(roomId: string, peerId: string, sharing: SharingState): SharingState | undefined {

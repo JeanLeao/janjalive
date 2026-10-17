@@ -306,10 +306,17 @@ export function createSignalServer({
     // Deterministic check: only remove if THIS socket is the active one (BUG-01)
     if (clients.get(key) === socket) {
       clients.delete(key);
+      const clearedIndications = rooms.clearIndications(roomId, peerId, effectiveVoluntary);
       rooms.leave(roomId, peerId, effectiveVoluntary, recoveryGraceMs);
       const count = rooms.peers(roomId).length;
       signalLog('leave', { roomId, peerId, count, isVoluntary: effectiveVoluntary });
-      broadcast(roomId, { type: 'peer-left', peerId, count }, peerId);
+      broadcast(roomId, {
+        type: 'peer-left', peerId, count,
+        ...(effectiveVoluntary ? {} : { reconnectGraceMs: Math.max(1, Math.round(recoveryGraceMs)) }),
+      }, peerId);
+      for (const { presenterPeerId, seq } of clearedIndications) {
+        if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-indicated', peerId: presenterPeerId, targetPeerId: null, seq });
+      }
     } else {
       signalLog('superseded-leave-ignored', { roomId, peerId });
     }
@@ -536,6 +543,14 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          const restoredIndication = rooms.getIndication(normalizedRoom, normalizedPeer);
+          if (restoredIndication) {
+            broadcast(
+              normalizedRoom,
+              { type: 'stage-indicated', peerId: normalizedPeer, targetPeerId: restoredIndication.targetPeerId, seq: restoredIndication.seq },
+              normalizedPeer
+            );
+          }
           return;
         }
 
@@ -693,6 +708,20 @@ export function createSignalServer({
           const { type, ...sharing } = message;
           const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
+          if (!effective.active) {
+            for (const { presenterPeerId, seq } of rooms.clearIndications(roomId, peerId, true)) {
+              broadcast(roomId, { type: 'stage-indicated', peerId: presenterPeerId, targetPeerId: null, seq });
+            }
+          }
+          return;
+        }
+
+        if (message.type === 'indicate-stage') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
+          const indication = rooms.indicateStage(meta.roomId, meta.peerId, message.targetPeerId);
+          if (!indication) return;
+          broadcast(meta.roomId, { type: 'stage-indicated', peerId: meta.peerId, targetPeerId: indication.targetPeerId, seq: indication.seq });
           return;
         }
 

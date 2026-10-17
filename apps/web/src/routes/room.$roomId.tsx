@@ -312,6 +312,12 @@ function RoomPage() {
             : session.featuredStreamId
         }
         onSelectFeaturedStream={session.selectFeaturedStream}
+        followPresenterId={session.followPresenterId}
+        followStatus={session.followStatus}
+        onFollowPresenter={isDemo ? undefined : session.followPresenter}
+        onResumeFollowing={session.resumeFollowing}
+        onStopFollowing={session.stopFollowing}
+        onIndicateStage={session.indicateStage}
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
         onStartSharing={session.startSharing}
         onCopyInvite={handleCopyInvite}
