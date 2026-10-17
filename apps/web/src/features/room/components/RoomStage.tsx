@@ -167,6 +167,8 @@ export function RoomStage({
   if (!activeStream) {
     return (
       <Box
+        ref={stageContainerRef}
+        className="stage-empty-container"
         style={{
           flex: 1,
           display: 'flex',
@@ -178,6 +180,13 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        <style>{`
+          .stage-empty-container { --stage-control-size: 36px; }
+          .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+          @media (max-width: 768px), (pointer: coarse) {
+            .stage-empty-container { --stage-control-size: 44px; }
+          }
+        `}</style>
         {interactions}
         {isCinema && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
@@ -388,6 +397,7 @@ export function RoomStage({
           isCinema={isCinema}
           onToggleCinema={onToggleCinema}
           streamCount={secondaryStreams.length}
+          overlayTop={60}
           showStreams={showStreams}
           onToggleStreams={() => setShowStreams(value => !value)}
         />
@@ -547,11 +557,13 @@ function SpotlightVideoPlayer({
   isCinema,
   onToggleCinema,
   streamCount,
+  overlayTop = 60,
   showStreams,
   onToggleStreams,
   isFullscreen,
   onToggleFullscreen,
 }: {
+  overlayTop?: number;
   remotePeerId?: string;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
@@ -818,8 +830,8 @@ function SpotlightVideoPlayer({
       </Tooltip>
       </Box>
     </Box>
-    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: 108, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
-    <Box style={{ position: 'absolute', top: 60, left: 12, zIndex: 2 }}>
+    {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 48, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
+    <Box style={{ position: 'absolute', top: overlayTop, left: 12, zIndex: 2 }}>
       {stream && <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>}
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
       {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}

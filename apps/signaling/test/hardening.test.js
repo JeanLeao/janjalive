@@ -313,6 +313,7 @@ test('REL-01: terminates unresponsive sockets and cleans up presence', async (t)
   const peerLeftMessage = await nextMessage(host, 1500);
   assert.deepEqual(peerLeftMessage, {
     type: 'peer-left',
+    reconnectGraceMs: 30000,
     peerId: 'viewer-1',
     count: 1,
   });

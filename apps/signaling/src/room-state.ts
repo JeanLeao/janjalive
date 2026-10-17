@@ -2,6 +2,7 @@ import {
   normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
+  type StageSelection, STAGE_SELECTION_LIMITS,
 } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
@@ -36,11 +37,17 @@ export interface ParticipantMeta {
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
+  /** F29: ephemeral stage selection; `selectionSeq` only grows so stale updates stay detectable. */
+  selection?: StageSelection;
+  selectionSeq?: number;
+  selectionTimes?: number[];
 }
 
 export interface RecoveryReservation {
   interactions?: InteractionBudget;
   sharing?: SharingState;
+  selection?: StageSelection;
+  selectionSeq?: number;
   reconnectToken: string;
   nickname?: string;
   timer: NodeJS.Timeout;
@@ -130,7 +137,11 @@ export class RoomRegistry {
       reconnectToken: token,
       ...(preservedSharing ? { sharing: preservedSharing } : {}),
       ...(existingMeta?.collaboration ? { collaboration: existingMeta.collaboration } : {}),
+      ...((existingMeta?.selection ?? reservation?.selection) ? { selection: existingMeta?.selection ?? reservation?.selection } : {}),
+      ...((existingMeta?.selectionSeq ?? reservation?.selectionSeq) !== undefined ? { selectionSeq: existingMeta?.selectionSeq ?? reservation?.selectionSeq } : {}),
     });
+    const restored = participants.get(peer)!;
+    if (restored.selection && !this.#validSelection(participants, restored)) restored.selection = undefined;
     return existingPeers;
   }
 
@@ -173,6 +184,8 @@ export class RoomRegistry {
         nickname: existingMeta.nickname,
         interactions: existingMeta.interactions,
         sharing: existingMeta.sharing,
+        selection: existingMeta.selection,
+        selectionSeq: existingMeta.selectionSeq,
         timer,
         expiresAt: Date.now() + graceMs,
       });
@@ -194,8 +207,67 @@ export class RoomRegistry {
     return Array.from(participants.entries()).map(([peerId, meta]) => ({
       peerId,
       ...(meta.sharing ? { sharing: meta.sharing } : {}),
+      ...(meta.selection && this.#validSelection(participants, meta) ? { selection: meta.selection } : {}),
       ...(meta.nickname ? { nickname: meta.nickname } : {}),
     }));
+  }
+
+  #validSelection(participants: Map<string, ParticipantMeta>, presenter: ParticipantMeta): boolean {
+    const selection = presenter.selection;
+    return Boolean(selection && presenter.sharing?.active && participants.get(selection.targetPeerId)?.sharing?.active);
+  }
+
+  /** The valid selection currently held by a connected presenter, if any. */
+  getSelection(roomId: unknown, peerId: unknown): StageSelection | undefined {
+    const participants = this.#rooms.get(normalizeRoom(roomId));
+    const meta = participants?.get(normalizePeer(peerId));
+    return participants && meta?.selection && this.#validSelection(participants, meta) ? meta.selection : undefined;
+  }
+
+  /**
+   * F29: the sender (actively sharing) points followers at a currently shared stream of the room.
+   * Identity comes from the authenticated socket, never from the payload.
+   */
+  selectStage(roomId: string, senderPeerId: string, targetPeerId: string, now = Date.now()): StageSelection | undefined {
+    const participants = this.#rooms.get(roomId);
+    const meta = participants?.get(senderPeerId);
+    if (!participants || !meta?.sharing?.active) return undefined;
+    let target: string;
+    try { target = normalizePeer(targetPeerId); } catch { return undefined; }
+    if (!participants.get(target)?.sharing?.active) return undefined;
+    meta.selectionTimes = (meta.selectionTimes ?? []).filter((time) => now - time < 1000);
+    if (meta.selectionTimes.length >= STAGE_SELECTION_LIMITS.perSecond) return undefined;
+    meta.selectionTimes.push(now);
+    meta.selectionSeq = (meta.selectionSeq ?? 0) + 1;
+    meta.selection = { targetPeerId: target, seq: meta.selectionSeq };
+    return meta.selection;
+  }
+
+  /**
+   * Drops selections that point at `peerId` (its stream ended or it left) and, when
+   * `includeOwn` is set, the one it issued itself. Returns the cleared presenters with a fresh seq.
+   * Also invalidates references maintained in ephemeral recovery reservations.
+   */
+  clearSelections(roomId: string, peerId: string, includeOwn: boolean): Array<{ presenterPeerId: string; seq: number }> {
+    const cleared: Array<{ presenterPeerId: string; seq: number }> = [];
+    for (const [presenterPeerId, meta] of this.#rooms.get(roomId) ?? []) {
+      if (!meta.selection) continue;
+      if (meta.selection.targetPeerId !== peerId && !(includeOwn && presenterPeerId === peerId)) continue;
+      meta.selectionSeq = (meta.selectionSeq ?? 0) + 1;
+      meta.selection = undefined;
+      cleared.push({ presenterPeerId, seq: meta.selectionSeq });
+    }
+    const room = normalizeRoom(roomId);
+    const prefix = `${room}:`;
+    for (const [key, res] of this.#recoveryReservations.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const reservedPeerId = key.slice(prefix.length);
+      if (!res.selection) continue;
+      if (res.selection.targetPeerId !== peerId && !(includeOwn && reservedPeerId === peerId)) continue;
+      res.selectionSeq = (res.selectionSeq ?? 0) + 1;
+      res.selection = undefined;
+    }
+    return cleared;
   }
 
   updateSharing(roomId: string, peerId: string, sharing: SharingState): SharingState | undefined {
@@ -496,6 +568,29 @@ export class RoomRegistry {
 
   getReservedReconnectToken(roomId: unknown, peerId: unknown): string | undefined {
     return this.getRecoveryReservation(roomId, peerId)?.reconnectToken;
+  }
+
+  /**
+   * Returns authoritative list of reserved peers and their remaining recovery grace in milliseconds.
+   * Never exposes reconnect tokens or credentials.
+   */
+  getReservedPeers(roomId: unknown, now = Date.now()): Array<{ peerId: string; reconnectGraceMs: number }> {
+    const room = normalizeRoom(roomId);
+    const prefix = `${room}:`;
+    const result: Array<{ peerId: string; reconnectGraceMs: number }> = [];
+    for (const [key, res] of this.#recoveryReservations.entries()) {
+      if (key.startsWith(prefix)) {
+        const remaining = res.expiresAt - now;
+        if (remaining <= 0) {
+          clearTimeout(res.timer);
+          this.#recoveryReservations.delete(key);
+        } else {
+          const peerId = key.slice(prefix.length);
+          result.push({ peerId, reconnectGraceMs: Math.max(1, Math.round(remaining)) });
+        }
+      }
+    }
+    return result;
   }
 
   clearRecovery(roomId: unknown, peerId: unknown): void {
