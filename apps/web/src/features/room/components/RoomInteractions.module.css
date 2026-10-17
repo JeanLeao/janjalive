@@ -98,3 +98,7 @@
 @keyframes slideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .reaction, .panel { animation: none; } .spinner { animation-duration: 2s; } .reactionButton, .reactionButton span { transition: none; } }
+
+.handAction:disabled { opacity: .4; cursor: default; }
+.handCheck { position: absolute; right: 1px; bottom: 1px; }
+@media (pointer: coarse) { .handAction { min-width: 44px; min-height: 44px; } }

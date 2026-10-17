@@ -2,7 +2,7 @@ import {
   normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
-  type StageSelection, STAGE_SELECTION_LIMITS,
+  type StageSelection, STAGE_SELECTION_LIMITS, type HandState, type HandsSnapshot, HAND_LIMITS,
 } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
@@ -21,6 +21,8 @@ export interface SpectatorDrawingSenderBudget {
 }
 
 export interface ParticipantMeta {
+  hand?: Omit<HandState, 'peerId'>;
+  handTimes?: number[];
   interactions?: InteractionBudget;
   collaboration?: {
     streamId: string;
@@ -44,6 +46,8 @@ export interface ParticipantMeta {
 }
 
 export interface RecoveryReservation {
+  hand?: Omit<HandState, 'peerId'>;
+  handTimes?: number[];
   interactions?: InteractionBudget;
   sharing?: SharingState;
   selection?: StageSelection;
@@ -72,6 +76,7 @@ export class UnauthorizedReconnectError extends Error {
 
 export class RoomRegistry {
   static readonly DEFAULT_RECOVERY_GRACE_MS = 30000;
+  #handClock = 0;
   #rooms = new Map<string, Map<string, ParticipantMeta>>();
   #recoveryReservations = new Map<string, RecoveryReservation>();
   readonly maxParticipants: number;
@@ -132,6 +137,8 @@ export class RoomRegistry {
 
     const preservedSharing = existingMeta?.sharing ?? reservation?.sharing;
     participants.set(peer, {
+      hand: existingMeta?.hand ?? reservation?.hand,
+      handTimes: existingMeta?.handTimes ?? reservation?.handTimes,
       interactions: existingMeta?.interactions ?? reservation?.interactions,
       nickname: cleanNickname,
       reconnectToken: token,
@@ -182,6 +189,8 @@ export class RoomRegistry {
       this.#recoveryReservations.set(reservationKey, {
         reconnectToken: existingMeta.reconnectToken,
         nickname: existingMeta.nickname,
+        hand: existingMeta.hand,
+        handTimes: existingMeta.handTimes,
         interactions: existingMeta.interactions,
         sharing: existingMeta.sharing,
         selection: existingMeta.selection,
@@ -210,6 +219,26 @@ export class RoomRegistry {
       ...(meta.selection && this.#validSelection(participants, meta) ? { selection: meta.selection } : {}),
       ...(meta.nickname ? { nickname: meta.nickname } : {}),
     }));
+  }
+
+  /** Connected identities only; reservations keep their hand privately until recovery. */
+  handsSnapshot(roomId: string): HandsSnapshot {
+    return { type: 'hands-snapshot', roomId, revision: ++this.#handClock,
+      hands: Array.from(this.#rooms.get(roomId) ?? [], ([peerId, meta]) => ({
+        peerId, order: meta.hand?.order ?? null, version: meta.hand?.version ?? 0,
+      })) };
+  }
+
+  setHand(roomId: string, peerId: string, raised: boolean, version: number, now = Date.now()): boolean {
+    const meta = this.#rooms.get(roomId)?.get(peerId);
+    if (!meta) return false;
+    meta.handTimes = (meta.handTimes ?? []).filter(time => now - time < HAND_LIMITS.windowMs);
+    if (meta.handTimes.length >= HAND_LIMITS.burst) return false;
+    meta.handTimes.push(now);
+    if (version !== (meta.hand?.version ?? 0)) return false;
+    if (raised === Boolean(meta.hand?.order)) return true;
+    meta.hand = { order: raised ? ++this.#handClock : null, version: version + 1 };
+    return true;
   }
 
   #validSelection(participants: Map<string, ParticipantMeta>, presenter: ParticipantMeta): boolean {

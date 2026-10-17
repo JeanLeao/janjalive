@@ -287,3 +287,22 @@ após reconexão; uma interrupção ou timeout de 8 segundos informa que o envio
 foi confirmado. Uma confirmação tardia ainda pode aparecer no histórico, sem
 promessa de recuperação. Reações são descartadas na desconexão; o histórico local
 continua durante a reconexão, mas é limpo ao encerrar ou trocar a sessão/sala.
+
+### Levantar a mão (F38)
+
+Qualquer participante conectado pode levantar ou abaixar a própria mão pelo
+controle junto ao chat e às reações, também no Cinema e em fullscreen. O contador
+junto aos participantes considera apenas conexões ativas. Na lista, mãos levantadas
+aparecem primeiro na ordem atribuída pelo servidor; os demais ficam em ordem de
+identidade estável. O controle expõe `aria-pressed` e a lista identifica o estado
+por ícone e texto.
+
+O estado vive apenas na presença efêmera do signaling, sem relação com iniciar,
+pausar, trocar ou encerrar compartilhamento. Entradas tardias recebem snapshot;
+quedas involuntárias ocultam a mão até a recuperação autenticada dentro da reserva,
+preservando a ordem original. Saída voluntária ou expiração descarta a solicitação.
+O servidor associa a intenção ao socket ativo, valida versões para impedir reversões
+obsoletas e limita tentativas a 6 por participante em janela móvel de 10 segundos
+(`HAND_LIMITS`), inclusive durante recuperação. A interface aguarda confirmação;
+não enfileira nem reenvia intenções após desconexão. Este slice da proposta F38
+não inclui perguntas, enquetes, moderação ou permissões especiais.

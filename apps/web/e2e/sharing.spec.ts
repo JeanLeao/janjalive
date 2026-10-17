@@ -2198,3 +2198,68 @@ for (const width of [390, 320]) {
   });
 }
 
+
+for (const mobile of [false, true]) {
+  test(`F38 hands synchronize, survive media and recovery, and remain accessible ${mobile ? 'mobile' : 'desktop'}`, async ({ browser }) => {
+    const contexts = await Promise.all([
+      browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, hasTouch: mobile }),
+      browser.newContext(), browser.newContext(),
+    ]);
+    try {
+      const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
+      for (const page of [host, viewer, late]) await syntheticCapture(page);
+      const room = `/room/f38-${mobile ? 'mobile' : 'desktop'}`;
+      await host.goto(room); await viewer.goto(room);
+      const up = (page: Page) => page.getByRole('button', { name: 'Levantar mão', exact: true });
+      const down = (page: Page) => page.getByRole('button', { name: 'Abaixar mão', exact: true });
+      await expect(up(host)).toBeEnabled();
+      if (mobile) await up(host).tap();
+      else { await up(host).focus(); await host.keyboard.press('Enter'); }
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await up(viewer).click(); await expect(down(viewer)).toHaveAttribute('aria-pressed', 'true');
+      await expect(host.getByRole('button', { name: /Ver participantes \(2\), 2 mãos levantadas/ }).first()).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-raised.png`) });
+      await late.goto(room);
+      await expect(late.getByRole('button', { name: /Ver participantes \(3\), 2 mãos levantadas/ }).first()).toBeVisible();
+      await host.getByRole('button', { name: /Ver participantes/ }).first().click();
+      await expect(host.getByText('Mão levantada', { exact: true })).toHaveCount(2);
+      const rows = host.getByText('Mão levantada', { exact: true });
+      await expect(rows.first().locator('..').locator('..')).toContainText('(você)');
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-participants.png`) });
+      await host.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+      if (mobile) {
+        const box = (await down(host).boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      await startLive(host); await frames(viewer);
+      await startLive(viewer); await frames(host);
+      await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await expect(down(host)).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-cinema.png`) });
+      await down(host).click(); await expect(up(host)).toHaveAttribute('aria-pressed', 'false');
+      await up(host).click(); await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => host.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+      await expect(down(host)).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-fullscreen.png`) });
+      await down(host).click(); await expect(up(host)).toHaveAttribute('aria-pressed', 'false');
+      await up(host).click(); await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+      await host.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+      await host.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1 && s.url.includes('/signal')).forEach((s: WebSocket) => s.close(4001)));
+      await expect(up(host)).toBeDisabled();
+      await expect(down(host)).toBeEnabled({ timeout: 15000 });
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Sair da sala', exact: true }).last().click();
+      await expect(late.getByRole('button', { name: /Ver participantes \(2\), 1 mão levantada/ }).first()).toBeVisible();
+    } finally { await Promise.all(contexts.map(c => c.close())); }
+  });
+}

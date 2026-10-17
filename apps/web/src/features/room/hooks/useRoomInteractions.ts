@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChatTextSchema, INTERACTION_LIMITS, type ChatMessage, type Reaction, type ReactionEvent, type ServerMessage } from '@screen-room/protocol';
+import { ChatTextSchema, INTERACTION_LIMITS, type HandsSnapshot, type ChatMessage, type Reaction, type ReactionEvent, type ServerMessage } from '@screen-room/protocol';
 import type { SignalingClient } from '../signaling/signaling-client';
+
+export function acceptHandsSnapshot(previous: HandsSnapshot | null, message: HandsSnapshot, roomId: string): HandsSnapshot | null {
+  return message.roomId === roomId && message.revision > (previous?.revision ?? 0) ? message : previous;
+}
 
 export function appendChatMessage(previous: ChatMessage[], message: ChatMessage): ChatMessage[] {
   return previous.some(item => item.id === message.id) ? previous : [...previous, message].slice(-INTERACTION_LIMITS.history);
@@ -13,6 +17,8 @@ export function useRoomInteractions(roomId: string) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const ready = useRef(false);
+  const [hands, setHands] = useState<HandsSnapshot | null>(null);
+  const handsRef = useRef<HandsSnapshot | null>(null);
   const pendingRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const finish = useCallback(() => {
@@ -22,6 +28,8 @@ export function useRoomInteractions(roomId: string) {
   }, []);
   const resetConnection = useCallback(() => {
     ready.current = false;
+    handsRef.current = null;
+    setHands(null);
     if (pendingRef.current) setError('Conexão interrompida. O envio não foi confirmado; não será reenviado.');
     finish();
     timers.current.forEach(clearTimeout);
@@ -37,6 +45,10 @@ export function useRoomInteractions(roomId: string) {
   }, [roomId, resetConnection]);
   const receive = useCallback((message: ServerMessage) => {
     if (message.type === 'peers') ready.current = true;
+    if (message.type === 'hands-snapshot' && ready.current) {
+      handsRef.current = acceptHandsSnapshot(handsRef.current, message, roomId);
+      setHands(handsRef.current);
+    }
     if (message.type === 'interaction-rejected') {
       setError(message.message);
       if (pendingRef.current?.id === message.requestId) finish();
@@ -78,7 +90,16 @@ export function useRoomInteractions(roomId: string) {
     }
     setError(null);
   };
-  return { messages: dataRoom === roomId ? messages : [], reactions: dataRoom === roomId ? reactions : [],
+  const toggleHand = (client: SignalingClient | null, peerId: string) => {
+    const own = handsRef.current?.hands.find(hand => hand.peerId === peerId);
+    if (!ready.current || !own || !client?.send({ type: 'set-hand', raised: own.order === null, version: own.version })) {
+      setError('Reconecte à sala para levantar ou abaixar a mão.');
+      return;
+    }
+    setError(null);
+  };
+  return { hands: dataRoom === roomId ? hands?.hands ?? [] : [], toggleHand,
+    messages: dataRoom === roomId ? messages : [], reactions: dataRoom === roomId ? reactions : [],
     error: dataRoom === roomId ? error : null, pending: dataRoom === roomId && pending,
     receive, resetConnection, sendChat, sendReaction };
 }
