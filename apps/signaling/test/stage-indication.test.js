@@ -63,6 +63,33 @@ test('room-state: involuntary drop reserves the indication; voluntary leave and 
   rooms.clearAllRecovery();
 });
 
+test('room-state: target stopping while presenter is disconnected clears indication in reservation', () => {
+  const rooms = new RoomRegistry();
+  rooms.join('r', 'ana'); rooms.join('r', 'bia');
+  const tokenAna = rooms.getReconnectToken('r', 'ana');
+  rooms.updateSharing('r', 'ana', sharing('a1'));
+  rooms.updateSharing('r', 'bia', sharing('b1'));
+  rooms.indicateStage('r', 'ana', 'bia');
+  assert.deepEqual(rooms.getIndication('r', 'ana'), { targetPeerId: 'bia', seq: 1 });
+
+  // Ana desconecta involuntariamente
+  rooms.clearIndications('r', 'ana', false);
+  rooms.leave('r', 'ana', false, 1000);
+
+  // Bia encerra e reinicia a transmissão antes de Ana retornar
+  rooms.updateSharing('r', 'bia', stopped);
+  rooms.clearIndications('r', 'bia', true);
+  rooms.updateSharing('r', 'bia', sharing('b2'));
+
+  // Ana reconecta
+  rooms.join('r', 'ana', undefined, tokenAna);
+  rooms.updateSharing('r', 'ana', sharing('a1'));
+
+  // A indicação antiga NÃO é restaurada
+  assert.equal(rooms.getIndication('r', 'ana'), undefined);
+  rooms.clearAllRecovery();
+});
+
 test('room-state: indications are rate limited and a self-target is cleared when the presenter leaves', () => {
   const rooms = new RoomRegistry();
   rooms.join('r', 'a'); rooms.updateSharing('r', 'a', sharing('a'));
@@ -142,4 +169,75 @@ test('integration: broadcast, late join snapshot, stop, spoofing, isolation and 
   // A voluntary leave is final and announces no grace period.
   a2.send({ type: 'leave' });
   assert.equal((await v.next('peer-left', e => e.peerId === 'a')).reconnectGraceMs, undefined);
+});
+
+test('integration: Ana indica Bia -> Ana desconecta involuntariamente -> Bia encerra e reinicia -> Ana reconecta: indicação antiga não é restaurada nem retransmitida', async (t) => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 1000 });
+  await app.ready;
+  t.after(() => app.close());
+
+  const ana = await connect(app, 'room-swap', 'ana');
+  const bia = await connect(app, 'room-swap', 'bia');
+  const viewer = await connect(app, 'room-swap', 'viewer');
+
+  ana.send({ type: 'update-sharing', ...sharing('a1') });
+  bia.send({ type: 'update-sharing', ...sharing('b1') });
+  await viewer.next('sharing-updated');
+  await viewer.next('sharing-updated');
+
+  // Ana indica Bia
+  ana.send({ type: 'indicate-stage', targetPeerId: 'bia' });
+  const indicated = await viewer.next('stage-indicated');
+  assert.deepEqual(indicated, { type: 'stage-indicated', peerId: 'ana', targetPeerId: 'bia', seq: 1 });
+
+  // Ana desconecta involuntariamente
+  const tokenAna = ana.peers.reconnectToken;
+  ana.ws.terminate();
+  await viewer.next('peer-left', e => e.peerId === 'ana');
+
+  // Bia encerra a transmissão
+  bia.send({ type: 'update-sharing', ...stopped });
+  await viewer.next('sharing-updated', e => e.peerId === 'bia' && !e.active);
+
+  // Bia reinicia a transmissão com novo stream
+  bia.send({ type: 'update-sharing', ...sharing('b2') });
+  await viewer.next('sharing-updated', e => e.peerId === 'bia' && e.active);
+
+  // Ana reconecta com o token de recuperação
+  const ana2 = await connect(app, 'room-swap', 'ana', tokenAna);
+  ana2.send({ type: 'update-sharing', ...sharing('a2') });
+  await viewer.next('sharing-updated', e => e.peerId === 'ana' && e.active);
+
+  // viewer NÃO deve receber indicação antiga retransmitida
+  assert.ok(await viewer.quiet('stage-indicated'));
+  // E a lista de participantes autoritativa não deve conter indicação
+  assert.equal(ana2.peers.participants?.find(p => p.peerId === 'ana')?.indication, undefined);
+});
+
+test('integration: peers message reports authoritative reservedPeers and omits voluntary leaves', async (t) => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 2000 });
+  await app.ready;
+  t.after(() => app.close());
+
+  const host = await connect(app, 'room-res', 'host');
+  const dropped = await connect(app, 'room-res', 'dropped');
+  const leaver = await connect(app, 'room-res', 'leaver');
+
+  // dropped desconecta involuntariamente
+  dropped.ws.terminate();
+  await host.next('peer-left', e => e.peerId === 'dropped');
+
+  // leaver sai voluntariamente
+  leaver.send({ type: 'leave' });
+  await host.next('peer-left', e => e.peerId === 'leaver');
+
+  // Novo participante (ou reconexão do espectador) recebe peers
+  const viewer = await connect(app, 'room-res', 'viewer');
+  assert.ok(viewer.peers.reservedPeers);
+  assert.equal(viewer.peers.reservedPeers.length, 1);
+  assert.equal(viewer.peers.reservedPeers[0].peerId, 'dropped');
+  assert.ok(viewer.peers.reservedPeers[0].reconnectGraceMs > 0);
+  assert.ok(viewer.peers.reservedPeers[0].reconnectGraceMs <= 2000);
+  // Garante que nenhum token foi exposto em reservedPeers
+  assert.equal(viewer.peers.reservedPeers[0].reconnectToken, undefined);
 });

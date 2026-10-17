@@ -278,8 +278,16 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           dispatchFollow({ type: 'snapshot', indications: snapshot });
           const followed = followRef.current.presenterId;
           if (followed) {
-            if ((message.participants || []).some((p) => p.peerId === followed)) presenterBack(followed);
-            else presenterLeft(followed, 30_000);
+            if ((message.participants || []).some((p) => p.peerId === followed)) {
+              presenterBack(followed);
+            } else {
+              const reserved = message.reservedPeers?.find((r) => r.peerId === followed);
+              if (reserved) {
+                presenterLeft(followed, reserved.reconnectGraceMs);
+              } else {
+                presenterLeft(followed, undefined);
+              }
+            }
           }
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;

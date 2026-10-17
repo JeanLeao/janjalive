@@ -209,6 +209,8 @@ export function RoomStage({
   if (!activeStream) {
     return (
       <Box
+        ref={stageContainerRef}
+        className="stage-empty-container"
         style={{
           flex: 1,
           display: 'flex',
@@ -220,7 +222,27 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        <style>{`
+          .stage-empty-container { --stage-control-size: 36px; }
+          .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+          .stage-empty-container .follow-controls { position: absolute; top: 16px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
+          .stage-empty-container .follow-controls button { min-height: var(--stage-control-size); }
+          .stage-empty-container .follow-chip { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; border-radius: 16px; background: rgba(13, 17, 23, .85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.1); }
+          .stage-empty-container .follow-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+          @media (max-width: 768px), (pointer: coarse) {
+            .stage-empty-container { --stage-control-size: 44px; }
+          }
+        `}</style>
         {interactions}
+        {showFollowRow && (
+          <FollowControls
+            {...followControlsProps}
+            onFollow={(id) => onFollowPresenter?.(id)}
+            onResume={() => onResumeFollowing?.()}
+            onStop={() => onStopFollowing?.()}
+            onIndicate={() => {}}
+          />
+        )}
         {isCinema && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box

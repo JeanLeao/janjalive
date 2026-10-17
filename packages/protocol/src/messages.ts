@@ -200,12 +200,19 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 // Server -> Client
+export const ReservedPeerInfoSchema = z.object({
+  peerId: z.string().min(1),
+  reconnectGraceMs: z.number().int().positive(),
+}).strict();
+export type ReservedPeerInfo = z.infer<typeof ReservedPeerInfoSchema>;
+
 export const PeersMessageSchema = z.object({
   type: z.literal('peers'),
   serverTime: z.number().int().nonnegative().optional(),
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
+  reservedPeers: z.array(ReservedPeerInfoSchema).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
 });
 export type PeersMessage = z.infer<typeof PeersMessageSchema>;

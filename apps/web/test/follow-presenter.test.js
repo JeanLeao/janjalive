@@ -84,3 +84,59 @@ test('a snapshot replaces every indication and reset clears the session', () => 
   assert.equal(followTarget(state, ctx('a', 'b')).stageId, 'a', 'seq restarts with the new server snapshot');
   assert.deepEqual(run([{ type: 'reset' }], state), initialFollowState);
 });
+
+test('ausência definitiva: presenter-left sem reserva encerra o acompanhamento imediatamente', () => {
+  const state = run([
+    { type: 'follow', presenterId: 'a' },
+    indicate('a', 'b', 1),
+    { type: 'presenter-left', presenterId: 'a', reserved: false },
+  ]);
+  assert.equal(followStatus(state), 'off');
+  assert.equal(state.presenterId, null);
+  assert.equal(state.away, false);
+  assert.equal(state.suspended, false);
+  assert.equal(followTarget(state, ctx('a', 'b')), null);
+});
+
+test('reserva ainda válida: presenter-left com reserva suspende temporariamente para away e preserva presenterId', () => {
+  const state = run([
+    { type: 'follow', presenterId: 'a' },
+    indicate('a', 'b', 1),
+    { type: 'presenter-left', presenterId: 'a', reserved: true },
+  ]);
+  assert.equal(followStatus(state), 'away');
+  assert.equal(state.presenterId, 'a');
+  assert.equal(state.away, true);
+  assert.equal(followTarget(state, ctx('a', 'b')), null);
+});
+
+test('expiração: presenter-expired após tempo de reserva encerra o acompanhamento', () => {
+  const state = run([
+    { type: 'follow', presenterId: 'a' },
+    { type: 'presenter-left', presenterId: 'a', reserved: true },
+    { type: 'presenter-expired', presenterId: 'a' },
+  ]);
+  assert.equal(followStatus(state), 'off');
+  assert.equal(state.presenterId, null);
+  assert.equal(state.away, false);
+});
+
+test('reconexão bem-sucedida com manutenção do controle manual: presenter-back preserva status suspenso', () => {
+  const state = run([
+    { type: 'follow', presenterId: 'a' },
+    indicate('a', 'b', 1),
+    { type: 'manual-select' },
+    { type: 'presenter-left', presenterId: 'a', reserved: true },
+    { type: 'presenter-back', presenterId: 'a' },
+  ]);
+  assert.equal(followStatus(state), 'suspended');
+  assert.equal(state.presenterId, 'a');
+  assert.equal(state.away, false);
+  assert.equal(state.suspended, true);
+  // Controle manual continua preservado
+  assert.equal(followTarget(state, ctx('a', 'b')), null);
+  // Retomar reaplica acompanhamento
+  const resumed = run([{ type: 'resume' }, indicate('a', 'b', 2)], state);
+  assert.equal(followStatus(resumed), 'active');
+  assert.equal(followTarget(resumed, ctx('a', 'b')).stageId, 'b');
+});

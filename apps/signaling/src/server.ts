@@ -515,6 +515,7 @@ export function createSignalServer({
 
           const count = rooms.peers(normalizedRoom).length;
           const participants = rooms.getParticipants(normalizedRoom);
+          const reservedPeers = rooms.getReservedPeers(normalizedRoom);
           const effectiveNick = rooms.getNickname(normalizedRoom, normalizedPeer);
           const reconnectToken = rooms.getReconnectToken(normalizedRoom, normalizedPeer);
           signalLog('join', {
@@ -530,6 +531,7 @@ export function createSignalServer({
             peers,
             count,
             participants,
+            ...(reservedPeers.length > 0 ? { reservedPeers } : {}),
             reconnectToken,
           });
 

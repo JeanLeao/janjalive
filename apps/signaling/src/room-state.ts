@@ -246,6 +246,7 @@ export class RoomRegistry {
   /**
    * Drops indications that point at `peerId` (its stream ended or it left) and, when
    * `includeOwn` is set, the one it issued itself. Returns the cleared presenters with a fresh seq.
+   * Also invalidates references maintained in ephemeral recovery reservations.
    */
   clearIndications(roomId: string, peerId: string, includeOwn: boolean): Array<{ presenterPeerId: string; seq: number }> {
     const cleared: Array<{ presenterPeerId: string; seq: number }> = [];
@@ -255,6 +256,16 @@ export class RoomRegistry {
       meta.indicationSeq = (meta.indicationSeq ?? 0) + 1;
       meta.indication = undefined;
       cleared.push({ presenterPeerId, seq: meta.indicationSeq });
+    }
+    const room = normalizeRoom(roomId);
+    const prefix = `${room}:`;
+    for (const [key, res] of this.#recoveryReservations.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const reservedPeerId = key.slice(prefix.length);
+      if (!res.indication) continue;
+      if (res.indication.targetPeerId !== peerId && !(includeOwn && reservedPeerId === peerId)) continue;
+      res.indicationSeq = (res.indicationSeq ?? 0) + 1;
+      res.indication = undefined;
     }
     return cleared;
   }
@@ -557,6 +568,29 @@ export class RoomRegistry {
 
   getReservedReconnectToken(roomId: unknown, peerId: unknown): string | undefined {
     return this.getRecoveryReservation(roomId, peerId)?.reconnectToken;
+  }
+
+  /**
+   * Returns authoritative list of reserved peers and their remaining recovery grace in milliseconds.
+   * Never exposes reconnect tokens or credentials.
+   */
+  getReservedPeers(roomId: unknown, now = Date.now()): Array<{ peerId: string; reconnectGraceMs: number }> {
+    const room = normalizeRoom(roomId);
+    const prefix = `${room}:`;
+    const result: Array<{ peerId: string; reconnectGraceMs: number }> = [];
+    for (const [key, res] of this.#recoveryReservations.entries()) {
+      if (key.startsWith(prefix)) {
+        const remaining = res.expiresAt - now;
+        if (remaining <= 0) {
+          clearTimeout(res.timer);
+          this.#recoveryReservations.delete(key);
+        } else {
+          const peerId = key.slice(prefix.length);
+          result.push({ peerId, reconnectGraceMs: Math.max(1, Math.round(remaining)) });
+        }
+      }
+    }
+    return result;
   }
 
   clearRecovery(roomId: unknown, peerId: unknown): void {

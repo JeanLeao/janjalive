@@ -202,3 +202,85 @@ for (const [label, viewport, touch] of [['desktop', { width: 1280, height: 800 }
     } finally { await closeAll([presenter.context, viewer.context]); }
   });
 }
+
+for (const [label, viewport, touch] of [['desktop', { width: 1280, height: 800 }, false], ['mobile', { width: 375, height: 700 }, true]] as const) {
+  test(`F29 empty stage: follower identifies and stops following when no stream is active (${label})`, async ({ browser }) => {
+    const room = `f29-empty-${label}-${Date.now()}`;
+    const presenter = await open(browser, room, 'Ana', viewport, touch);
+    const viewer = await open(browser, room, 'Vera', viewport, touch);
+    try {
+      await startLive(presenter.page);
+      await expect(stageBadge(viewer.page, 'Ana')).toBeVisible();
+
+      // Espectador começa a seguir Ana
+      const seguir = follow(viewer.page, 'Ana');
+      if (touch) await seguir.tap(); else { await seguir.focus(); await viewer.page.keyboard.press('Enter'); }
+      await expect(chip(viewer.page)).toContainText('Seguindo Ana · Acompanhando');
+
+      // Presenter para o compartilhamento de tela -> palco entra no estado vazio
+      await presenter.page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(viewer.page.getByText('Nenhuma transmissão ativa', { exact: true })).toBeVisible();
+
+      // No palco vazio, o chip e o botão de parar de seguir continuam visíveis
+      await expect(chip(viewer.page)).toBeVisible();
+      await expect(chip(viewer.page)).toContainText('Seguindo Ana · Acompanhando');
+      const stop = viewer.page.getByRole('button', { name: 'Parar de seguir', exact: true });
+      await expect(stop).toBeVisible();
+
+      // Validar dimensões e limites de tela
+      const stopBox = (await stop.boundingBox())!;
+      expect(stopBox.height).toBeGreaterThanOrEqual(touch ? 44 : 28);
+      expect(stopBox.x).toBeGreaterThanOrEqual(0);
+      expect(stopBox.x + stopBox.width).toBeLessThanOrEqual(viewport.width);
+
+      // Parar de seguir pelo teclado ou toque
+      if (touch) {
+        await stop.tap();
+      } else {
+        await stop.focus();
+        await expect(stop).toBeFocused();
+        await viewer.page.keyboard.press('Space');
+      }
+
+      // Chip e botão de seguir desaparecem, palco vazio preservado
+      await expect(chip(viewer.page)).toHaveCount(0);
+      await expect(viewer.page.getByText('Nenhuma transmissão ativa', { exact: true })).toBeVisible();
+      await viewer.page.screenshot({ path: test.info().outputPath(`f29-empty-${label}.png`) });
+      await test.info().attach(`f29-empty-${label}`, { path: test.info().outputPath(`f29-empty-${label}.png`), contentType: 'image/png' });
+    } finally { await closeAll([presenter.context, viewer.context]); }
+  });
+}
+
+test('F29 target stopped and restarted while presenter was disconnected does not restore stale indication', async ({ browser }) => {
+  const room = `f29-reconnect-stale-${Date.now()}`;
+  const ana = await open(browser, room, 'Ana'), bia = await open(browser, room, 'Bia'), viewer = await open(browser, room, 'Vera');
+  const contexts = [ana, bia, viewer].map(p => p.context);
+  try {
+    await startLive(ana.page);
+    await startLive(bia.page);
+    await follow(viewer.page, 'Ana').click();
+    await card(ana.page, 'Bia').click();
+    await indicate(ana.page).click();
+    await expect(stageBadge(viewer.page, 'Bia')).toBeVisible();
+
+    // Ana cai involuntariamente
+    await ana.page.evaluate(() => {
+      ((window as any).testSockets as WebSocket[]).filter(s => s.readyState === WebSocket.OPEN && s.url.includes('/signal')).forEach(s => s.close(4001, 'test drop'));
+    });
+    await expect(chip(viewer.page)).toContainText('Aguardando reconexão');
+
+    // Enquanto Ana está fora, Bia encerra a transmissão e depois inicia uma nova
+    await bia.page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    await expect(viewer.page.getByText('Nenhuma transmissão ativa', { exact: true })).toBeVisible();
+    await startLive(bia.page);
+    await expect(stageBadge(viewer.page, 'Bia')).toBeVisible();
+
+    // Ana reconecta com a mesma identidade
+    await expect.poll(() => viewer.page.evaluate(() => (window as any).testJoins || 0), { timeout: 15000 }).toBe(1);
+
+    // O seguidor de Ana (viewer) NÃO deve ser forçado para Bia com a indicação obsoleta!
+    // Como a indicação foi invalidada quando Bia parou, viewer destaca o stream da própria Ana
+    await expect(stageBadge(viewer.page, 'Ana')).toBeVisible();
+    await expect(chip(viewer.page)).toContainText('Seguindo Ana · Acompanhando');
+  } finally { await closeAll(contexts); }
+});
