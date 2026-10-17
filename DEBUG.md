@@ -164,7 +164,7 @@ Ao testar a aplicação com dois navegadores (Cliente A = Apresentador, Cliente 
 - **`offer-created` aparece no apresentador mas `offer-received` não chega no espectador:**
   Problema na sinalização intermediária (verifique os logs de `relay` no servidor).
 - **Conexão estagnada em `pc-ice state=checking` ou transitando para `failed`:**
-  A conexão direta P2P foi bloqueada por NAT simétrico ou firewall restritivo. Nesse caso, a travessia depende do servidor TURN. Verifique se o evento `turn-config` reportou `relay: true` e se as portas UDP/TCP do coturn estão liberadas.
+  Esses estados mostram estabelecimento pendente ou falha observada de ICE; isoladamente não comprovam NAT simétrico, firewall ou uma causa específica. TURN pode ser necessário para a travessia. Verifique se o evento `turn-config` reportou `relay: true` e se as portas UDP/TCP do coturn estão liberadas.
 
 ## Ciclo de transmissão e regressões
 
@@ -178,8 +178,7 @@ rollback. SDP e ICE incluem a geração da conexão e a identificação da negoc
 Os eventos `screen-captured`, `offer-created`, `answer-received`,
 `pc-connection`, `first-frame`, `screen-stopped` e `recovery-start` permitem
 acompanhar o ciclo. `elapsedMs` em conexão e primeiro frame mede o tempo desde a
-criação da conexão; o primeiro frame é observado pelo coletor de stats, em
-intervalos de três segundos. Os testes de navegador medem reprodução diretamente.
+criação da conexão; `first-frame` preserva a semântica de primeiro frame **decodificado**, observado via `framesDecoded` pelo coletor em intervalos de três segundos (`evidence=decoded`). Não comprova apresentação.
 
 A configuração ICE tem prazo de cinco segundos. `turn-config-fallback` registra
 falha ou timeout; o cliente usa STUN nesse caso. Uma desconexão de mídia por cinco
@@ -228,3 +227,43 @@ A fonte Web Audio é verificada antes do teste de áudio. Se o contexto não ent
 em execução, esse cenário é explicitamente pulado. Em Gecko, o evento sintético
 `ended` não substitui uma parada nativa confiável; a suíte usa a parada pelo
 aplicativo e a validação do botão nativo fica para uma captura real.
+
+## Diagnóstico de conectividade e reprodução (F18)
+
+Na aba **Rede & Métricas**, WebSocket representa somente a sinalização. A contagem
+mostra conexões cujo `connectionState` WebRTC foi observado como `connected`,
+independentemente de haver RTP ou de `getStats()` funcionar. A atualização é
+periódica (3 s); não constitui garantia de reprodução de todos os participantes.
+Sem peers, a contagem é zero, mesmo com WebSocket conectado.
+
+Cada peer é identificado pelo ID usado nos eventos técnicos. A lista distingue
+estado geral WebRTC, ICE e SDP. “Descrições aplicadas” exige descrições local e
+remota; `stable` sozinho também ocorre antes da negociação. Pendência ou falha
+observável deve ser interpretada junto de `offer-*`, `answer-*`, `pc-*` e
+`recovery-*`; não é atribuída uma causa a partir de um sintoma isolado.
+
+Bytes recebidos e frames decodificados são contadores acumulados do relatório
+atual, não garantias de fluxo contínuo. A recepção é indeterminada sem contador.
+A média usa somente valores disponíveis de cada métrica e prioriza recepção nos
+peers bidirecionais. `–` nunca significa zero: os detalhes por peer distinguem
+sem amostra RTP/par ICE, campo não fornecido pelo navegador, estatísticas
+indisponíveis e medição ainda não estabelecida (por exemplo, baseline de bitrate
+ou intervalo sem pacotes para calcular perda). Não é possível concluir ausência
+de suporte permanente apenas porque um campo não foi fornecido nesta amostra.
+Zero só aparece com evidência numérica válida. A primeira perda válida usa os
+contadores acumulados; depois usa deltas não negativos com tráfego no intervalo.
+
+`first-frame-presented` registra o primeiro callback de
+`requestVideoFrameCallback()` por associação ao vídeo **remoto no palco**, com
+peer e ID do MediaStream local ao receptor. O callback comprova envio de um frame
+à composição pelo elemento, não visibilidade física, atenção do usuário ou
+continuidade da reprodução. Prévia local e miniaturas não geram esse evento.
+Trocar o palco, stream, pausar pela interface ou desmontar cancela a observação;
+uma nova associação pode gerar outro evento para o mesmo peer. Não há loop
+permanente de callbacks. Sem essa API, apresentação permanece indeterminada;
+`playing`, dimensões e decodificação não são usados como substitutos.
+
+Os eventos continuam limitados aos 50 mais recentes. A ausência de um evento
+nesse histórico pode resultar de expiração, API indisponível ou vídeo que não
+ocupou o palco; não comprova falha de reprodução. Não são registrados SDP,
+candidatos ICE completos, tokens ou credenciais por essa instrumentação.

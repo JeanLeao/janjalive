@@ -891,6 +891,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   };
 
   return {
+    onVideoPresented: (peerId: string, stream: MediaStream) => {
+      if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
+        loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });
+      }
+    },
     annotations, sendCollaboration,
     collaborationAvailable: connectionStatus === 'connected' && collaborationReadyRef.current,
     pointingEnabled,
