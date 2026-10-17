@@ -1,3 +1,4 @@
+import { StageSelectionPublisher } from './stage-selection-publisher';
 import { LiveAnnotations } from '../collaboration/live-annotations';
 import type { CollaborationMessage } from '@screen-room/protocol';
 import { useRoomInteractions } from './useRoomInteractions';
@@ -118,6 +119,18 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
   const nicknameRef = useRef<string | undefined>(displayName?.trim() || undefined);
   const reconnectTokenRef = useRef<string | undefined>(undefined);
+
+  const stageSelectionPublisher = useMemo(() => new StageSelectionPublisher({
+    canSend: () => canSendStageSelection({
+      connected: signalingRef.current?.getState() === 'connected',
+      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
+      sharing: Boolean(sharingIdRef.current),
+    }),
+    isValidTarget: (id) => id === localPeerRef.current
+      ? Boolean(sharingIdRef.current)
+      : participantsRef.current.some(p => p.peerId === id && p.isSharing),
+    send: (targetPeerId) => signalingRef.current?.send({ type: 'select-stage', targetPeerId }) ?? false,
+  }), [roomId]);
 
   remoteStreamsRef.current = remoteStreams;
 
@@ -252,6 +265,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state !== 'connected') {
+          stageSelectionPublisher.cancel();
           interactionsRef.current.resetConnection();
           collaborationReadyRef.current = false;
           annotations.reset();
@@ -333,6 +347,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           });
 
         } else if (message.type === 'stage-selected') {
+          if (message.peerId === peerId) stageSelectionPublisher.acknowledge(message.targetPeerId, message.seq);
           dispatchFollow({ type: 'selection', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
         } else if (message.type === 'peer-joined') {
           presenterBack(message.peerId);
@@ -363,6 +378,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
 
         } else if (message.type === 'peer-left') {
+          stageSelectionPublisher.invalidate(message.peerId);
           annotations.removePeer(message.peerId);
           presenterLeft(message.peerId, message.reconnectGraceMs);
           setParticipantCount(Math.max(1, message.count));
@@ -389,6 +405,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             showToast('Participante removeu o nickname.');
           }
         } else if (message.type === 'sharing-updated') {
+          if (!message.active) stageSelectionPublisher.invalidate(message.peerId);
           annotations.setCapture(message.peerId, message.active ? message.streamId : undefined);
           if (message.active && message.pointingEnabled === false) annotations.clearPointers(message.peerId);
           if (message.active && message.drawingEnabled === false) annotations.clearCollaborativeDrawings(message.peerId);
@@ -432,6 +449,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     return () => {
       isDisposed = true;
+      stageSelectionPublisher.cancel();
       for (const timer of followExpiryTimers.values()) clearTimeout(timer);
       followExpiryTimers.clear();
       dispatchFollow({ type: 'reset' });
@@ -469,9 +487,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       peerManager.dispose();
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled, annotations]);
+  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher]);
 
   const stopSharing = useCallback(() => {
+    stageSelectionPublisher.cancel();
     qualityOperationRef.current = null;
     setQualityPending(false);
     setQualityNotice(null);
@@ -518,7 +537,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (generation === captureGenerationRef.current) transition('idle');
     });
     loggerRef.current?.log('screen-stopped');
-  }, [annotations]);
+  }, [annotations, stageSelectionPublisher]);
 
   const startSharing = useCallback(async () => {
     if (captureStateRef.current !== 'idle') return;
@@ -602,14 +621,14 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (state === 'preview') {
         const stageId = featuredStreamIdRef.current;
         const targetPeerId = !stageId || stageId === 'local' ? localPeerRef.current : stageId;
-        signalingRef.current?.send({ type: 'select-stage', targetPeerId });
+        stageSelectionPublisher.select(targetPeerId);
       }
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
       setErrorMessage('Não foi possível publicar a captura. Compartilhamento encerrado.');
     }
-  }, [stopSharing, annotations]);
+  }, [stopSharing, annotations, stageSelectionPublisher]);
 
   const pauseSharing = useCallback(async () => {
     if (!['sharing', 'publishing', 'resuming'].includes(captureStateRef.current)) return;
@@ -772,12 +791,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     dispatchFollow({ type: 'manual-select' });
     featuredStreamIdRef.current = streamId;
     setFeaturedStreamId(streamId);
-    if (canSendStageSelection({
-      connected: signalingRef.current?.getState() === 'connected',
-      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
-      sharing: Boolean(sharingIdRef.current),
-    })) signalingRef.current?.send({ type: 'select-stage', targetPeerId });
-  }, [roomId, enabled]);
+    stageSelectionPublisher.select(targetPeerId);
+  }, [enabled, stageSelectionPublisher]);
 
   const updateNickname = useCallback(
     (nickname: string) => {

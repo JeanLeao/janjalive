@@ -9,8 +9,19 @@ async function open(browser: Browser, room: string, name: string, viewport?: { w
   await page.addInitScript((nickname) => {
     sessionStorage.setItem('screen_room_display_name', nickname);
     (window as any).testSockets = [];
+    (window as any).testSelections = [];
     const NativeSocket = window.WebSocket;
     window.WebSocket = class extends NativeSocket {
+      override send(data: Parameters<WebSocket['send']>[0]) {
+        if (typeof data === 'string') {
+          try {
+            const m = JSON.parse(data);
+            if (m.type === 'join') (window as any).testPeerId = m.peerId;
+            if (m.type === 'select-stage') (window as any).testSelections.push({ target: m.targetPeerId, at: performance.now() });
+          } catch {}
+        }
+        super.send(data);
+      }
       constructor(url: string | URL, protocols?: string | string[]) { if ((window as any).blockSignal && String(url).includes('/signal')) throw new Error('test: reconnection held'); super(url, protocols); (window as any).testSockets.push(this); this.addEventListener('message', e => { try { const m = JSON.parse(e.data); if (m.type === 'peer-joined') (window as any).testJoins = ((window as any).testJoins || 0) + 1; } catch {} }); }
     };
     Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
@@ -227,3 +238,42 @@ test('F29 manual choices during pending F27 and pause are synchronized without p
     await drawer(viewer.page); await expect(status(viewer.page)).toHaveText('Transmissão indisponível');
   } finally { await closeAll([ana.context, bia.context, viewer.context]); }
 });
+
+for (const [label, viewport, hasTouch] of [['desktop', { width: 1280, height: 800 }, false], ['mobile-320', { width: 320, height: 700 }, true]] as const) {
+  test(`F29 rapid manual choices converge after the server budget is saturated (${label})`, async ({ browser }) => {
+    const room = `f29-burst-${label}-${Date.now()}`;
+    const ana = await open(browser, room, 'Ana', viewport, hasTouch);
+    const bia = await open(browser, room, 'Bia', viewport, hasTouch);
+    const viewer = await open(browser, room, 'Vera', viewport, hasTouch);
+    try {
+      await startLive(ana.page); await expect(stageBadge(bia.page, 'Ana')).toBeVisible(); await startLive(bia.page);
+      await chooseFollow(viewer.page, 'Ana'); await expect(stageBadge(viewer.page, 'Ana')).toBeVisible();
+      await ana.page.waitForTimeout(1150); // Expire the initial publication's server budget.
+      const elapsed = await ana.page.evaluate(async () => {
+        const socket = ((window as any).testSockets as WebSocket[]).find(s => s.url.includes('/signal') && s.readyState === WebSocket.OPEN)!;
+        const self = (window as any).testPeerId;
+        for (let i = 0; i < 5; i++) socket.send(JSON.stringify({ type: 'select-stage', targetPeerId: self }));
+        (window as any).testSelections = [];
+        const start = performance.now();
+        for (let i = 0; i < 19; i++) {
+          const button = document.querySelector<HTMLButtonElement>('button[aria-label^="Destacar transmissão de "]');
+          if (!button) throw new Error('Missing secondary transmission');
+          button.click();
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        }
+        return performance.now() - start;
+      });
+      expect(elapsed).toBeLessThan(1000);
+      await expect(stageBadge(ana.page, 'Bia')).toBeVisible();
+      await expect(stageBadge(viewer.page, 'Bia')).toBeVisible();
+      await expect.poll(() => ana.page.evaluate(() => (window as any).testSelections.length)).toBeGreaterThan(0);
+      const sent = await ana.page.evaluate(() => (window as any).testSelections as { target: string; at: number }[]);
+      expect(sent.length).toBeLessThanOrEqual(2);
+      for (let i = 1; i < sent.length; i++) expect(sent[i].at - sent[i - 1].at).toBeGreaterThanOrEqual(1090);
+      // An acknowledged final choice must not keep retrying.
+      await ana.page.waitForTimeout(1250);
+      expect(await ana.page.evaluate(() => (window as any).testSelections.length)).toBe(sent.length);
+      await expect(stageBadge(viewer.page, 'Bia')).toBeVisible();
+    } finally { await closeAll([ana.context, bia.context, viewer.context]); }
+  });
+}
