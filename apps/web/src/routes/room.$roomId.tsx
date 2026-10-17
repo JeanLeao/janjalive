@@ -317,6 +317,7 @@ function RoomPage() {
         onFollowPresenter={isDemo ? undefined : session.followPresenter}
         onResumeFollowing={session.resumeFollowing}
         onStopFollowing={session.stopFollowing}
+        canIndicateStage={session.canIndicateStage}
         onIndicateStage={session.indicateStage}
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
         onStartSharing={session.startSharing}

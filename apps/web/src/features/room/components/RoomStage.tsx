@@ -58,6 +58,7 @@ export interface RoomStageProps {
   onFollowPresenter?: (presenterId: string) => void;
   onResumeFollowing?: () => void;
   onStopFollowing?: () => void;
+  canIndicateStage?: boolean;
   onIndicateStage?: (stageId: string) => void;
   participants: RoomParticipant[];
   onStartSharing: () => void;
@@ -98,12 +99,20 @@ export function RoomStage({
   onResumeFollowing,
   onStopFollowing,
   onIndicateStage,
+  canIndicateStage = false,
   participants,
   onStartSharing,
   onCopyInvite,
   canShareScreen,
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
+  const followedIdentity = useRef<{ id: string; name: string } | null>(null);
+  const followedParticipant = participants.find(p => p.peerId === followPresenterId);
+  useEffect(() => {
+    if (followPresenterId && followedParticipant) {
+      followedIdentity.current = { id: followPresenterId, name: formatDisplayName(followedParticipant.nickname, false) };
+    } else if (followedIdentity.current?.id !== followPresenterId) followedIdentity.current = null;
+  }, [followPresenterId, followedParticipant]);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -128,9 +137,13 @@ export function RoomStage({
     const measure = () => setFollowRowBottom(row.offsetTop + row.offsetHeight);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
     observer.observe(row);
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   });
 
   const toggleFullscreen = async () => {
@@ -191,16 +204,13 @@ export function RoomStage({
     : [];
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
-  const activeRemotePresenter = activeStream && !activeStream.isLocal && activeStream.id !== followPresenterId
-    ? { id: activeStream.id, name: activeStream.displayName }
-    : undefined;
   const followControlsProps = {
     status: followStatus,
     followedName: followPresenterId
-      ? formatDisplayName(participants.find((p) => p.peerId === followPresenterId)?.nickname, false)
+      ? (followedParticipant ? formatDisplayName(followedParticipant.nickname, false) : followedIdentity.current?.id === followPresenterId ? followedIdentity.current.name : undefined)
       : undefined,
-    viewedPresenter: activeRemotePresenter,
-    canIndicate: Boolean(isSharing && localStream && activeStream && onIndicateStage),
+    presenters: participants.filter(p => !p.isLocal && p.isSharing && p.peerId !== followPresenterId).map(p => ({ id: p.peerId, name: formatDisplayName(p.nickname, false) })),
+    canIndicate: Boolean(canIndicateStage && activeStream && onIndicateStage && (activeStream.isLocal || participants.some(p => p.peerId === activeStream.id && p.isSharing))),
   };
   const showFollowRow = followRowShown && followControlsVisible(followControlsProps);
   const showAccess = isCinema || isFullscreen;
@@ -210,7 +220,7 @@ export function RoomStage({
     return (
       <Box
         ref={stageContainerRef}
-        className="stage-empty-container"
+        className={`stage-empty-container${showAccess ? ' stage-follow-with-access' : ''}`}
         style={{
           flex: 1,
           display: 'flex',
@@ -227,10 +237,9 @@ export function RoomStage({
           .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
           .stage-empty-container .follow-controls { position: absolute; top: 16px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
           .stage-empty-container .follow-controls button { min-height: var(--stage-control-size); }
-          .stage-empty-container .follow-chip { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; border-radius: 16px; background: rgba(13, 17, 23, .85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.1); }
-          .stage-empty-container .follow-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
           @media (max-width: 768px), (pointer: coarse) {
             .stage-empty-container { --stage-control-size: 44px; }
+            .stage-empty-container.stage-follow-with-access .follow-controls { max-width: calc(100% - 132px); }
           }
         `}</style>
         {interactions}
@@ -333,7 +342,7 @@ export function RoomStage({
   return (
     <Box
       ref={stageContainerRef}
-      className="stage-main-container"
+      className={`stage-main-container${showAccess ? ' stage-follow-with-access' : ''}`}
       style={{
         flex: 1,
         display: 'flex',
@@ -369,8 +378,6 @@ export function RoomStage({
         .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
         .follow-controls { position: absolute; top: 56px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
         .follow-controls button { min-height: var(--stage-control-size); }
-        .follow-chip { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; border-radius: 16px; background: rgba(13, 17, 23, .85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.1); }
-        .follow-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
@@ -383,6 +390,7 @@ export function RoomStage({
         @media (max-width: 560px) {
           .stage-quality-pill-compact { display: none !important; }
           .stage-top-right-access { top: 60px !important; }
+          .stage-follow-with-access .follow-controls { max-width: calc(100% - 132px); }
         }
         @media (max-width: 768px) {
           .stage-main-container {

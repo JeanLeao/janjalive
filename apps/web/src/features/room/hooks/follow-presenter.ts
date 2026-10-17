@@ -23,7 +23,7 @@ export interface FollowState {
   indications: Record<string, FollowIndication>;
 }
 
-export type FollowStatus = 'off' | 'active' | 'suspended' | 'away';
+export type FollowStatus = 'off' | 'active' | 'suspended' | 'away' | 'unavailable';
 
 export type FollowAction =
   | { type: 'follow'; presenterId: string }
@@ -116,4 +116,27 @@ export function followTarget(state: FollowState, ctx: FollowContext): { stageId:
   }
   if (state.fallbackPending && ctx.isSharing(presenterId)) return { stageId: presenterId, consumesFallback: true };
   return null;
+}
+
+/** Configured follow mode can remain active while its requested stream is unavailable. */
+export function followDisplayStatus(state: FollowState, ctx: FollowContext, connected: boolean): FollowStatus {
+  const status = followStatus(state);
+  if (status === 'off') return status;
+  if (!connected || state.away) return 'away';
+  if (status === 'suspended') return status;
+  const indication = state.presenterId ? state.indications[state.presenterId] : undefined;
+  const target = indication ? indication.targetPeerId : state.presenterId;
+  return target && ctx.isSharing(target) ? 'active' : 'unavailable';
+}
+
+/** The UI and execution guard share the same sender eligibility; the server validates the target again. */
+export function canSendStageIndication(context: {
+  connected: boolean;
+  roomReady: boolean;
+  sharing: boolean;
+  captureState: string;
+  switching: boolean;
+}): boolean {
+  return context.connected && context.roomReady && context.sharing && !context.switching
+    && (context.captureState === 'sharing' || context.captureState === 'paused');
 }

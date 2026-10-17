@@ -3,7 +3,7 @@ import type { CollaborationMessage } from '@screen-room/protocol';
 import { useRoomInteractions } from './useRoomInteractions';
 import type { Reaction } from '@screen-room/protocol';
 import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
-import { followReducer, followStatus, followTarget, initialFollowState } from './follow-presenter';
+import { canSendStageIndication, followReducer, followDisplayStatus, followTarget, initialFollowState } from './follow-presenter';
 import {
   type QualitySelection,
   DEFAULT_QUALITY, normalizeQuality, resolveQuality, downgradeQuality,
@@ -835,12 +835,18 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   /** Presenter action: point followers at the stage currently shown here ('local' or a remote peerId). */
   const indicateStage = useCallback((stageId: string): boolean => {
     const targetPeerId = stageId === 'local' ? localPeerRef.current : stageId;
-    if (!targetPeerId || !sharingIdRef.current || !['sharing', 'paused'].includes(captureStateRef.current)) return false;
+    if (!targetPeerId || !canSendStageIndication({
+      connected: signalingRef.current?.getState() === 'connected',
+      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
+      sharing: Boolean(sharingIdRef.current),
+      captureState: captureStateRef.current,
+      switching: Boolean(switchRef.current),
+    })) return false;
     if (!followIsSharing(targetPeerId)) return false;
     const sent = signalingRef.current?.send({ type: 'indicate-stage', targetPeerId }) ?? false;
-    if (sent) showToast('Transmissão indicada aos seguidores.');
+    showToast(sent ? 'Solicitação de indicação enviada.' : 'Não foi possível enviar a indicação. Tente novamente.');
     return sent;
-  }, [followIsSharing, showToast]);
+  }, [followIsSharing, showToast, roomId]);
 
   const togglePointingPermission = useCallback(() => {
     if (!sharingIdRef.current || switchRef.current) return;
@@ -1019,7 +1025,20 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     featuredStreamId,
     selectFeaturedStream,
     followPresenterId: follow.presenterId,
-    followStatus: followStatus(follow),
+    followStatus: followDisplayStatus(follow, {
+      localPeerId: localPeerRef.current,
+      isSharing: (id) => {
+        if (id === localPeerRef.current) return isSharing && Boolean(localStream?.getVideoTracks().some(track => track.readyState === 'live'));
+        const participant = participantsWithSharing.find(p => p.peerId === id);
+        return Boolean(participant?.isSharing && (participant.isPaused || remoteStreams.some(entry =>
+          entry.peerId === id && entry.stream.getVideoTracks().some(track => track.readyState === 'live'))));
+      },
+    }, connectionStatus === 'connected' && collaborationReadyRef.current),
+    canIndicateStage: canSendStageIndication({
+      connected: connectionStatus === 'connected',
+      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
+      sharing: Boolean(sharingIdRef.current), captureState, switching: Boolean(switchRef.current),
+    }),
     followPresenter,
     resumeFollowing,
     stopFollowing,

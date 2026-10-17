@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { followReducer, followStatus, followTarget, initialFollowState } from '../src/features/room/hooks/follow-presenter.ts';
+import { canSendStageIndication, followReducer, followDisplayStatus, followStatus, followTarget, initialFollowState } from '../src/features/room/hooks/follow-presenter.ts';
 
 const run = (actions, state = initialFollowState) => actions.reduce(followReducer, state);
 const indicate = (presenterId, targetPeerId, seq) => ({ type: 'indication', presenterId, targetPeerId, seq });
@@ -139,4 +139,37 @@ test('reconexão bem-sucedida com manutenção do controle manual: presenter-bac
   const resumed = run([{ type: 'resume' }, indicate('a', 'b', 2)], state);
   assert.equal(followStatus(resumed), 'active');
   assert.equal(followTarget(resumed, ctx('a', 'b')).stageId, 'b');
+});
+
+
+test('display status distinguishes configured following, available target, manual control and both reconnects', () => {
+  let state = run([{ type: 'follow', presenterId: 'a' }]);
+  assert.equal(followDisplayStatus(initialFollowState, ctx(), true), 'off');
+  assert.equal(followDisplayStatus(state, ctx('a'), true), 'active');
+  assert.equal(followDisplayStatus(state, ctx(), true), 'unavailable');
+  state = run([indicate('a', 'b', 1)], state);
+  assert.equal(followDisplayStatus(state, ctx('a'), true), 'unavailable');
+  assert.equal(followDisplayStatus(state, ctx('b'), true), 'active');
+  state = run([indicate('a', null, 2)], state);
+  assert.equal(followDisplayStatus(state, ctx('a', 'b'), true), 'unavailable');
+  state = run([{ type: 'manual-select' }], state);
+  assert.equal(followDisplayStatus(state, ctx(), true), 'suspended');
+  assert.equal(followDisplayStatus(state, ctx('a'), false), 'away');
+  state = run([{ type: 'presenter-left', presenterId: 'a', reserved: true }], state);
+  assert.equal(followDisplayStatus(state, ctx('a'), true), 'away');
+  state = run([{ type: 'presenter-back', presenterId: 'a' }], state);
+  assert.equal(followDisplayStatus(state, ctx('a'), true), 'suspended');
+});
+
+
+test('indication eligibility matrix excludes every capture transition, disconnected sender and stale room', () => {
+  const ready = { connected: true, roomReady: true, sharing: true, captureState: 'sharing', switching: false };
+  for (const captureState of ['idle', 'requesting', 'preview', 'publishing', 'sharing', 'pausing', 'paused', 'resuming', 'stopping', 'switch-requesting', 'switch-preview', 'switch-publishing', 'switch-restoring']) {
+    assert.equal(canSendStageIndication({ ...ready, captureState }), ['sharing', 'paused'].includes(captureState), captureState);
+  }
+  for (const blocked of [{ connected: false }, { roomReady: false }, { sharing: false }, { switching: true }]) {
+    for (const captureState of ['sharing', 'paused']) {
+      assert.equal(canSendStageIndication({ ...ready, captureState, ...blocked }), false);
+    }
+  }
 });
