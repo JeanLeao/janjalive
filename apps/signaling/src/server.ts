@@ -306,7 +306,7 @@ export function createSignalServer({
     // Deterministic check: only remove if THIS socket is the active one (BUG-01)
     if (clients.get(key) === socket) {
       clients.delete(key);
-      const clearedIndications = rooms.clearIndications(roomId, peerId, effectiveVoluntary);
+      const clearedSelections = rooms.clearSelections(roomId, peerId, effectiveVoluntary);
       rooms.leave(roomId, peerId, effectiveVoluntary, recoveryGraceMs);
       const count = rooms.peers(roomId).length;
       signalLog('leave', { roomId, peerId, count, isVoluntary: effectiveVoluntary });
@@ -314,8 +314,8 @@ export function createSignalServer({
         type: 'peer-left', peerId, count,
         ...(effectiveVoluntary ? {} : { reconnectGraceMs: Math.max(1, Math.round(recoveryGraceMs)) }),
       }, peerId);
-      for (const { presenterPeerId, seq } of clearedIndications) {
-        if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-indicated', peerId: presenterPeerId, targetPeerId: null, seq });
+      for (const { presenterPeerId, seq } of clearedSelections) {
+        if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
       }
     } else {
       signalLog('superseded-leave-ignored', { roomId, peerId });
@@ -545,11 +545,11 @@ export function createSignalServer({
             },
             normalizedPeer
           );
-          const restoredIndication = rooms.getIndication(normalizedRoom, normalizedPeer);
-          if (restoredIndication) {
+          const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
+          if (restoredSelection) {
             broadcast(
               normalizedRoom,
-              { type: 'stage-indicated', peerId: normalizedPeer, targetPeerId: restoredIndication.targetPeerId, seq: restoredIndication.seq },
+              { type: 'stage-selected', peerId: normalizedPeer, targetPeerId: restoredSelection.targetPeerId, seq: restoredSelection.seq },
               normalizedPeer
             );
           }
@@ -711,19 +711,19 @@ export function createSignalServer({
           const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           if (!effective.active) {
-            for (const { presenterPeerId, seq } of rooms.clearIndications(roomId, peerId, true)) {
-              broadcast(roomId, { type: 'stage-indicated', peerId: presenterPeerId, targetPeerId: null, seq });
+            for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {
+              broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
             }
           }
           return;
         }
 
-        if (message.type === 'indicate-stage') {
+        if (message.type === 'select-stage') {
           const meta = socket.meta;
           if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
-          const indication = rooms.indicateStage(meta.roomId, meta.peerId, message.targetPeerId);
-          if (!indication) return;
-          broadcast(meta.roomId, { type: 'stage-indicated', peerId: meta.peerId, targetPeerId: indication.targetPeerId, seq: indication.seq });
+          const selection = rooms.selectStage(meta.roomId, meta.peerId, message.targetPeerId);
+          if (!selection) return;
+          broadcast(meta.roomId, { type: 'stage-selected', peerId: meta.peerId, targetPeerId: selection.targetPeerId, seq: selection.seq });
           return;
         }
 

@@ -1,86 +1,66 @@
-# F29 — revisão visual e contextual
+# F29 — acompanhamento das escolhas do apresentador
 
-PR: [#20](https://github.com/aldomigge/webrtc-shared/pull/20) · branch `feat/f29-follow-presenter` · referência anterior `61a9c6d`.
+PR: [#20](https://github.com/aldomigge/webrtc-shared/pull/20) · branch `feat/f29-follow-presenter`.
 
-**Aprovação visual do proprietário: pendente.** Capturas e testes são evidência para revisão, não aprovação.
+**Revisão técnica e aprovação visual do proprietário: pendentes.** Testes e inspeção pelo agente não substituem essas aprovações.
 
-## Problemas e ajustes
+## Experiência final
 
-- Indicador e ações permanentes competiam com a transmissão. A F29 agora tem um único controle contextual, com nome e estado sempre visíveis quando há acompanhamento configurado. Retomar, parar, indicar e escolher apresentador ficam no menu.
-- A escolha direta de outro apresentador era bloqueada durante acompanhamento ativo. O menu lista os demais apresentadores com compartilhamento anunciado, inclusive pausado, sem exigir suspensão ou parada prévia.
-- O estado ativo confundia configuração com disponibilidade. “Transmissão indisponível” identifica alvo encerrado, indicação limpa, ausência de compartilhamento ou anúncio sem tracks recebidas; “Aguardando reconexão” identifica desconexão local ou do apresentador. Suspensão manual continua preservada na reconexão. O último nome conhecido permanece visível durante a reserva.
-- A indicação aparecia durante transições sem poder executar. Interface e callback usam a mesma regra de elegibilidade; o callback também revalida conexão, sala, captura e alvo no momento do clique. O servidor mantém a validação de remetente/alvo compartilhando e seu limite de frequência. Não houve mudança de protocolo.
-- O feedback agora diz “Solicitação de indicação enviada.”: envio não confirma aceitação pelo servidor nem entrega aos seguidores. Falha de envio tem mensagem própria.
-- Menu dentro do palco para funcionar em fullscreen; espaço reservado para chat/reações em Cinema e fullscreen estreitos; alvos de toque de pelo menos 44px; foco e navegação do menu por teclado. Medição da faixa de acompanhamento agendada no próximo frame para evitar notificações recursivas de ResizeObserver.
+O apresentador apenas escolhe uma transmissão no palco. Essa ação sincroniza automaticamente a escolha com quem decidiu acompanhá-lo. Não existe ativação pelo apresentador, gerenciamento de seguidores nem ação “Indicar aos seguidores”.
 
-## Matriz de estados × ações
+O espectador começa independente. Com duas ou mais transmissões anunciadas (incluindo pausadas), a gaveta **Participantes** oferece **Acompanhar escolhas de [nome]** junto aos apresentadores remotos. O apresentador seguido recebe uma identificação discreta e a ação **Parar de seguir**. A seleção manual de outra transmissão suspende o acompanhamento e disponibiliza **Retomar**. Trocar de apresentador é uma ação direta na mesma lista.
 
-As ações abaixo ficam no menu **Acompanhamento**. “Outros” significa participantes remotos com compartilhamento anunciado, excluindo o apresentador já seguido. Seguir nunca é imposto automaticamente.
+Com uma única transmissão e sem acompanhamento configurado, não há controles adicionais da F29. Se a quantidade cair, a configuração existente permanece acessível pela gaveta, inclusive para interromper o acompanhamento. Suspensão, reconexão e indisponibilidade aparecem somente para o acompanhamento configurado. O nome conhecido é preservado enquanto o apresentador está na reserva de reconexão.
 
-| Estado | Seguir / trocar | Retomar | Parar de seguir | Indicar aos seguidores | Indicador / validação |
-| --- | --- | --- | --- | --- | --- |
-| Sem compartilhamento e sem acompanhamento | Ausente | Ausente | Ausente | Ausente | Controle ausente; E2E desktop/320px |
-| Prévia inicial / solicitação / publicação | Outros, se existentes e fora do modal | Só se suspenso e acessível fora do modal | Se configurado e acessível fora do modal | Ausente | E2E de prévia + matriz unitária de transições |
-| Compartilhamento ativo conectado | Outros | Só se suspenso | Se configurado | Sim, com alvo válido no palco | Acompanhando se alvo disponível; E2E |
-| Compartilhamento pausado conectado | Outros, inclusive pausados | Só se suspenso | Se configurado | Sim, com alvo válido no palco | Acompanhando; palco indica Pausado; E2E |
-| Pausando / retomando / parando | Outros | Só se suspenso | Se configurado | Ausente | Matriz unitária de elegibilidade; ciclo de pausa/retomada E2E |
-| F27: solicitando / prévia / publicando / restaurando | Outros, respeitando modal | Só se suspenso e acessível | Se configurado e acessível | Ausente | Identidade e acompanhamento preservados; solicitação/prévia/confirmação E2E + demais transições unitárias |
-| Suspensão por seleção manual | Outros, sem exigir parada | Sim | Sim | Apenas se o próprio espectador também transmite e está elegível | Suspenso; E2E |
-| Apresentador desconectado com reserva | Outros disponíveis | Após reconectar, se suspensão preservada | Sim | Apenas remetente conectado e elegível | Aguardando reconexão; nome preservado; E2E |
-| Cliente desconectado / reconectando | Escolha local conforme participantes ainda conhecidos | Não enquanto aguarda conexão | Se configurado | Ausente | Aguardando reconexão; regra de execução unitária e reconexão E2E |
-| Reconexão concluída | Outros | Se suspensão manual anterior | Se configurado | Só após sala pronta e captura estável | Snapshot reaplicado; suspensão preservada; E2E |
-| Transmissão indicada encerrada / limpa / indisponível | Outros disponíveis | Só se suspenso | Sim | Só remetente elegível e novo alvo válido | Transmissão indisponível, mesmo com outra transmissão no palco; E2E |
-| Apresentador encerrou captura mas permanece na sala | Outros disponíveis | Só se suspenso | Sim | Ausente para quem encerrou | Configuração mantida; sem transmissão indicada quando não há alvo; E2E |
-| Palco vazio com acompanhamento configurado | Ausente sem outros compartilhamentos anunciados | Só se suspenso | Sim | Ausente | Transmissão indisponível; E2E desktop/375px/320px e Cinema |
-| Compartilhamento anunciado, palco aguardando tracks | Pode configurar acompanhamento | Só se suspenso | Sim | Ausente sem alvo disponível no palco | Transmissão indisponível; E2E específico |
-| Múltiplos apresentadores | Escolha direta de qualquer outro | Só se suspenso | Se configurado | Regra normal do remetente e alvo | Seguidores independentes; E2E |
-| Saída voluntária / reserva expirada | Outros disponíveis | Ausente para acompanhamento encerrado | Ausente para acompanhamento encerrado | Regra normal | Acompanhamento encerrado; saída E2E, expiração unitária |
+O palco não contém controles nem indicadores permanentes da F29. Zoom e arraste continuam locais; Cinema, fullscreen, PiP e anotações usam os controles existentes.
 
-A matriz unitária cobre os 13 estados de captura e bloqueios por desconexão, sala não pronta, ausência de compartilhamento e troca pendente. Os E2E conferem listas completas de ações e ausência de ações indevidas, além da execução.
+## Implementação e invariantes
 
-## Capturas reais do Chromium
+- `useRoomSession.ts`: a ação explícita de seleção manual publica `select-stage`. Recepção remota e fallback automático apenas atualizam o destaque local, sem publicar outra escolha; ciclos de acompanhamento não geram retransmissão em cadeia. A publicação inicial de captura registra o palco disponível naquele momento para o snapshot inicial. Retomar captura e trocar sua origem não republicam escolhas incidentais.
+- `follow-presenter.ts`: mantém a máquina de acompanhamento opcional, suspensão manual, sequência por apresentador, fallback inicial, reserva e expiração. Mensagens obsoletas são ignoradas; seleções limpas não ressuscitam uma transmissão encerrada.
+- `ParticipantsDrawer.tsx` e `room.$roomId.tsx`: concentram elegibilidade, estado e ações na lista existente, com botões de área efetiva mínima de 44px, quebra de texto e acesso por teclado/toque.
+- `RoomStage.tsx`: remove a integração, estilos e medição da faixa de acompanhamento. `FollowControls.tsx` foi removido.
+- `packages/protocol/src/messages.ts`, `apps/signaling/src/room-state.ts` e `server.ts`: `select-stage` / `stage-selected`, snapshot `selection` e nomes internos representam seleção, substituindo as estruturas de indicação manual. Mantidos os schemas estritos, identidade derivada do socket, remetente compartilhando, alvo ativo na mesma sala, limite de 5/s, sequência do servidor e invalidação de seleções nas reservas. Web, protocol e signaling precisam usar o mesmo contrato.
+- Testes em `apps/web/test/follow-presenter.test.js`, `apps/signaling/test/stage-selection.test.js` e `apps/web/e2e/follow.spec.ts` foram atualizados para essa semântica.
 
-Captura de mídia sintética por canvas, com participantes em contextos separados, aplicação web e signaling locais. As áreas vermelha/azul são a transmissão sintética.
+Não houve alteração da captura de mídia, topologia mesh, transporte WebRTC ou credenciais. Sem alterações de F19, F20 ou GitHub Projects. Arquivos locais não rastreados foram preservados.
 
-| Viewport | Antes (`61a9c6d`) | Depois |
-| --- | --- | --- |
-| Desktop 1280×800, acompanhamento ativo | [Antes](screenshots/f29-review/before-desktop-active.png) | [Depois](screenshots/f29-review/after-desktop-active.png) |
-| Mobile 375×700, acompanhamento ativo | [Antes](screenshots/f29-review/before-mobile-active.png) | [Depois](screenshots/f29-review/after-mobile-active.png) |
-| Mobile 320×700 | — | [Ativo](screenshots/f29-review/after-mobile-320-active.png) · [Trocar apresentador](screenshots/f29-review/after-mobile-320-switch-menu.png) |
-| Troca direta de apresentador | — | [Desktop](screenshots/f29-review/after-desktop-switch-menu.png) · [320px](screenshots/f29-review/after-mobile-320-switch-menu.png) |
-| Suspenso | — | [Desktop](screenshots/f29-review/after-desktop-suspended.png) · [320px](screenshots/f29-review/after-mobile-320-suspended.png) |
-| Reconectando | — | [Desktop](screenshots/f29-review/after-desktop-reconnecting.png) · [320px](screenshots/f29-review/after-mobile-320-reconnecting.png) |
-| Anúncio sem mídia recebida | — | [Desktop](screenshots/f29-review/after-desktop-no-media.png) |
-| Alvo indisponível | — | [Desktop](screenshots/f29-review/after-desktop-unavailable.png) · [320px](screenshots/f29-review/after-mobile-320-unavailable.png) |
-| Palco vazio | — | [Desktop](screenshots/f29-review/after-desktop-empty.png) · [375px](screenshots/f29-review/after-mobile-empty.png) · [320px](screenshots/f29-review/after-mobile-320-empty.png) |
-| Cinema | — | [Desktop](screenshots/f29-review/after-desktop-cinema.png) · [320px](screenshots/f29-review/after-mobile-320-cinema.png) |
-| Fullscreen | — | [Desktop](screenshots/f29-review/after-desktop-fullscreen.png) · [320px](screenshots/f29-review/after-mobile-320-fullscreen.png) |
-| Palco vazio em Cinema | — | [Desktop](screenshots/f29-review/after-desktop-empty-cinema.png) · [320px](screenshots/f29-review/after-mobile-320-empty-cinema.png) |
+## Evidências visuais atuais
 
-## Validação e limites
+As capturas abaixo foram produzidas nesta revisão por Chromium real com mídia sintética e contextos separados. As evidências anteriores, produzidas até `eafe443`, mostram o fluxo substituído e **não descrevem a experiência final**. Somente as capturas listadas na tabela desta revisão devem ser usadas para avaliar a nova interface.
 
-- `pnpm --filter @screen-room/signaling... build`: passou; preparou os builds usados pelos testes web.
-- `pnpm test`: passou, 197 testes (13 protocol, 81 signaling, 103 web).
-- `pnpm typecheck`: passou nos três pacotes.
-- `pnpm build`: passou no workspace; bundler emitiu avisos sobre diretivas de módulos e nome de grupo de code splitting, sem impedir a compilação.
-- `pnpm --filter @screen-room/web test:e2e follow.spec.ts sharing.spec.ts --workers=1`: 74/74 passaram (11 F29 + 63 compartilhamento).
-- Após o ajuste final de disponibilidade de mídia, `pnpm typecheck` e `pnpm build` passaram novamente. A rodada ampliada da F29 passou em 11 cenários; o 12º acertou o indicador, mas falhou por esperar palco vazio em vez do placeholder “Conectando à transmissão”. A expectativa foi corrigida e esse caso foi reexecutado isoladamente (comando e resultado abaixo).
-- `pnpm --filter @screen-room/web test:e2e follow.spec.ts --grep 'announced sharing' --workers=1`: passou (1/1). Os 12 cenários finais da F29 passaram, somando as execuções descritas acima.
+A matriz executada cobre sala com um participante, uma transmissão e espectadores, múltiplas transmissões, acompanhamento ativo/suspenso, reconexão, alvo indisponível, Cinema e fullscreen em 1280×800, 375×700 e 320×700. Os PNGs completos ficam nos artefatos locais do Playwright (`apps/web/test-results`); uma seleção substitui evidências já versionadas para evitar acrescentar novos arquivos binários ao PR.
+
+| Estado | Desktop 1280×800 | Mobile 375×700 | Mobile 320×700 |
+| --- | --- | --- | --- |
+| Um participante, sem transmissão | [Captura](screenshots/f29-review/after-desktop-empty.png) | [Captura](screenshots/f29-review/after-mobile-empty.png) | [Captura](screenshots/f29-review/after-mobile-320-empty.png) |
+| Acompanhamento ativo na gaveta | [Captura](screenshots/f29-review/after-desktop-active.png) | [Captura](screenshots/f29-review/after-mobile-active.png) | [Captura](screenshots/f29-review/after-mobile-320-active.png) |
+| Suspenso por escolha manual | [Captura](screenshots/f29-review/after-desktop-suspended.png) | Artefato local | [Captura](screenshots/f29-review/after-mobile-320-suspended.png) |
+| Aguardando reconexão | [Captura](screenshots/f29-review/after-desktop-reconnecting.png) | Artefato local | [Captura](screenshots/f29-review/after-mobile-320-reconnecting.png) |
+| Transmissão indisponível | [Captura](screenshots/f29-review/after-desktop-unavailable.png) | Artefato local | [Captura](screenshots/f29-review/after-mobile-320-unavailable.png) |
+| Cinema, sem faixa de acompanhamento | [Captura](screenshots/f29-review/after-desktop-cinema.png) | Artefato local | [Captura](screenshots/f29-review/after-mobile-320-cinema.png) |
+| Fullscreen, sem faixa de acompanhamento | [Captura](screenshots/f29-review/after-desktop-fullscreen.png) | Artefato local | [Captura](screenshots/f29-review/after-mobile-320-fullscreen.png) |
+
+Uma transmissão com espectadores, gaveta sem controles extras e múltiplas transmissões também foram capturadas nos três tamanhos: arquivos `desktop-single.png`, `desktop-single-drawer.png`, `desktop-multiple.png` e equivalentes `mobile-*` / `mobile-320-*` nos resultados do teste “participants drawer”. Os testes anexam cada PNG ao resultado. Dez estados por viewport foram inspecionados em duas rodadas agrupadas pelo agente; a segunda confirmou a implementação final. Não foram adicionados novos PNGs versionados: 16 evidências existentes foram substituídas. Sete PNGs exclusivos do fluxo antigo foram removidos da árvore atual; continuam disponíveis no histórico até `eafe443`, sem serem apresentados como resultado final.
+
+## Validação
+
+- `pnpm --filter @screen-room/signaling... build`: passou; preparou protocol/signaling usados pelos testes web.
+- `pnpm typecheck`: passou nos três pacotes, inclusive após o ajuste de elegibilidade.
+- `pnpm test`: passou novamente na implementação final, **197/197** (13 protocol, 81 signaling, 103 web).
+- `pnpm build`: passou novamente no workspace. O bundler emitiu avisos de diretivas de módulos e nome de grupo de code splitting; não impediram a compilação.
+- `pnpm --filter @screen-room/web test:e2e follow.spec.ts sharing.spec.ts viewing-modes.spec.ts zoom.spec.ts --workers=1`: **75/77 passaram**: os 63 cenários de compartilhamento passaram; dois cenários de Cinema/PiP no demo falharam e foram corrigidos conforme descrito abaixo.
+- `pnpm --filter @screen-room/web test:e2e follow.spec.ts viewing-modes.spec.ts zoom.spec.ts --workers=1`: **14/14 passaram** após a correção do demo (6 F29, 7 viewing modes, 1 zoom). Assim, os 77 cenários distintos passaram entre as execuções documentadas; não houve uma nova execução conjunta dos 77 após o ajuste exclusivo do demo.
 - `git diff --check`: passou.
 
-Nas execuções intermediárias dos novos testes, foram corrigidas esperas de animação do menu e uma simulação que também fechava o WebSocket do Vite, interrompendo a página. A simulação final fecha somente `/signal` e controla a tentativa de reconexão. Houve ainda uma falha de gravação de trace do Playwright (`file data stream has unexpected number of bytes` / arquivo ZIP truncado) em uma execução intermediária; não foi classificada como preexistente. Uma rodada posterior falhou em 320px porque o alerta produzido pela falha de socket deliberadamente simulada interceptava o toque; o teste passou a fechar esse alerta pela interface após reconectar. A mensagem sintética de anúncio também foi corrigida para incluir `audioMuted`, obrigatório no contrato. Execuções interrompidas para ajustar os testes não contam como validação aprovada.
+A matriz F29 inclui seguidores distintos, espectador independente, snapshot em entrada tardia, seleção inicial ao publicar, suspensão/retomada/troca/parada, ausência de retransmissão em cadeia, pausa, F27, queda do apresentador e do espectador, suspensão preservada, invalidação de alvo encerrado durante reserva e saída voluntária. A regressão amplia a cobertura de limpeza, compartilhamento, anotações, zoom, Cinema, fullscreen e PiP.
 
-A Impeccable local foi aplicada como refinamento da interface existente; detector sobre `FollowControls.tsx` e `RoomStage.tsx`: `[]`. Inspeção visual das capturas pelo agente, contraste dos textos sobre superfícies opacas escuras, foco visível e áreas efetivas de interação. Sem redesenho geral.
+A Impeccable local foi usada como refinamento da gaveta existente. Detector sobre `ParticipantsDrawer.tsx` e `RoomStage.tsx`: `[]`. A aprovação visual continua pendente.
 
-Captura sintética não valida permissões nativas, áudio real de aba/sistema, autoplay com áudio ou STUN/TURN entre redes distintas. Não foram usados dispositivos físicos nem leitores de tela. Chromium foi o navegador desta revisão; Firefox e Safari não foram executados.
+Preparação: um primeiro typecheck encontrou os builds antigos do protocolo após a renomeação do contrato. A reconstrução de protocol/signaling resolveu isso; o typecheck final passou.
 
-## Arquivos alterados
+Execuções intermediárias: o primeiro E2E usava um seletor com “Você” em vez de “você” e media a gaveta antes de terminar sua animação. O seletor e a espera pela posição final foram corrigidos. A primeira rodada completa dos cinco novos cenários passou em 5/5. Uma rodada ampliada foi interrompida para corrigir o bloqueio herdado de seleção durante F27; a execução final inclui um sexto cenário específico para seleção manual durante autorização pendente e pausa. Na primeira rodada, houve também edição de fonte, provocando HMR e interrupção de sessões; ela foi descartada como validação final. Essas falhas não são classificadas como preexistentes.
 
-- `apps/web/src/features/room/components/FollowControls.tsx`: controle contextual, menu, status e estilos da F29.
-- `apps/web/src/features/room/components/RoomStage.tsx`: opções de apresentador, disponibilidade do alvo, identidade durante reconexão e limites de layout.
-- `apps/web/src/features/room/hooks/follow-presenter.ts`: estado de apresentação indisponível e regra de elegibilidade de indicação.
-- `apps/web/src/features/room/hooks/useRoomSession.ts`: integração das regras e feedback de envio.
-- `apps/web/src/routes/room.$roomId.tsx`: passa a elegibilidade ao palco.
-- `apps/web/test/follow-presenter.test.js`: matriz de elegibilidade e estados exibidos.
-- `apps/web/e2e/follow.spec.ts`: ações presentes/ausentes, troca direta, transições, reconexão, zoom, Cinema/fullscreen, teclado, toque e capturas.
-- `F29-REVIEW.md` e `screenshots/f29-review/*.png`: relatório e evidência visual desta revisão. Demais arquivos não rastreados preservados.
+Na rodada ampliada, o guard de seleção da F29 rejeitou os participantes sintéticos fornecidos pela rota em `demo=multi`, impedindo a troca do palco e a saída de PiP em dois testes de Cinema (desktop/mobile). A seleção local foi preservada explicitamente quando `enabled=false`; o caminho da sala real continua validando participantes antes de publicar. Typecheck, build e os 197 testes foram reexecutados após essa correção. Os 63 testes de compartilhamento da rodada ampliada não foram repetidos, pois esse ajuste se limita ao caminho com a sessão desativada. A reexecução de F29, viewing modes e zoom valida o ajuste e a continuidade do caminho real.
+
+Captura sintética não valida permissões nativas, áudio real de aba/sistema, autoplay com áudio ou STUN/TURN entre redes distintas. PiP usa mocks da API nos testes existentes; não comprova a janela nativa do sistema. Sem dispositivos físicos, leitores de tela, Firefox ou Safari nesta revisão.

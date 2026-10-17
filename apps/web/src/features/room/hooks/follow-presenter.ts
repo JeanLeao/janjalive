@@ -1,12 +1,12 @@
 /**
  * F29 — "Seguir apresentador": pure client-side state for follow mode.
  *
- * Followed presenters are identified by their ephemeral peerId. Indications are
- * authoritative server events (`stage-indicated`, per-presenter `seq`); this reducer only
+ * Followed presenters are identified by their ephemeral peerId. Selections are
+ * authoritative server events (`stage-selected`, per-presenter `seq`); this reducer only
  * keeps the newest one per presenter and decides whether following is active, suspended by
  * a manual selection, or waiting for a disconnected presenter to come back.
  */
-export interface FollowIndication {
+export interface FollowSelection {
   targetPeerId: string | null;
   seq: number;
 }
@@ -14,13 +14,13 @@ export interface FollowIndication {
 export interface FollowState {
   /** Presenter chosen by the viewer, or null while following is off. */
   presenterId: string | null;
-  /** The viewer took manual control; only an explicit resume reapplies indications. */
+  /** The viewer took manual control; only an explicit resume reapplies selections. */
   suspended: boolean;
   /** The followed presenter dropped and may still reconnect with the same identity. */
   away: boolean;
-  /** No indication has been seen since following (re)started: fall back to the presenter's own stream once. */
+  /** No selection has been seen since following (re)started: fall back to the presenter's own stream once. */
   fallbackPending: boolean;
-  indications: Record<string, FollowIndication>;
+  selections: Record<string, FollowSelection>;
 }
 
 export type FollowStatus = 'off' | 'active' | 'suspended' | 'away' | 'unavailable';
@@ -31,15 +31,15 @@ export type FollowAction =
   | { type: 'manual-select' }
   | { type: 'resume' }
   | { type: 'fallback-done' }
-  | { type: 'indication'; presenterId: string; targetPeerId: string | null; seq: number }
-  | { type: 'snapshot'; indications: Record<string, FollowIndication> }
+  | { type: 'selection'; presenterId: string; targetPeerId: string | null; seq: number }
+  | { type: 'snapshot'; selections: Record<string, FollowSelection> }
   | { type: 'presenter-left'; presenterId: string; reserved: boolean }
   | { type: 'presenter-back'; presenterId: string }
   | { type: 'presenter-expired'; presenterId: string }
   | { type: 'reset' };
 
 export const initialFollowState: FollowState = {
-  presenterId: null, suspended: false, away: false, fallbackPending: false, indications: {},
+  presenterId: null, suspended: false, away: false, fallbackPending: false, selections: {},
 };
 
 export function followStatus(state: FollowState): FollowStatus {
@@ -60,29 +60,29 @@ export function followReducer(state: FollowState, action: FollowAction): FollowS
       return state.presenterId && state.suspended ? { ...state, suspended: false, fallbackPending: true } : state;
     case 'fallback-done':
       return state.fallbackPending ? { ...state, fallbackPending: false } : state;
-    case 'indication': {
-      const known = state.indications[action.presenterId];
+    case 'selection': {
+      const known = state.selections[action.presenterId];
       if (known && action.seq <= known.seq) return state; // late or repeated
       return {
         ...state,
-        // Any indication (even a clear) means the presenter drives the stage: no own-stream fallback.
+        // Any selection (even a clear) means the presenter drives the stage: no own-stream fallback.
         fallbackPending: action.presenterId === state.presenterId ? false : state.fallbackPending,
-        indications: { ...state.indications, [action.presenterId]: { targetPeerId: action.targetPeerId, seq: action.seq } },
+        selections: { ...state.selections, [action.presenterId]: { targetPeerId: action.targetPeerId, seq: action.seq } },
       };
     }
     case 'snapshot':
       return {
         ...state,
-        fallbackPending: state.presenterId ? !(state.presenterId in action.indications) : false,
-        indications: action.indications,
+        fallbackPending: state.presenterId ? !(state.presenterId in action.selections) : false,
+        selections: action.selections,
       };
     case 'presenter-left': {
-      const { [action.presenterId]: _dropped, ...indications } = state.indications;
-      if (action.presenterId !== state.presenterId) return { ...state, indications };
+      const { [action.presenterId]: _dropped, ...selections } = state.selections;
+      if (action.presenterId !== state.presenterId) return { ...state, selections };
       // Voluntary leave is final; an involuntary drop keeps the choice while the identity is reserved.
       return action.reserved
-        ? { ...state, indications, away: true }
-        : { ...state, indications, presenterId: null, suspended: false, away: false, fallbackPending: false };
+        ? { ...state, selections, away: true }
+        : { ...state, selections, presenterId: null, suspended: false, away: false, fallbackPending: false };
     }
     case 'presenter-back':
       if (action.presenterId !== state.presenterId || !state.away) return state;
@@ -108,9 +108,9 @@ export interface FollowContext {
 export function followTarget(state: FollowState, ctx: FollowContext): { stageId: string; consumesFallback: boolean } | null {
   const { presenterId } = state;
   if (!presenterId || state.suspended || state.away) return null;
-  const indication = state.indications[presenterId];
-  if (indication) {
-    const target = indication.targetPeerId;
+  const selection = state.selections[presenterId];
+  if (selection) {
+    const target = selection.targetPeerId;
     if (!target || !ctx.isSharing(target)) return null;
     return { stageId: target === ctx.localPeerId ? 'local' : target, consumesFallback: false };
   }
@@ -124,19 +124,16 @@ export function followDisplayStatus(state: FollowState, ctx: FollowContext, conn
   if (status === 'off') return status;
   if (!connected || state.away) return 'away';
   if (status === 'suspended') return status;
-  const indication = state.presenterId ? state.indications[state.presenterId] : undefined;
-  const target = indication ? indication.targetPeerId : state.presenterId;
+  const selection = state.presenterId ? state.selections[state.presenterId] : undefined;
+  const target = selection ? selection.targetPeerId : state.presenterId;
   return target && ctx.isSharing(target) ? 'active' : 'unavailable';
 }
 
-/** The UI and execution guard share the same sender eligibility; the server validates the target again. */
-export function canSendStageIndication(context: {
+/** Match signaling eligibility: an announced capture remains eligible while paused or changing source. */
+export function canSendStageSelection(context: {
   connected: boolean;
   roomReady: boolean;
   sharing: boolean;
-  captureState: string;
-  switching: boolean;
 }): boolean {
-  return context.connected && context.roomReady && context.sharing && !context.switching
-    && (context.captureState === 'sharing' || context.captureState === 'paused');
+  return context.connected && context.roomReady && context.sharing;
 }

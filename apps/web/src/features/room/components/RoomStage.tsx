@@ -10,8 +10,6 @@ import {
   Menu,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
-import type { FollowStatus } from '../hooks/follow-presenter';
-import { FollowControls, followControlsVisible } from './FollowControls';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { useVideoZoom } from '../hooks/useVideoZoom';
 import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
@@ -52,14 +50,6 @@ export interface RoomStageProps {
   remoteStreams: RemoteStreamEntry[];
   featuredStreamId: string | null;
   onSelectFeaturedStream: (streamId: string) => void;
-  /** F29 follow mode; all optional so the stage works unchanged without it. */
-  followPresenterId?: string | null;
-  followStatus?: FollowStatus;
-  onFollowPresenter?: (presenterId: string) => void;
-  onResumeFollowing?: () => void;
-  onStopFollowing?: () => void;
-  canIndicateStage?: boolean;
-  onIndicateStage?: (stageId: string) => void;
   participants: RoomParticipant[];
   onStartSharing: () => void;
   onCopyInvite: () => void;
@@ -93,26 +83,12 @@ export function RoomStage({
   remoteStreams,
   featuredStreamId,
   onSelectFeaturedStream,
-  followPresenterId = null,
-  followStatus = 'off',
-  onFollowPresenter,
-  onResumeFollowing,
-  onStopFollowing,
-  onIndicateStage,
-  canIndicateStage = false,
   participants,
   onStartSharing,
   onCopyInvite,
   canShareScreen,
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
-  const followedIdentity = useRef<{ id: string; name: string } | null>(null);
-  const followedParticipant = participants.find(p => p.peerId === followPresenterId);
-  useEffect(() => {
-    if (followPresenterId && followedParticipant) {
-      followedIdentity.current = { id: followPresenterId, name: formatDisplayName(followedParticipant.nickname, false) };
-    } else if (followedIdentity.current?.id !== followPresenterId) followedIdentity.current = null;
-  }, [followPresenterId, followedParticipant]);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -126,25 +102,6 @@ export function RoomStage({
       document.removeEventListener('fullscreenchange', handleFsChange);
     };
   }, []);
-
-  // The follow row sits under the streamer badge; playback messages below it are pushed down by its measured height.
-  const followRowRef = useRef<HTMLDivElement | null>(null);
-  const [followRowBottom, setFollowRowBottom] = useState(0);
-  const followRowShown = Boolean(onFollowPresenter);
-  useEffect(() => {
-    const row = followRowRef.current;
-    if (!row) { setFollowRowBottom(0); return; }
-    const measure = () => setFollowRowBottom(row.offsetTop + row.offsetHeight);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    let frame = 0;
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    });
-    observer.observe(row);
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  });
 
   const toggleFullscreen = async () => {
     if (!stageContainerRef.current) return;
@@ -204,15 +161,6 @@ export function RoomStage({
     : [];
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
-  const followControlsProps = {
-    status: followStatus,
-    followedName: followPresenterId
-      ? (followedParticipant ? formatDisplayName(followedParticipant.nickname, false) : followedIdentity.current?.id === followPresenterId ? followedIdentity.current.name : undefined)
-      : undefined,
-    presenters: participants.filter(p => !p.isLocal && p.isSharing && p.peerId !== followPresenterId).map(p => ({ id: p.peerId, name: formatDisplayName(p.nickname, false) })),
-    canIndicate: Boolean(canIndicateStage && activeStream && onIndicateStage && (activeStream.isLocal || participants.some(p => p.peerId === activeStream.id && p.isSharing))),
-  };
-  const showFollowRow = followRowShown && followControlsVisible(followControlsProps);
   const showAccess = isCinema || isFullscreen;
 
   // Empty state if no stream is active
@@ -220,7 +168,7 @@ export function RoomStage({
     return (
       <Box
         ref={stageContainerRef}
-        className={`stage-empty-container${showAccess ? ' stage-follow-with-access' : ''}`}
+        className="stage-empty-container"
         style={{
           flex: 1,
           display: 'flex',
@@ -235,23 +183,11 @@ export function RoomStage({
         <style>{`
           .stage-empty-container { --stage-control-size: 36px; }
           .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
-          .stage-empty-container .follow-controls { position: absolute; top: 16px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
-          .stage-empty-container .follow-controls button { min-height: var(--stage-control-size); }
           @media (max-width: 768px), (pointer: coarse) {
             .stage-empty-container { --stage-control-size: 44px; }
-            .stage-empty-container.stage-follow-with-access .follow-controls { max-width: calc(100% - 132px); }
           }
         `}</style>
         {interactions}
-        {showFollowRow && (
-          <FollowControls
-            {...followControlsProps}
-            onFollow={(id) => onFollowPresenter?.(id)}
-            onResume={() => onResumeFollowing?.()}
-            onStop={() => onStopFollowing?.()}
-            onIndicate={() => {}}
-          />
-        )}
         {isCinema && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
@@ -342,7 +278,7 @@ export function RoomStage({
   return (
     <Box
       ref={stageContainerRef}
-      className={`stage-main-container${showAccess ? ' stage-follow-with-access' : ''}`}
+      className="stage-main-container"
       style={{
         flex: 1,
         display: 'flex',
@@ -376,8 +312,6 @@ export function RoomStage({
         .stage-display-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.16); padding-left: 6px; }
         .stage-annotations-menu { max-width: calc(100vw - 24px); }
         .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
-        .follow-controls { position: absolute; top: 56px; left: 16px; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: min(520px, calc(100% - 32px)); }
-        .follow-controls button { min-height: var(--stage-control-size); }
         .stage-view-controls button { min-width: var(--stage-control-size); min-height: var(--stage-control-size); }
         @media (max-width: 768px), (pointer: coarse) {
           .stage-main-container { --stage-control-size: 44px; }
@@ -390,7 +324,6 @@ export function RoomStage({
         @media (max-width: 560px) {
           .stage-quality-pill-compact { display: none !important; }
           .stage-top-right-access { top: 60px !important; }
-          .stage-follow-with-access .follow-controls { max-width: calc(100% - 132px); }
         }
         @media (max-width: 768px) {
           .stage-main-container {
@@ -464,7 +397,7 @@ export function RoomStage({
           isCinema={isCinema}
           onToggleCinema={onToggleCinema}
           streamCount={secondaryStreams.length}
-          overlayTop={showFollowRow && followRowBottom ? Math.max(60, followRowBottom + 8) : 60}
+          overlayTop={60}
           showStreams={showStreams}
           onToggleStreams={() => setShowStreams(value => !value)}
         />
@@ -515,17 +448,6 @@ export function RoomStage({
             }}
           />
         </Box>
-
-        {showFollowRow && (
-          <FollowControls
-            ref={followRowRef}
-            {...followControlsProps}
-            onFollow={(id) => onFollowPresenter?.(id)}
-            onResume={() => onResumeFollowing?.()}
-            onStop={() => onStopFollowing?.()}
-            onIndicate={() => onIndicateStage?.(activeStream.id)}
-          />
-        )}
 
         {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
         <Box

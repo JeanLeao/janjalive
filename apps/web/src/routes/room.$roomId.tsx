@@ -312,13 +312,6 @@ function RoomPage() {
             : session.featuredStreamId
         }
         onSelectFeaturedStream={session.selectFeaturedStream}
-        followPresenterId={session.followPresenterId}
-        followStatus={session.followStatus}
-        onFollowPresenter={isDemo ? undefined : session.followPresenter}
-        onResumeFollowing={session.resumeFollowing}
-        onStopFollowing={session.stopFollowing}
-        canIndicateStage={session.canIndicateStage}
-        onIndicateStage={session.indicateStage}
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
         onStartSharing={session.startSharing}
         onCopyInvite={handleCopyInvite}
@@ -366,6 +359,11 @@ function RoomPage() {
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
         onUpdateNickname={session.updateNickname}
         currentNickname={session.currentNickname}
+        followPresenterId={session.followPresenterId}
+        followStatus={session.followStatus}
+        onFollowPresenter={isDemo ? undefined : session.followPresenter}
+        onResumeFollowing={session.resumeFollowing}
+        onStopFollowing={session.stopFollowing}
       />
 
       {/* Right Drawer: Settings & Diagnostics */}

@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canSendStageIndication, followReducer, followDisplayStatus, followStatus, followTarget, initialFollowState } from '../src/features/room/hooks/follow-presenter.ts';
+import { canSendStageSelection, followReducer, followDisplayStatus, followStatus, followTarget, initialFollowState } from '../src/features/room/hooks/follow-presenter.ts';
 
 const run = (actions, state = initialFollowState) => actions.reduce(followReducer, state);
-const indicate = (presenterId, targetPeerId, seq) => ({ type: 'indication', presenterId, targetPeerId, seq });
+const indicate = (presenterId, targetPeerId, seq) => ({ type: 'selection', presenterId, targetPeerId, seq });
 const ctx = (...sharing) => ({ localPeerId: 'me', isSharing: id => sharing.includes(id) });
 
-test('following starts off and indications never move the stage of a viewer who is not following', () => {
+test('following starts off and selections never move the stage of a viewer who is not following', () => {
   const state = run([indicate('a', 'b', 1)]);
   assert.equal(followStatus(state), 'off');
   assert.equal(followTarget(state, ctx('a', 'b')), null);
 });
 
-test('only the followed presenter drives the stage, newest indication wins, stale and repeated ones are ignored', () => {
+test('only the followed presenter drives the stage, newest selection wins, stale and repeated ones are ignored', () => {
   let state = run([indicate('a', 'b', 1), indicate('c', 'c', 1), { type: 'follow', presenterId: 'a' }]);
   assert.deepEqual(followTarget(state, ctx('a', 'b', 'c')), { stageId: 'b', consumesFallback: false });
   state = run([indicate('c', 'a', 2)], state);
@@ -21,7 +21,7 @@ test('only the followed presenter drives the stage, newest indication wins, stal
   assert.equal(followTarget(state, ctx('a', 'b', 'c')).stageId, 'a');
 });
 
-test('without an indication the presenter own stream is highlighted exactly once', () => {
+test('without an selection the presenter own stream is highlighted exactly once', () => {
   let state = run([{ type: 'follow', presenterId: 'a' }]);
   assert.equal(followTarget(state, ctx()), null, 'waits until the presenter shares');
   assert.deepEqual(followTarget(state, ctx('a')), { stageId: 'a', consumesFallback: true });
@@ -29,21 +29,21 @@ test('without an indication the presenter own stream is highlighted exactly once
   assert.equal(followTarget(state, ctx('a')), null);
 });
 
-test('an indication targeting the local stream resolves to the local stage', () => {
+test('an selection targeting the local stream resolves to the local stage', () => {
   const state = run([{ type: 'follow', presenterId: 'a' }, indicate('a', 'me', 1)]);
   assert.equal(followTarget(state, ctx('a', 'me')).stageId, 'local');
   assert.equal(followTarget(state, ctx('a')), null, 'local capture ended');
 });
 
-test('manual selection suspends but keeps the presenter; resume reapplies the latest indication; stop keeps manual control', () => {
+test('manual selection suspends but keeps the presenter; resume reapplies the latest selection; stop keeps manual control', () => {
   let state = run([{ type: 'follow', presenterId: 'a' }, indicate('a', 'b', 1), { type: 'manual-select' }]);
   assert.equal(followStatus(state), 'suspended');
   assert.equal(state.presenterId, 'a');
   state = run([indicate('a', 'a', 2)], state);
-  assert.equal(followTarget(state, ctx('a', 'b')), null, 'suspended ignores new indications');
+  assert.equal(followTarget(state, ctx('a', 'b')), null, 'suspended ignores new selections');
   state = run([{ type: 'resume' }], state);
   assert.equal(followStatus(state), 'active');
-  assert.equal(followTarget(state, ctx('a', 'b')).stageId, 'a', 'latest indication, not the one before suspending');
+  assert.equal(followTarget(state, ctx('a', 'b')).stageId, 'a', 'latest selection, not the one before suspending');
   state = run([{ type: 'stop' }], state);
   assert.equal(followStatus(state), 'off');
   assert.equal(followTarget(state, ctx('a', 'b')), null);
@@ -63,7 +63,7 @@ test('involuntary presenter drop suspends temporarily and restores; manual contr
   let state = run([{ type: 'follow', presenterId: 'a' }, indicate('a', 'b', 4), { type: 'presenter-left', presenterId: 'a', reserved: true }]);
   assert.equal(followStatus(state), 'away');
   assert.equal(followTarget(state, ctx('a', 'b')), null);
-  assert.equal(state.indications.a, undefined, 'no stale indication survives the drop');
+  assert.equal(state.selections.a, undefined, 'no stale selection survives the drop');
   state = run([{ type: 'presenter-back', presenterId: 'a' }, indicate('a', 'b', 4)], state);
   assert.equal(followStatus(state), 'active');
   assert.equal(followTarget(state, ctx('a', 'b')).stageId, 'b');
@@ -77,10 +77,10 @@ test('involuntary presenter drop suspends temporarily and restores; manual contr
   assert.equal(run([{ type: 'follow', presenterId: 'a' }, { type: 'presenter-left', presenterId: 'z', reserved: false }]).presenterId, 'a');
 });
 
-test('a snapshot replaces every indication and reset clears the session', () => {
+test('a snapshot replaces every selection and reset clears the session', () => {
   let state = run([{ type: 'follow', presenterId: 'a' }, indicate('a', 'b', 9), indicate('c', 'c', 9)]);
-  state = run([{ type: 'snapshot', indications: { a: { targetPeerId: 'a', seq: 1 } } }], state);
-  assert.deepEqual(Object.keys(state.indications), ['a']);
+  state = run([{ type: 'snapshot', selections: { a: { targetPeerId: 'a', seq: 1 } } }], state);
+  assert.deepEqual(Object.keys(state.selections), ['a']);
   assert.equal(followTarget(state, ctx('a', 'b')).stageId, 'a', 'seq restarts with the new server snapshot');
   assert.deepEqual(run([{ type: 'reset' }], state), initialFollowState);
 });
@@ -162,14 +162,10 @@ test('display status distinguishes configured following, available target, manua
 });
 
 
-test('indication eligibility matrix excludes every capture transition, disconnected sender and stale room', () => {
-  const ready = { connected: true, roomReady: true, sharing: true, captureState: 'sharing', switching: false };
-  for (const captureState of ['idle', 'requesting', 'preview', 'publishing', 'sharing', 'pausing', 'paused', 'resuming', 'stopping', 'switch-requesting', 'switch-preview', 'switch-publishing', 'switch-restoring']) {
-    assert.equal(canSendStageIndication({ ...ready, captureState }), ['sharing', 'paused'].includes(captureState), captureState);
-  }
-  for (const blocked of [{ connected: false }, { roomReady: false }, { sharing: false }, { switching: true }]) {
-    for (const captureState of ['sharing', 'paused']) {
-      assert.equal(canSendStageIndication({ ...ready, captureState, ...blocked }), false);
-    }
+test('stage choices require a connected, joined presenter with an announced capture', () => {
+  const ready = { connected: true, roomReady: true, sharing: true };
+  assert.equal(canSendStageSelection(ready), true);
+  for (const blocked of [{ connected: false }, { roomReady: false }, { sharing: false }]) {
+    assert.equal(canSendStageSelection({ ...ready, ...blocked }), false);
   }
 });

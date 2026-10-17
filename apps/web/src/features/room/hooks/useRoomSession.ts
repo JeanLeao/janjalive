@@ -3,7 +3,7 @@ import type { CollaborationMessage } from '@screen-room/protocol';
 import { useRoomInteractions } from './useRoomInteractions';
 import type { Reaction } from '@screen-room/protocol';
 import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
-import { canSendStageIndication, followReducer, followDisplayStatus, followTarget, initialFollowState } from './follow-presenter';
+import { canSendStageSelection, followReducer, followDisplayStatus, followTarget, initialFollowState } from './follow-presenter';
 import {
   type QualitySelection,
   DEFAULT_QUALITY, normalizeQuality, resolveQuality, downgradeQuality,
@@ -274,8 +274,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           for (const p of message.participants || []) if (p.peerId !== peerId) annotations.setCapture(p.peerId, p.sharing?.active ? p.sharing.streamId : undefined);
           annotations.setCapture(peerId, sharingIdRef.current);
           const snapshot: Record<string, { targetPeerId: string | null; seq: number }> = {};
-          for (const p of message.participants || []) if (p.peerId !== peerId && p.indication) snapshot[p.peerId] = p.indication;
-          dispatchFollow({ type: 'snapshot', indications: snapshot });
+          for (const p of message.participants || []) if (p.peerId !== peerId && p.selection) snapshot[p.peerId] = p.selection;
+          dispatchFollow({ type: 'snapshot', selections: snapshot });
           const followed = followRef.current.presenterId;
           if (followed) {
             if ((message.participants || []).some((p) => p.peerId === followed)) {
@@ -332,8 +332,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             return [local, ...remoteList];
           });
 
-        } else if (message.type === 'stage-indicated') {
-          dispatchFollow({ type: 'indication', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
+        } else if (message.type === 'stage-selected') {
+          dispatchFollow({ type: 'selection', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
         } else if (message.type === 'peer-joined') {
           presenterBack(message.peerId);
           peerManager.addParticipant(message.peerId);
@@ -599,6 +599,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       sharingIdRef.current ||= crypto.randomUUID();
       setIsSharing(true);
       signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
+      if (state === 'preview') {
+        const stageId = featuredStreamIdRef.current;
+        const targetPeerId = !stageId || stageId === 'local' ? localPeerRef.current : stageId;
+        signalingRef.current?.send({ type: 'select-stage', targetPeerId });
+      }
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
@@ -752,10 +757,27 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, [cancelSwitch, stopSharing, annotations]);
 
   const selectFeaturedStream = useCallback((streamId: string) => {
-    // A manual choice of another stream hands control back to the viewer without forgetting the presenter.
-    if (streamId !== featuredStreamIdRef.current) dispatchFollow({ type: 'manual-select' });
+    // Only this explicit UI action publishes a choice. Remote follow and automatic fallback
+    // call setFeaturedStreamId directly, so following another presenter cannot create a relay chain.
+    if (streamId === featuredStreamIdRef.current) return;
+    // Demo streams are supplied by the route while the real room session is disabled.
+    if (!enabled) {
+      featuredStreamIdRef.current = streamId;
+      setFeaturedStreamId(streamId);
+      return;
+    }
+    const targetPeerId = streamId === 'local' ? localPeerRef.current : streamId;
+    if (streamId !== 'local' && !participantsRef.current.some(p => p.peerId === streamId && p.isSharing)) return;
+    if (streamId === 'local' && !sharingIdRef.current) return;
+    dispatchFollow({ type: 'manual-select' });
+    featuredStreamIdRef.current = streamId;
     setFeaturedStreamId(streamId);
-  }, []);
+    if (canSendStageSelection({
+      connected: signalingRef.current?.getState() === 'connected',
+      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
+      sharing: Boolean(sharingIdRef.current),
+    })) signalingRef.current?.send({ type: 'select-stage', targetPeerId });
+  }, [roomId, enabled]);
 
   const updateNickname = useCallback(
     (nickname: string) => {
@@ -807,12 +829,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     }));
   }, [participants, isSharing, remoteStreams, captureState, pointingEnabled, drawingEnabled]);
 
-  const followIsSharing = useCallback((peerId: string) => {
-    if (peerId === localPeerRef.current) return Boolean(sharingIdRef.current) && ['sharing', 'paused'].includes(captureStateRef.current);
-    return participantsRef.current.some((p) => p.peerId === peerId && p.isSharing);
-  }, []);
-
-  // Applies the followed presenter's indication (or, once, their own stream) to the local highlight.
+  // Applies the followed presenter's selection (or, once, their own stream) to the local highlight.
   useEffect(() => {
     const target = followTarget(follow, {
       localPeerId: localPeerRef.current,
@@ -831,22 +848,6 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, []);
   const resumeFollowing = useCallback(() => dispatchFollow({ type: 'resume' }), []);
   const stopFollowing = useCallback(() => dispatchFollow({ type: 'stop' }), []);
-
-  /** Presenter action: point followers at the stage currently shown here ('local' or a remote peerId). */
-  const indicateStage = useCallback((stageId: string): boolean => {
-    const targetPeerId = stageId === 'local' ? localPeerRef.current : stageId;
-    if (!targetPeerId || !canSendStageIndication({
-      connected: signalingRef.current?.getState() === 'connected',
-      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
-      sharing: Boolean(sharingIdRef.current),
-      captureState: captureStateRef.current,
-      switching: Boolean(switchRef.current),
-    })) return false;
-    if (!followIsSharing(targetPeerId)) return false;
-    const sent = signalingRef.current?.send({ type: 'indicate-stage', targetPeerId }) ?? false;
-    showToast(sent ? 'Solicitação de indicação enviada.' : 'Não foi possível enviar a indicação. Tente novamente.');
-    return sent;
-  }, [followIsSharing, showToast, roomId]);
 
   const togglePointingPermission = useCallback(() => {
     if (!sharingIdRef.current || switchRef.current) return;
@@ -1034,15 +1035,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           entry.peerId === id && entry.stream.getVideoTracks().some(track => track.readyState === 'live'))));
       },
     }, connectionStatus === 'connected' && collaborationReadyRef.current),
-    canIndicateStage: canSendStageIndication({
-      connected: connectionStatus === 'connected',
-      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
-      sharing: Boolean(sharingIdRef.current), captureState, switching: Boolean(switchRef.current),
-    }),
     followPresenter,
     resumeFollowing,
     stopFollowing,
-    indicateStage,
     updateNickname,
     currentNickname,
     quality,

@@ -13,31 +13,31 @@ export type SharingState = z.infer<typeof SharingStateSchema>;
 export const UpdateSharingMessageSchema = SharingStateSchema.extend({ type: z.literal('update-sharing') });
 export const SharingUpdatedMessageSchema = SharingStateSchema.extend({ type: z.literal('sharing-updated'), peerId: z.string().min(1) });
 
-// F29: a presenter's current stage indication. `seq` is assigned by the server and only grows per presenter.
-export const StageIndicationSchema = z.object({
+// F29: a presenter's current stage selection. `seq` is assigned by the server and only grows per presenter.
+export const StageSelectionSchema = z.object({
   targetPeerId: z.string().min(1).max(64),
   seq: z.number().int().nonnegative(),
 }).strict();
-export type StageIndication = z.infer<typeof StageIndicationSchema>;
-export const IndicateStageMessageSchema = z.object({
-  type: z.literal('indicate-stage'),
+export type StageSelection = z.infer<typeof StageSelectionSchema>;
+export const SelectStageMessageSchema = z.object({
+  type: z.literal('select-stage'),
   targetPeerId: z.string().min(1).max(64),
 }).strict();
-export type IndicateStageMessage = z.infer<typeof IndicateStageMessageSchema>;
-export const StageIndicatedMessageSchema = z.object({
-  type: z.literal('stage-indicated'),
+export type SelectStageMessage = z.infer<typeof SelectStageMessageSchema>;
+export const StageSelectedMessageSchema = z.object({
+  type: z.literal('stage-selected'),
   peerId: z.string().min(1),
   targetPeerId: z.string().min(1).max(64).nullable(),
   seq: z.number().int().nonnegative(),
 }).strict();
-export type StageIndicatedMessage = z.infer<typeof StageIndicatedMessageSchema>;
-export const STAGE_INDICATION_LIMITS = { perSecond: 5 } as const;
+export type StageSelectedMessage = z.infer<typeof StageSelectedMessageSchema>;
+export const STAGE_SELECTION_LIMITS = { perSecond: 5 } as const;
 
 // Participant presence info
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
   sharing: SharingStateSchema.optional(),
-  indication: StageIndicationSchema.optional(),
+  selection: StageSelectionSchema.optional(),
   nickname: z.string().trim().min(1).max(32).optional(),
 });
 export type ParticipantInfo = z.infer<typeof ParticipantInfoSchema>;
@@ -192,7 +192,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   SendReactionSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
-  IndicateStageMessageSchema,
+  SelectStageMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
   LeaveMessageSchema,
@@ -284,7 +284,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   InteractionRejectedSchema,
   PeersMessageSchema,
   SharingUpdatedMessageSchema,
-  StageIndicatedMessageSchema,
+  StageSelectedMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,
   PeerUpdatedMessageSchema,
