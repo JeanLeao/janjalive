@@ -80,7 +80,7 @@ for (const mobile of [false, true]) {
       await expect(page.getByRole('button', { name: 'Sair do Modo Cinema' })).toBeVisible();
       await page.getByRole('button', { name: 'Sair da tela cheia' }).click();
       await expect(page.getByRole('button', { name: 'Sair do Modo Cinema' })).toHaveAttribute('aria-pressed', 'true');
-      const streamsButton = page.getByRole('button', { name: 'Transmissões (1)' });
+      const streamsButton = page.getByRole('button', { name: 'Alternar outras transmissões' });
       if (mobile) await streamsButton.tap(); else await streamsButton.click();
       const preview = page.getByRole('button', { name: /Destacar transmissão/ });
       await expect(preview).toBeVisible();

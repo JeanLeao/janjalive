@@ -1,6 +1,6 @@
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
-import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
+import React, { useRef, useState, useEffect, useId } from 'react';
 import {
   Box,
   Text,
@@ -400,49 +400,72 @@ export function RoomStage({
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
         .stage-view-controls {
           position: absolute;
-          --stage-safe-bottom: max(14px, env(safe-area-inset-bottom, 0px));
-          bottom: max(var(--stage-safe-bottom), var(--stage-dock-clearance, 0px));
-          right: max(14px, env(safe-area-inset-right, 0px));
-          max-width: calc(100% - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px)));
+          top: 100px;
+          bottom: max(100px, env(safe-area-inset-bottom, 0px));
+          right: max(8px, env(safe-area-inset-right, 0px));
           z-index: 20;
-          display: inline-flex;
-          flex-wrap: nowrap;
-          justify-content: flex-end;
+          width: var(--stage-rail-width, 48px);
+          display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: 2px;
-          padding: 3px 5px;
-          background: rgba(13, 17, 23, 0.88);
-          backdrop-filter: blur(10px);
+          pointer-events: none;
+        }
+        @media (min-width: 960px) {
+          /* Keep the rail available beside the existing non-modal interactions panel. */
+          .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-view-controls,
+          .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label="Transmissão secundária"] .stage-view-controls {
+            right: 392px;
+          }
+        }
+        .stage-view-controls :focus-visible { outline-offset: -2px; }
+        .stage-controls-toggle { flex-shrink: 0; }
+        .stage-controls-toggle, .stage-controls-scroll {
+          pointer-events: auto;
+          background: rgba(13, 17, 23, 0.94);
           border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 999px;
-          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+          border-radius: 12px;
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
         }
-        .stage-comparing .comparison-panel[aria-label="Transmissão principal"] .stage-view-controls {
-          left: max(12px, env(safe-area-inset-left, 0px));
-          right: auto;
-          justify-content: flex-start;
+        .stage-controls-scroll {
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+          overscroll-behavior: contain;
+          scrollbar-width: thin;
+          scrollbar-color: #484f58 #0d1117;
+          margin-top: 4px;
+          padding: 1px;
+          width: var(--stage-rail-width, 48px);
+          flex-shrink: 1;
         }
-        .stage-display-controls {
-          display: inline-flex;
-          flex-wrap: nowrap;
-          justify-content: flex-end;
+        .stage-display-controls, .stage-tools-group, .zoom-controls {
+          display: flex !important;
+          flex-direction: column;
           align-items: center;
           gap: 2px;
         }
         .stage-tools-group + .stage-display-controls {
-          border-left: 1px solid rgba(255, 255, 255, 0.14);
-          padding-left: 4px;
-          margin-left: 2px;
+          border-top: 1px solid rgba(255, 255, 255, 0.14);
+          padding-top: 6px;
+          margin-top: 6px;
         }
-        .comparison-panel[aria-label="Transmissão secundária"] .stage-display-controls { border: 0; padding-left: 0; margin-left: 0; }
+        .stage-view-controls .zoom-controls {
+          border-radius: 10px !important;
+          margin-block: 4px;
+        }
+        .stage-view-controls .stage-streams-btn {
+          width: var(--stage-control-size);
+          padding: 0 !important;
+          font-size: 0 !important;
+        }
         .stage-annotations-menu { max-width: calc(100vw - 24px); }
         .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
         .stage-view-controls button {
-          min-width: 34px;
+          min-width: var(--stage-control-size);
           min-height: var(--stage-control-size);
           height: var(--stage-control-size);
           border-radius: 999px;
-          padding: 0 6px;
+          padding: 0;
         }
         .stage-view-controls .stage-controls-toggle { min-width: var(--stage-control-size) !important; width: var(--stage-control-size) !important; }
         .zoom-reset-btn {
@@ -464,24 +487,7 @@ export function RoomStage({
           color: #93c5fd !important;
         }
         @media (max-width: 768px), (pointer: coarse) {
-          .stage-main-container { --stage-control-size: 44px; }
-          .stage-view-controls {
-            gap: 1px;
-            padding: 2px 4px;
-            border-radius: 999px;
-          }
-          .stage-display-controls { flex-wrap: wrap; max-width: 100%; }
-          .stage-view-controls button:not(.zoom-reset-btn):not(.stage-streams-btn) {
-            min-width: 33px;
-            width: 33px;
-            padding: 0;
-            border-radius: 999px;
-          }
-          .zoom-reset-btn {
-            min-width: 36px !important;
-            padding: 0 2px !important;
-            font-size: 10px !important;
-          }
+          .stage-main-container { --stage-control-size: 44px; --stage-rail-width: 56px; }
           .comparison-selector-pill {
             padding: 2px 6px 2px 8px;
           }
@@ -496,20 +502,15 @@ export function RoomStage({
           }
           .stage-comparing {
             overflow-y: auto !important;
-            padding-bottom: 84px;
+            margin-bottom: 100px;
           }
           .stage-comparing .comparison-panel {
-            flex: 1 0 300px;
-            min-height: 300px;
+            flex: 1 0 420px;
+            min-height: 420px;
           }
           .stage-comparing .comparison-panel + .comparison-panel {
             border-left: none;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
-          }
-          .stage-comparing .comparison-panel[aria-label="Transmissão principal"] .stage-view-controls {
-            left: auto;
-            right: max(8px, env(safe-area-inset-right, 0px));
-            justify-content: flex-end;
           }
           .secondary-streams-panel {
             order: -1 !important;
@@ -547,32 +548,6 @@ export function RoomStage({
           .stage-top-right-access { top: 56px !important; }
         }
         @media (max-width: 440px) {
-          .stage-view-controls {
-            right: 4px;
-            max-width: calc(100% - 8px);
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: 0;
-            padding: 2px 3px;
-            border-radius: 16px;
-          }
-          .stage-comparing .comparison-panel[aria-label="Transmissão principal"] .stage-view-controls {
-            right: 4px;
-          }
-          .stage-view-controls button:not(.zoom-reset-btn):not(.stage-streams-btn) {
-            min-width: 28px !important;
-            width: 28px !important;
-            padding: 0 !important;
-          }
-          .zoom-reset-btn {
-            min-width: 31px !important;
-            padding: 0 1px !important;
-            font-size: 10px !important;
-          }
-          .stage-tools-group + .stage-display-controls {
-            padding-left: 2px;
-            margin-left: 1px;
-          }
           .comparison-header {
             top: 8px;
             left: 8px;
@@ -899,7 +874,7 @@ function SpotlightVideoPlayer({
   const canPoint = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
   const canDraw = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && drawingEnabled);
   const effectiveTool: AnnotationTool =
-    isLocal
+    !controlsExpanded ? 'navigate' : isLocal
       ? canAnnotate && (tool === 'laser' || tool === 'draw')
         ? tool
         : 'navigate'
@@ -921,46 +896,7 @@ function SpotlightVideoPlayer({
   });
   const controlsRef = useRef<HTMLDivElement>(null);
 
-  // Measure the intended bottom row, not the previous raised position: this avoids
-  // oscillation when resizing or when a toolbar changes width.
-  useLayoutEffect(() => {
-    const controls = controlsRef.current;
-    const canvas = controls?.parentElement;
-    const dock = controls?.ownerDocument.querySelector<HTMLElement>('.floating-dock-wrapper');
-    if (!controls || !canvas || !dock) return;
-    const positionControls = () => {
-      const bounds = controls.getBoundingClientRect();
-      const area = canvas.getBoundingClientRect();
-      const dockBounds = dock.getBoundingClientRect();
-      controls.style.setProperty('--stage-dock-clearance', '0px');
-      const safeBottom = parseFloat(getComputedStyle(controls).bottom) || 14;
-      let bottom = safeBottom;
-      const dockVisible = !isFullscreen && dockBounds.width > 0 && dockBounds.height > 0;
-      if (dockVisible && dockBounds.bottom <= area.bottom && dockBounds.bottom > area.top) {
-        bottom = Math.max(bottom, area.bottom - dockBounds.bottom);
-      }
-      const rowBottom = area.bottom - bottom;
-      const overlaps = dockVisible && bounds.left < dockBounds.right + 12 && bounds.right > dockBounds.left - 12
-        && rowBottom > dockBounds.top - 12 && rowBottom - bounds.height < dockBounds.bottom + 12;
-      if (overlaps) bottom = Math.max(bottom, area.bottom - dockBounds.top + 12);
-      // Keep controls inside short comparison panels as well.
-      bottom = Math.min(bottom, Math.max(safeBottom, area.height - bounds.height - 8));
-      controls.style.setProperty('--stage-dock-clearance', `${bottom}px`);
-    };
-    const observer = new ResizeObserver(positionControls);
-    observer.observe(controls);
-    observer.observe(canvas);
-    observer.observe(dock);
-    window.addEventListener('resize', positionControls);
-    window.addEventListener('scroll', positionControls, true);
-    positionControls();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', positionControls);
-      window.removeEventListener('scroll', positionControls, true);
-      controls.style.removeProperty('--stage-dock-clearance');
-    };
-  }, [isFullscreen, isCinema, controlsExpanded]);
+  const toolsId = useId();
 
   const statusText = connectionState === 'failed'
     ? 'Falha na conexão'
@@ -973,9 +909,19 @@ function SpotlightVideoPlayer({
   return (
     <>
     <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
-      {controlsExpanded && <>
+      <Tooltip label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} position="left" events={{ hover: true, focus: true, touch: false }} withArrow>
+        <Button variant="subtle" color="gray" className="stage-controls-toggle"
+          aria-label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} aria-expanded={controlsExpanded}
+          aria-controls={toolsId}
+          onClick={() => { setTool('navigate'); onControlsExpandedChange(!controlsExpanded); }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d={controlsExpanded ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} />
+          </svg>
+        </Button>
+      </Tooltip>
+      <Box id={toolsId} className="stage-controls-scroll" hidden={!controlsExpanded}>{controlsExpanded && <>
       {!secondary && isLocal && annotations && annotationStreamId && <Box className="stage-tools-group" role="group" aria-label="Anotações temporárias" style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-        {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} events={{ hover: true, focus: true, touch: false }} withArrow>
+        {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip position="left" key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
             disabled={!canAnnotate} aria-pressed={effectiveTool === mode} onClick={() => setTool(effectiveTool === mode ? 'navigate' : mode)}
             aria-label={mode === 'navigate' ? 'Navegar' : mode === 'laser' ? 'Ponteiro laser' : 'Desenhar'}>
@@ -984,7 +930,8 @@ function SpotlightVideoPlayer({
             </svg>
           </Button>
         </Tooltip>)}
-        <Menu key={`${annotationPeerId}:${annotationStreamId}:${isFullscreen}`} position="top-end" offset={8}
+        <Menu key={`${annotationPeerId}:${annotationStreamId}:${isFullscreen}`} position="left-start" offset={8}
+          middlewares={{ flip: true, shift: { padding: 12, crossAxis: true } }}
           width={280} closeOnItemClick={false}
           portalProps={{ target: isFullscreen ? controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined : undefined }}>
           <Menu.Target>
@@ -1021,7 +968,7 @@ function SpotlightVideoPlayer({
       </Box>}
       {!secondary && !isLocal && annotations && annotationPeerId && annotationStreamId && (
         <Box className="stage-tools-group" role="group" aria-label="Ferramentas de colaboração" style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-          <Tooltip
+          <Tooltip position="left"
             label={
               !pointingEnabled
                 ? 'Apontamentos desativados pelo apresentador'
@@ -1058,7 +1005,7 @@ function SpotlightVideoPlayer({
               </Button>
             </span>
           </Tooltip>
-          <Tooltip
+          <Tooltip position="left"
             label={
               !drawingEnabled
                 ? 'Desenho colaborativo desativado pelo apresentador'
@@ -1099,7 +1046,7 @@ function SpotlightVideoPlayer({
       <Box className="stage-display-controls" role="group" aria-label="Controles de visualização">
       {comparisonControl}
       {!secondary && onToggleCinema && (
-        <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        <Tooltip position="left" label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button
             variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
             aria-pressed={isCinema} aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
@@ -1108,12 +1055,12 @@ function SpotlightVideoPlayer({
         </Tooltip>
       )}
       {isCinema && streamCount > 0 && (
-        <Button className="stage-streams-btn" variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams} style={{ fontSize: 12, padding: '0 8px' }}>
-          {showStreams ? 'Ocultar' : 'Transmissões'} ({streamCount})
+        <Button aria-label="Alternar outras transmissões" title="Outras transmissões" className="stage-streams-btn" variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams} style={{ fontSize: 12, padding: '0 8px' }}>
+          <IconScreen size={15} aria-hidden />
         </Button>
       )}
       {!secondary && <>
-      <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP) · sem anotações' : 'Janela flutuante indisponível neste navegador ou vídeo'} events={{ hover: true, focus: true, touch: false }} withArrow>
+      <Tooltip position="left" label={pip.available || pip.active ? 'Janela flutuante (PiP) · sem anotações' : 'Janela flutuante indisponível neste navegador ou vídeo'} events={{ hover: true, focus: true, touch: false }} withArrow>
         <span
           tabIndex={!pip.available && !pip.active ? 0 : undefined}
           aria-label={!pip.available && !pip.active ? 'Janela flutuante indisponível neste navegador ou vídeo' : undefined}
@@ -1127,7 +1074,7 @@ function SpotlightVideoPlayer({
           ><IconPictureInPicture size={15} aria-hidden /></Button>
         </span>
       </Tooltip>
-      <Tooltip
+      <Tooltip position="left"
         label={
           screenshot.feedback === 'success'
             ? 'Download da imagem iniciado'
@@ -1198,7 +1145,7 @@ function SpotlightVideoPlayer({
           disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconMinus size={14} aria-hidden /></Button>
-        <Tooltip label={zoom.scale !== 1 ? 'Restaurar enquadramento (100%)' : 'Enquadramento original'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        <Tooltip position="left" label={zoom.scale !== 1 ? 'Restaurar enquadramento (100%)' : 'Enquadramento original'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button
             className="zoom-reset-btn"
             variant="subtle" color="gray"
@@ -1217,23 +1164,14 @@ function SpotlightVideoPlayer({
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={14} aria-hidden /></Button>
       </Box>
-      {!secondary && <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} events={{ hover: true, focus: true, touch: false }} withArrow>
+      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} events={{ hover: true, focus: true, touch: false }} withArrow>
         <Button
           variant="subtle" color="gray" onClick={onToggleFullscreen}
           aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
         >{isFullscreen ? <IconMinimize size={15} aria-hidden /> : <IconMaximize size={15} aria-hidden />}</Button>
       </Tooltip>}
       </Box>
-      </>}
-      <Tooltip label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} events={{ hover: true, focus: true, touch: false }} withArrow>
-        <Button variant="subtle" color="gray" className="stage-controls-toggle"
-          aria-label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} aria-expanded={controlsExpanded}
-          onClick={() => { setTool('navigate'); onControlsExpandedChange(!controlsExpanded); }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d={controlsExpanded ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} />
-          </svg>
-        </Button>
-      </Tooltip>
+      </>}</Box>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 44, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8, borderRadius: 8 }}>{pip.error}</Text>}
     {(statusText || connectionState === 'failed' || (!secondary && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
