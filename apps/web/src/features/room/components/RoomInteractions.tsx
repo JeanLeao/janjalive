@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Popover } from '@mantine/core';
+import { Menu, Popover } from '@mantine/core';
 import {
   INTERACTION_LIMITS, QA_LIMITS, REACTIONS,
   type ChatMessage, type QaQuestion, type Reaction, type ReactionEvent,
 } from '@screen-room/protocol';
 import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar';
-import { IconHand, IconCheck, IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
+import { IconDots, IconHand, IconCheck, IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
 import classes from './RoomInteractions.module.css';
 
 const labels: Record<Reaction, string> = {
@@ -327,50 +327,47 @@ function InteractionsPanel({
     }
   };
 
-  return <section ref={panel} id="room-chat-panel" className={classes.panel} role="dialog" aria-modal="false" aria-labelledby="room-chat-title" tabIndex={-1}
+  return <section ref={panel} id="room-chat-panel" className={`${classes.panel} ${tab === 'qa' ? classes.qaPanel : ''}`} role="dialog" aria-modal="false" aria-labelledby="room-chat-title" tabIndex={-1}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); ui.closeChat(); } }}>
-    <header className={classes.panelHeader}>
-      <div className={classes.panelTitle}>
-        <h2 id="room-chat-title">{tab === 'chat' ? 'Chat da sala' : 'Perguntas da sala'}</h2>
-        <p>Só nesta sessão</p>
+    <h2 id="room-chat-title" className={classes.srOnly}>Interações da sala</h2>
+    <div className={classes.panelHeader}>
+      <div className={classes.tabs} role="tablist" aria-label="Abas de interação" onKeyDown={onTabKeyDown}>
+        <button
+          ref={chatTabRef}
+          type="button"
+          role="tab"
+          id="room-tab-chat"
+          aria-selected={tab === 'chat'}
+          aria-controls="room-tabpanel-chat"
+          tabIndex={tab === 'chat' ? 0 : -1}
+          className={classes.tab}
+          data-active={tab === 'chat' || undefined}
+          onClick={() => setTab('chat')}
+        >
+          <span>Chat</span>
+          {unread > 0 && <span className={classes.tabBadge} aria-label={`${unread} não lidas`}>{unread > 99 ? '99+' : unread}</span>}
+        </button>
+        <button
+          ref={qaTabRef}
+          type="button"
+          role="tab"
+          id="room-tab-qa"
+          aria-selected={tab === 'qa'}
+          aria-controls="room-tabpanel-qa"
+          tabIndex={tab === 'qa' ? 0 : -1}
+          className={classes.tab}
+          data-active={tab === 'qa' || undefined}
+          onClick={() => setTab('qa')}
+        >
+          <span>Perguntas</span>
+          {openQuestionsCount > 0 && (
+            <span className={`${classes.tabBadge} ${classes.tabBadgeQa}`} data-testid="qa-tab-count" aria-label={`${openQuestionsCount} em aberto`}>
+              {openQuestionsCount > 99 ? '99+' : openQuestionsCount}
+            </span>
+          )}
+        </button>
       </div>
       <button type="button" className={classes.close} aria-label="Fechar chat" onClick={ui.closeChat}><IconClose size={16} aria-hidden /></button>
-    </header>
-    <div className={classes.tabs} role="tablist" aria-label="Abas de interação" onKeyDown={onTabKeyDown}>
-      <button
-        ref={chatTabRef}
-        type="button"
-        role="tab"
-        id="room-tab-chat"
-        aria-selected={tab === 'chat'}
-        aria-controls="room-tabpanel-chat"
-        tabIndex={tab === 'chat' ? 0 : -1}
-        className={classes.tab}
-        data-active={tab === 'chat' || undefined}
-        onClick={() => setTab('chat')}
-      >
-        <span>Chat</span>
-        {unread > 0 && <span className={classes.tabBadge} aria-label={`${unread} não lidas`}>{unread > 99 ? '99+' : unread}</span>}
-      </button>
-      <button
-        ref={qaTabRef}
-        type="button"
-        role="tab"
-        id="room-tab-qa"
-        aria-selected={tab === 'qa'}
-        aria-controls="room-tabpanel-qa"
-        tabIndex={tab === 'qa' ? 0 : -1}
-        className={classes.tab}
-        data-active={tab === 'qa' || undefined}
-        onClick={() => setTab('qa')}
-      >
-        <span>Perguntas</span>
-        {openQuestionsCount > 0 && (
-          <span className={`${classes.tabBadge} ${classes.tabBadgeQa}`} data-testid="qa-tab-count" aria-label={`${openQuestionsCount} em aberto`}>
-            {openQuestionsCount > 99 ? '99+' : openQuestionsCount}
-          </span>
-        )}
-      </button>
     </div>
     {tab === 'chat' ? (
       <ChatTabView ui={ui} messages={messages} error={error} pending={pending} connected={connected} localPeerId={localPeerId} />
@@ -513,9 +510,17 @@ function QaTabView({
     }
   }, [questions, replyingId]);
 
-  const highlighted = highlightedQuestionId
-    ? questions.find(q => q.id === highlightedQuestionId) ?? null
-    : null;
+  const orderedQuestions = [...questions].sort((a, b) =>
+    Number(b.id === highlightedQuestionId) - Number(a.id === highlightedQuestionId));
+  const menuHost = useRef<HTMLDivElement>(null);
+  const [menuTarget, setMenuTarget] = useState<HTMLElement>();
+  useLayoutEffect(() => {
+    const updateTarget = () => setMenuTarget((document.fullscreenElement as HTMLElement | null)
+      ?? menuHost.current?.closest<HTMLElement>('.stage-main-container') ?? document.body);
+    updateTarget();
+    document.addEventListener('fullscreenchange', updateTarget);
+    return () => document.removeEventListener('fullscreenchange', updateTarget);
+  }, []);
 
   const canSend = connected && !qaPending && Boolean(qaDraft.trim());
   const status = qaError || (!connected ? 'Sem conexão. Aguarde a reconexão para enviar.' : qaPending ? 'Sincronizando…' : '');
@@ -529,52 +534,18 @@ function QaTabView({
     }
   };
 
-  return <div id="room-tabpanel-qa" role="tabpanel" aria-labelledby="room-tab-qa" className={classes.tabPanel}>
+  return <div ref={menuHost} id="room-tabpanel-qa" role="tabpanel" aria-labelledby="room-tab-qa" className={classes.tabPanel}>
     <div className={classes.logWrap}>
       <div className={classes.log} role="region" aria-label="Lista de perguntas da sala" aria-live="polite" tabIndex={0}>
-        {highlighted && (
-          <aside className={classes.qaSpotlight} data-testid="qa-highlighted" aria-label="Pergunta em destaque">
-            <div className={classes.qaSpotlightHeader}>
-              <span className={classes.qaSpotlightBadge}>Em destaque na sala</span>
-              <span className={classes.qaSpotlightAuthor}>
-                {Boolean(localPeerId) && highlighted.authorPeerId === localPeerId
-                  ? 'Você'
-                  : (highlighted.authorNickname || 'Visitante')}
-              </span>
-            </div>
-            <p className={classes.qaSpotlightText}>{highlighted.text}</p>
-            {highlighted.answer?.text && (
-              <div className={classes.qaAnswer}>
-                <span className={classes.qaAnswerMeta}>
-                  Resposta de {highlighted.answer.answeredByNickname || 'Apresentador'}
-                </span>
-                <p className={classes.qaAnswerText}>{highlighted.answer.text}</p>
-              </div>
-            )}
-            {isPresenter && (
-              <div className={classes.qaActions}>
-                <button
-                  type="button"
-                  className={classes.qaActionBtn}
-                  disabled={!connected || qaPending}
-                  onClick={() => onUpdateQuestionStatus?.(highlighted.id, 'unhighlight')}
-                >
-                  Remover destaque
-                </button>
-              </div>
-            )}
-          </aside>
-        )}
-
         {questions.length === 0 && (
-          <div className={classes.empty}>
-            <span className={classes.emptyIcon} aria-hidden="true">?</span>
+          <div className={`${classes.empty} ${classes.qaEmpty}`}>
+            <span className={classes.emptyIcon} aria-hidden="true"><IconChat size={22} /></span>
             <strong>Nenhuma pergunta ainda</strong>
-            <span>Envie uma pergunta para os apresentadores. Perguntas em aberto ficam no topo da fila.</span>
+            <span>O que você gostaria de saber? Envie a primeira pergunta.</span>
           </div>
         )}
 
-        {questions.map(item => {
+        {orderedQuestions.map(item => {
           const own = Boolean(localPeerId) && item.authorPeerId === localPeerId;
           const isHighlighted = item.id === highlightedQuestionId;
           const isOpen = item.status === 'open';
@@ -600,15 +571,32 @@ function QaTabView({
                     <time dateTime={new Date(item.createdAt).toISOString()}>{formatTime(item.createdAt)}</time>
                   </div>
                 </div>
-                <div className={classes.qaBadges}>
-                  {isHighlighted && <span className={classes.qaStatusHighlight}>Em destaque</span>}
-                  <span
-                    className={`${classes.qaStatusBadge} ${isOpen ? classes.qaStatusOpen : classes.qaStatusDone}`}
-                    data-testid="qa-question-status"
-                  >
-                    {statusLabel(item.status)}
-                  </span>
-                </div>
+                {(own || isPresenter) && <Menu position="bottom-end" width={196} offset={4} returnFocus
+                  portalProps={{ target: menuTarget }}
+                  zIndex={100}>
+                  <Menu.Target>
+                    <button type="button" className={classes.qaMenuTrigger} aria-label="Ações da pergunta" disabled={!connected || qaPending}>
+                      <IconDots size={18} aria-hidden />
+                    </button>
+                  </Menu.Target>
+                  <Menu.Dropdown className={classes.qaMenu} onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation(); }}>
+                    {isPresenter && <>
+                      <Menu.Item disabled={!connected || qaPending} onClick={() => onUpdateQuestionStatus?.(item.id, isHighlighted ? 'unhighlight' : 'highlight')}>
+                        {isHighlighted ? 'Remover destaque' : 'Destacar'}
+                      </Menu.Item>
+                      <Menu.Item disabled={!connected || qaPending} onClick={() => onUpdateQuestionStatus?.(item.id, isOpen ? 'answer-verbal' : 'reopen')}>
+                        {isOpen ? 'Respondida ao vivo' : 'Reabrir'}
+                      </Menu.Item>
+                    </>}
+                    {own && <Menu.Item color="red" disabled={!connected || qaPending} aria-label="Retirar pergunta" onClick={() => onWithdrawQuestion?.(item.id)}>Retirar</Menu.Item>}
+                  </Menu.Dropdown>
+                </Menu>}
+              </div>
+              <div className={classes.qaBadges}>
+                {isHighlighted && <span className={classes.qaStatusHighlight}>Em destaque</span>}
+                <span className={`${classes.qaStatusBadge} ${isOpen ? classes.qaStatusOpen : classes.qaStatusDone}`} data-testid="qa-question-status">
+                  {statusLabel(item.status)}
+                </span>
               </div>
 
               <p className={classes.qaText}>{item.text}</p>
@@ -631,6 +619,7 @@ function QaTabView({
               {isReplying && (
                 <div className={classes.qaReplyBox}>
                   <textarea
+                    autoFocus
                     aria-label="Resposta da pergunta"
                     placeholder="Escreva a resposta…"
                     rows={2}
@@ -668,66 +657,13 @@ function QaTabView({
                 </div>
               )}
 
-              {(own || isPresenter) && (
-                <div className={classes.qaActions}>
-                  {isPresenter && (
-                    <>
-                      <button
-                        type="button"
-                        className={classes.qaActionBtn}
-                        disabled={!connected || qaPending}
-                        aria-pressed={isHighlighted}
-                        onClick={() => onUpdateQuestionStatus?.(item.id, isHighlighted ? 'unhighlight' : 'highlight')}
-                      >
-                        {isHighlighted ? 'Remover destaque' : 'Destacar'}
-                      </button>
-                      {!isReplying && (
-                        <button
-                          type="button"
-                          className={classes.qaActionBtn}
-                          disabled={!connected || qaPending}
-                          onClick={() => {
-                            setReplyingId(item.id);
-                            setReplyText(item.answer?.text ?? '');
-                          }}
-                        >
-                          {item.answer ? 'Editar resposta' : 'Responder'}
-                        </button>
-                      )}
-                      {isOpen ? (
-                        <button
-                          type="button"
-                          className={classes.qaActionBtn}
-                          disabled={!connected || qaPending}
-                          onClick={() => onUpdateQuestionStatus?.(item.id, 'answer-verbal')}
-                        >
-                          Respondida ao vivo
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={classes.qaActionBtn}
-                          disabled={!connected || qaPending}
-                          onClick={() => onUpdateQuestionStatus?.(item.id, 'reopen')}
-                        >
-                          Reabrir
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {own && (
-                    <button
-                      type="button"
-                      className={`${classes.qaActionBtn} ${classes.qaActionDanger}`}
-                      disabled={!connected || qaPending}
-                      aria-label="Retirar pergunta"
-                      onClick={() => onWithdrawQuestion?.(item.id)}
-                    >
-                      Retirar
-                    </button>
-                  )}
-                </div>
-              )}
+              {isPresenter && !isReplying && <div className={classes.qaActions}>
+                <button type="button" className={`${classes.qaActionBtn} ${isOpen ? classes.qaActionPrimary : ''}`}
+                  disabled={!connected || qaPending}
+                  onClick={() => { setReplyingId(item.id); setReplyText(item.answer?.text ?? ''); }}>
+                  {item.answer?.text ? 'Editar resposta' : 'Responder'}
+                </button>
+              </div>}
             </article>
           );
         })}
@@ -742,7 +678,6 @@ function QaTabView({
         <textarea
           ref={field}
           aria-label="Pergunta"
-          aria-describedby="room-qa-hint"
           placeholder="Faça uma pergunta para a sala"
           value={qaDraft}
           readOnly={qaPending}
@@ -760,12 +695,7 @@ function QaTabView({
           {qaPending ? <span className={classes.spinner} aria-hidden="true" /> : <IconSend size={16} aria-hidden />}
         </button>
       </div>
-      <div className={classes.footnote}>
-        <span id="room-qa-hint">
-          {isPresenter ? 'Você está apresentando: pode responder e destacar' : 'Apresentadores podem responder e destacar'}
-        </span>
-        {nearLimit && <span className={classes.counter}>{qaDraft.length}/{QA_LIMITS.questionLength}</span>}
-      </div>
+      {nearLimit && <div className={classes.footnote}><span className={classes.counter}>{qaDraft.length}/{QA_LIMITS.questionLength}</span></div>}
     </form>
   </div>;
 }
