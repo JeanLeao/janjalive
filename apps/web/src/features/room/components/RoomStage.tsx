@@ -1,6 +1,6 @@
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import {
   Box,
   Text,
@@ -93,6 +93,8 @@ export function RoomStage({
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
+  const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
+  const [secondaryControlsExpanded, setSecondaryControlsExpanded] = useState(true);
   const [secondaryId, setSecondaryId] = useState<string | null>(null);
   const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
@@ -398,7 +400,8 @@ export function RoomStage({
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
         .stage-view-controls {
           position: absolute;
-          bottom: max(14px, env(safe-area-inset-bottom, 0px), var(--stage-dock-clearance, 0px));
+          --stage-safe-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+          bottom: max(var(--stage-safe-bottom), var(--stage-dock-clearance, 0px));
           right: max(14px, env(safe-area-inset-right, 0px));
           max-width: calc(100% - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px)));
           z-index: 20;
@@ -441,6 +444,7 @@ export function RoomStage({
           border-radius: 999px;
           padding: 0 6px;
         }
+        .stage-view-controls .stage-controls-toggle { min-width: var(--stage-control-size) !important; width: var(--stage-control-size) !important; }
         .zoom-reset-btn {
           min-width: 38px !important;
           padding: 0 4px !important;
@@ -466,6 +470,7 @@ export function RoomStage({
             padding: 2px 4px;
             border-radius: 999px;
           }
+          .stage-display-controls { flex-wrap: wrap; max-width: 100%; }
           .stage-view-controls button:not(.zoom-reset-btn):not(.stage-streams-btn) {
             min-width: 33px;
             width: 33px;
@@ -619,6 +624,7 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
+          controlsExpanded={primaryControlsExpanded} onControlsExpandedChange={setPrimaryControlsExpanded}
           onVideoPresented={onVideoPresented}
           remotePeerId={activeStream.isLocal ? undefined : activeStream.id}
           annotations={annotations}
@@ -762,6 +768,7 @@ export function RoomStage({
         </Box>
         <Box className="comparison-canvas" style={{ flex: 1, position: 'relative', minHeight: 0 }}>
           <SpotlightVideoPlayer key={secondaryStream.id} secondary
+            controlsExpanded={secondaryControlsExpanded} onControlsExpandedChange={setSecondaryControlsExpanded}
             stream={secondaryStream.paused ? null : secondaryStream.stream} isLocal={secondaryStream.isLocal}
             remotePeerId={secondaryStream.isLocal ? undefined : secondaryStream.id} onVideoPresented={onVideoPresented}
             annotations={annotations} localPeerId={participants.find(p => p.isLocal)?.peerId}
@@ -833,6 +840,7 @@ export function RoomStage({
 
 // Spotlight Video Player Component
 function SpotlightVideoPlayer({
+  controlsExpanded, onControlsExpandedChange,
   secondary = false, comparisonControl,
   onVideoPresented, remotePeerId,
   annotations, localPeerId, annotationPeerId, annotationStreamId,
@@ -854,6 +862,8 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  controlsExpanded: boolean;
+  onControlsExpandedChange: (expanded: boolean) => void;
   secondary?: boolean;
   comparisonControl?: React.ReactNode;
   overlayTop?: number;
@@ -911,31 +921,46 @@ function SpotlightVideoPlayer({
   });
   const controlsRef = useRef<HTMLDivElement>(null);
 
-  // Keep the stage controls vertically above the floating dock band when the dock is visible.
-  useEffect(() => {
+  // Measure the intended bottom row, not the previous raised position: this avoids
+  // oscillation when resizing or when a toolbar changes width.
+  useLayoutEffect(() => {
     const controls = controlsRef.current;
     const canvas = controls?.parentElement;
     const dock = controls?.ownerDocument.querySelector<HTMLElement>('.floating-dock-wrapper');
     if (!controls || !canvas || !dock) return;
     const positionControls = () => {
+      const bounds = controls.getBoundingClientRect();
+      const area = canvas.getBoundingClientRect();
       const dockBounds = dock.getBoundingClientRect();
-      const clearance = !isFullscreen && dockBounds.width > 0
-        ? Math.max(0, canvas.getBoundingClientRect().bottom - dockBounds.top + 12)
-        : 0;
-      controls.style.setProperty('--stage-dock-clearance', `${clearance}px`);
+      controls.style.setProperty('--stage-dock-clearance', '0px');
+      const safeBottom = parseFloat(getComputedStyle(controls).bottom) || 14;
+      let bottom = safeBottom;
+      const dockVisible = !isFullscreen && dockBounds.width > 0 && dockBounds.height > 0;
+      if (dockVisible && dockBounds.bottom <= area.bottom && dockBounds.bottom > area.top) {
+        bottom = Math.max(bottom, area.bottom - dockBounds.bottom);
+      }
+      const rowBottom = area.bottom - bottom;
+      const overlaps = dockVisible && bounds.left < dockBounds.right + 12 && bounds.right > dockBounds.left - 12
+        && rowBottom > dockBounds.top - 12 && rowBottom - bounds.height < dockBounds.bottom + 12;
+      if (overlaps) bottom = Math.max(bottom, area.bottom - dockBounds.top + 12);
+      // Keep controls inside short comparison panels as well.
+      bottom = Math.min(bottom, Math.max(safeBottom, area.height - bounds.height - 8));
+      controls.style.setProperty('--stage-dock-clearance', `${bottom}px`);
     };
     const observer = new ResizeObserver(positionControls);
     observer.observe(controls);
     observer.observe(canvas);
     observer.observe(dock);
     window.addEventListener('resize', positionControls);
+    window.addEventListener('scroll', positionControls, true);
     positionControls();
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', positionControls);
+      window.removeEventListener('scroll', positionControls, true);
       controls.style.removeProperty('--stage-dock-clearance');
     };
-  }, [isFullscreen]);
+  }, [isFullscreen, isCinema, controlsExpanded]);
 
   const statusText = connectionState === 'failed'
     ? 'Falha na conexão'
@@ -948,6 +973,7 @@ function SpotlightVideoPlayer({
   return (
     <>
     <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
+      {controlsExpanded && <>
       {!secondary && isLocal && annotations && annotationStreamId && <Box className="stage-tools-group" role="group" aria-label="Anotações temporárias" style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
         {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
@@ -1198,6 +1224,16 @@ function SpotlightVideoPlayer({
         >{isFullscreen ? <IconMinimize size={15} aria-hidden /> : <IconMaximize size={15} aria-hidden />}</Button>
       </Tooltip>}
       </Box>
+      </>}
+      <Tooltip label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        <Button variant="subtle" color="gray" className="stage-controls-toggle"
+          aria-label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} aria-expanded={controlsExpanded}
+          onClick={() => { setTool('navigate'); onControlsExpandedChange(!controlsExpanded); }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d={controlsExpanded ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} />
+          </svg>
+        </Button>
+      </Tooltip>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 44, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8, borderRadius: 8 }}>{pip.error}</Text>}
     {(statusText || connectionState === 'failed' || (!secondary && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (

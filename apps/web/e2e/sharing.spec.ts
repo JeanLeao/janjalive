@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
 
-async function syntheticCapture(page: Page) {
-  await page.addInitScript(() => {
+async function syntheticCapture(page: Page, representative = false) {
+  await page.addInitScript((representative) => {
     document.addEventListener('pointerdown', () => { (window as any).testAudioAllowed = true; });
     (window as any).testRenderedFrames = new WeakMap<HTMLVideoElement, number>();
     const nativePlay = HTMLMediaElement.prototype.play;
@@ -44,6 +44,17 @@ async function syntheticCapture(page: Page) {
           ctx.fillStyle = frame++ % 2 ? '#ff0000' : '#0000ff';
           ctx.fillRect(0, 0, 640, 360);
           ctx.fillStyle = '#ffffff'; ctx.fillRect(frame % 600, 40, 40, 40);
+          if (representative) {
+            ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, 640, 360);
+            ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, 640, 32); ctx.fillRect(0, 250, 640, 110);
+            ctx.font = '14px monospace'; ctx.fillStyle = '#8c959f';
+            ctx.fillText('Screen Room  /  peer-manager.ts', 18, 22);
+            const lines = ['export async function shareScreen() {', '  const stream = await captureDisplay();', '  await peers.attachTracks(stream);', '  publishSharingState({ active: true });', '}', '', '// Keep connections reusable after capture stops'];
+            lines.forEach((line, i) => { ctx.fillStyle = i === 6 ? '#8c959f' : '#79c0ff'; ctx.fillText(line, 24, 64 + i * 23); });
+            ctx.fillStyle = '#7ee787'; ctx.fillText('$ pnpm test', 18, 277);
+            ctx.fillText('✓ Sharing, reconnection and cleanup passed', 18, 305);
+            ctx.fillStyle = '#e6edf3'; ctx.fillText(`Live preview · frame ${frame}`, 18, 337);
+          }
         }, 50);
         const stream = canvas.captureStream(20);
         if ((window as any).testAudio) {
@@ -92,7 +103,7 @@ async function syntheticCapture(page: Page) {
         return stream;
       },
     });
-  });
+  }, representative);
 }
 
 async function mockPausePiP(page: Page) {
@@ -233,7 +244,7 @@ test('late join and a presenter serving nine spectators', async ({ browser }) =>
   const contexts = await Promise.all(Array.from({ length: 10 }, () => browser.newContext()));
   try {
     const pages = await Promise.all(contexts.map(context => context.newPage()));
-    await Promise.all(pages.map(syntheticCapture));
+    await Promise.all(pages.map(page => syntheticCapture(page)));
     const host = pages[0];
     await host.goto('/room/e2e-capacity');
     await expect(host.getByText('Conectado', { exact: true })).toBeVisible();
@@ -1915,6 +1926,14 @@ for (const width of [1280, 390, 320]) {
           expect(box.y).toBeGreaterThanOrEqual(0);
           expect(await drawing.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
         }
+        for (const bar of await page.locator('.stage-view-controls').all()) {
+          const bounds = (await bar.boundingBox())!;
+          for (const button of await bar.getByRole('button').all()) {
+            const target = (await button.boundingBox())!;
+            expect(target.x).toBeGreaterThanOrEqual(bounds.x);
+            expect(target.x + target.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+          }
+        }
         await page.screenshot({ path: test.info().outputPath(`${state}-${width}.png`), animations: 'disabled' });
       };
       await trigger.focus(); await page.keyboard.press('Enter');
@@ -1946,7 +1965,7 @@ for (const width of [1280, 390, 320]) {
         const bar = (await viewer.locator('.stage-view-controls').boundingBox())!;
         const dock = (await viewer.locator('.floating-dock-wrapper').boundingBox())!;
         expect(bar.x).toBeGreaterThanOrEqual(0); expect(bar.x + bar.width).toBeLessThanOrEqual(width);
-        expect(bar.y + bar.height).toBeLessThanOrEqual(dock.y);
+        if (bar.x < dock.x + dock.width + 12 && bar.x + bar.width > dock.x - 12) expect(bar.y + bar.height).toBeLessThanOrEqual(dock.y);
         await expect(viewer.getByRole('button', { name: 'Anotações', exact: true })).toHaveCount(0);
         await viewer.screenshot({ path: test.info().outputPath(`viewer-${width}.png`), animations: 'disabled' });
       } finally { await viewerContext.close(); }
@@ -2308,3 +2327,79 @@ test('F22 both annotation overlays, silent secondary, replacement and playback c
     await expect.poll(() => viewer.evaluate(() => (window as any).f22OldVideo.srcObject === null && !(window as any).f22OldVideo.isConnected)).toBe(true);
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
+
+
+for (const width of [1440, 390, 320]) {
+  test(`F22 collapsible stage toolbar geometry and input at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 400 });
+    const other = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const peer = await other.newPage();
+      const room = `/room/f22-toolbar-${width}`;
+      await syntheticCapture(page, true); await page.goto(room); await startLive(page);
+      await syntheticCapture(peer, true); await peer.goto(room); await startLive(peer);
+      await frames(page);
+      const primary = page.locator('.stage-view-controls').first();
+      const inspect = async (state: string) => {
+        await expect.poll(async () => {
+          const bars = await page.locator('.stage-view-controls').evaluateAll(elements => elements.map(el => {
+            const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+          }));
+          const dock = await page.locator('.floating-dock-wrapper').boundingBox();
+          const fullscreen = await page.evaluate(() => !!document.fullscreenElement);
+          return bars.every(r => r.x >= 0 && r.right <= width && r.y >= 0 &&
+            (fullscreen || !dock || r.right + 12 <= dock.x || r.x >= dock.x + dock.width + 12 || r.bottom + 11 <= dock.y || r.y >= dock.y + dock.height + 11));
+        }).toBe(true);
+        await page.screenshot({ path: test.info().outputPath(`${state}-${width}.png`), animations: 'disabled' });
+      };
+      const toggle = primary.locator('.stage-controls-toggle');
+      await primary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+      await inspect('traditional-expanded');
+      await primary.getByRole('button', { name: 'Desenhar', exact: true }).click();
+      await toggle.focus(); await page.keyboard.press('Enter');
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toggle).toBeFocused();
+      expect(await toggle.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid');
+      await expect(primary.getByRole('button')).toHaveCount(1);
+      await expect(page.getByTestId('zoom-viewport').first()).not.toHaveAttribute('aria-label', /Área de desenho/);
+      await inspect('traditional-collapsed');
+      if (width === 1440) {
+        const bar = (await primary.boundingBox())!;
+        const dock = (await page.locator('.floating-dock-wrapper').boundingBox())!;
+        expect(bar.x).toBeGreaterThan(dock.x + dock.width + 12);
+        expect(Math.abs(bar.y + bar.height - dock.y - dock.height)).toBeLessThan(1);
+      }
+      await page.keyboard.press('Tab');
+      expect(await primary.evaluate(el => el.contains(document.activeElement))).toBe(false);
+      await toggle.focus();
+      await page.mouse.move(10, 10); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await page.keyboard.press('Space');
+      await expect(primary.getByRole('button', { name: 'Restaurar enquadramento' })).toHaveText('125%');
+      await expect(primary.getByRole('button', { name: 'Desenhar', exact: true })).toHaveAttribute('aria-pressed', 'false');
+      await primary.getByRole('button', { name: 'Comparar', exact: true }).click();
+      await expect(page.locator('.stage-view-controls')).toHaveCount(2);
+      await inspect('comparison-expanded');
+      const secondary = page.getByRole('region', { name: 'Transmissão secundária', exact: true });
+      await secondary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+      if (width < 400) await toggle.tap(); else await toggle.click();
+      await expect(secondary.getByRole('button', { name: 'Restaurar enquadramento' })).toHaveText('125%');
+      await inspect('comparison-collapsed');
+      const selector = page.getByRole('region', { name: 'Transmissão principal', exact: true }).getByRole('combobox');
+      const alternative = await selector.locator('option').evaluateAll(options => options.find(o => !(o as HTMLOptionElement).selected)?.getAttribute('value'));
+      await selector.selectOption(alternative!);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await secondary.getByRole('button', { name: 'Recolher ferramentas' }).click();
+      await expect(page.getByRole('button', { name: 'Expandir ferramentas' })).toHaveCount(2);
+      await toggle.click();
+      await primary.getByRole('button', { name: 'Sair da comparação' }).click();
+      await primary.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await inspect('cinema-expanded'); await toggle.click(); await inspect('cinema-collapsed'); await toggle.click();
+      await primary.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await inspect('fullscreen-expanded'); await toggle.click(); await inspect('fullscreen-collapsed'); await toggle.click();
+      await primary.getByRole('button', { name: 'Sair da tela cheia' }).click();
+      await expect(page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true })).toBeVisible();
+    } finally { await context.close(); await other.close(); }
+  });
+}
