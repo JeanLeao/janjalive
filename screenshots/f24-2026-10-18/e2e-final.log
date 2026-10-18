@@ -1,0 +1,23 @@
+$ playwright test --grep 'F24|F22 both|F22 collapsible.*1440|F22 entering|WebKit presentation' --workers=1
+[WebServer] (node:79229) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:79238) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:79238) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 9 tests using 1 worker
+
+(node:79263) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/sharing.spec.ts:2303:1 › F22 both annotation overlays, silent secondary, replacement and playback cleanup (6.5s)
+  ✓  2 e2e/sharing.spec.ts:2350:3 › F22 collapsible stage toolbar geometry and input at 1440px (8.8s)
+  ✓  3 e2e/sharing.spec.ts:2436:3 › F24 individual playback preferences and comparison at 1440px (9.7s)
+  ✓  4 e2e/sharing.spec.ts:2436:3 › F24 individual playback preferences and comparison at 320px (9.0s)
+  ✓  5 e2e/sharing.spec.ts:2551:1 › F24 iOS exposes mute and device volume guidance without a software slider (1.9s)
+  ✓  6 e2e/sharing.spec.ts:2569:1 › F24 explicit mute survives blocked autoplay, source replacement and reconnect (4.2s)
+  ✓  7 e2e/viewing-modes.spec.ts:166:1 › WebKit presentation mode synchronizes entry and external exit (1.4s)
+  ✓  8 e2e/viewing-modes.spec.ts:200:1 › F22 entering and leaving comparison preserves primary playback, zoom and PiP (1.6s)
+  ✓  9 e2e/viewing-modes.spec.ts:221:1 › F24 volume and mute preserve PiP, media identity, Cinema and fullscreen controls (2.1s)
+
+  9 passed (47.1s)

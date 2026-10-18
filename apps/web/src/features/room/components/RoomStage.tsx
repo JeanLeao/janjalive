@@ -8,6 +8,7 @@ import {
   UnstyledButton,
   Tooltip,
   Menu,
+  Popover,
 } from '@mantine/core';
 import type { RemoteStreamEntry, RoomParticipant } from '../types';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
@@ -96,6 +97,8 @@ export function RoomStage({
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
   const [secondaryControlsExpanded, setSecondaryControlsExpanded] = useState(true);
   const [secondaryId, setSecondaryId] = useState<string | null>(null);
+  const [audioPreferences, setAudioPreferences] = useState<Record<string, { volume: number; muted: boolean }>>({});
+  const [manualAudio, setManualAudio] = useState<string | null>(null);
   const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -170,7 +173,8 @@ export function RoomStage({
 
   // Comparison is local UI state: only the primary uses the session/F29 callback.
   const comparing = comparison && secondaryStreams.length > 0;
-  const secondaryStream = secondaryStreams.find(item => item.id === secondaryId)
+  const secondaryStream = (comparing ? secondaryStreams.find(item => item.id === manualAudio) : undefined)
+    ?? secondaryStreams.find(item => item.id === secondaryId)
     ?? secondaryStreams.find(item => item.id === previousPrimary.current)
     ?? secondaryStreams[0];
   const primaryId = activeStream?.id;
@@ -180,6 +184,39 @@ export function RoomStage({
     setSecondaryId(resolvedSecondaryId);
     previousPrimary.current = primaryId ?? null;
   }, [primaryId, resolvedSecondaryId, secondaryStreams.length]);
+
+  // A vanished source leaves silence until the viewer explicitly selects audio again.
+  const audioHistory = useRef<{ source?: string }>({});
+  const [audioSuspended, setAudioSuspended] = useState(false);
+  const manualValid = comparing && manualAudio !== null &&
+    (manualAudio === primaryId || manualAudio === resolvedSecondaryId);
+  const sourceId = manualValid ? manualAudio : primaryId;
+  const vanished = audioHistory.current.source !== undefined &&
+    !streamItems.some(item => item.id === audioHistory.current.source);
+  const manualUnavailable = comparing && manualAudio !== null && !manualValid;
+  const suspended = audioSuspended || vanished || manualUnavailable;
+  useEffect(() => {
+    if (vanished || manualUnavailable) setAudioSuspended(true);
+    if (!comparing) setManualAudio(null);
+    audioHistory.current = { source: sourceId };
+  }, [primaryId, sourceId, comparing, vanished, manualUnavailable]);
+  const audioFor = (item: StreamItem) => ({
+    selected: sourceId === item.id && !suspended,
+    preference: audioPreferences[item.id] ?? { volume: 1, muted: false },
+    comparing,
+    paused: Boolean(item.paused),
+    hasAudio: item.hasAudio,
+    select: () => { setAudioSuspended(false); setManualAudio(comparing ? item.id : null); },
+    change: (patch: Partial<{ volume: number; muted: boolean }>) => setAudioPreferences(previous => ({
+      ...previous, [item.id]: { ...(previous[item.id] ?? { volume: 1, muted: false }), ...patch },
+    })),
+  });
+
+  const selectPrimary = (id: string) => {
+    setAudioSuspended(false);
+    if (!manualValid) setManualAudio(null);
+    onSelectFeaturedStream(id);
+  };
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
@@ -570,7 +607,7 @@ export function RoomStage({
             }} />
             Principal
           </span>
-          <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => onSelectFeaturedStream(event.target.value)}>
+          <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => selectPrimary(event.target.value)}>
             {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
           </select>
         </Box>
@@ -599,6 +636,7 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
+          audio={audioFor(activeStream)}
           controlsExpanded={primaryControlsExpanded} onControlsExpandedChange={setPrimaryControlsExpanded}
           onVideoPresented={onVideoPresented}
           remotePeerId={activeStream.isLocal ? undefined : activeStream.id}
@@ -630,7 +668,11 @@ export function RoomStage({
                 color={comparing ? 'blue' : 'gray'}
                 aria-pressed={comparing}
                 aria-label={comparing ? 'Sair da comparação' : 'Comparar'}
-                onClick={() => setComparison(value => !value)}
+                onClick={() => {
+                  setManualAudio(null);
+                  setAudioSuspended(false);
+                  setComparison(value => !value);
+                }}
               >
                 <IconCompare size={15} aria-hidden />
               </Button>
@@ -735,14 +777,20 @@ export function RoomStage({
               }} />
               Secundária
             </span>
-            <select aria-label="Transmissão secundária" value={secondaryStream.id} onChange={event => setSecondaryId(event.target.value)}>
+            <select aria-label="Transmissão secundária" value={secondaryStream.id} onChange={event => {
+              if (manualAudio && manualAudio !== primaryId && manualAudio !== event.target.value) {
+                setManualAudio(null);
+                setAudioSuspended(true);
+              }
+              setSecondaryId(event.target.value);
+            }}>
               {secondaryStreams.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
             </select>
           </Box>
-          <span className="comparison-meta-badge">Sem áudio</span>
+          <span className="comparison-meta-badge">{sourceId === secondaryStream.id && !suspended ? 'Fonte de áudio' : 'Áudio secundário'}</span>
         </Box>
         <Box className="comparison-canvas" style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-          <SpotlightVideoPlayer key={secondaryStream.id} secondary
+          <SpotlightVideoPlayer key={secondaryStream.id} secondary audio={audioFor(secondaryStream)}
             controlsExpanded={secondaryControlsExpanded} onControlsExpandedChange={setSecondaryControlsExpanded}
             stream={secondaryStream.paused ? null : secondaryStream.stream} isLocal={secondaryStream.isLocal}
             remotePeerId={secondaryStream.isLocal ? undefined : secondaryStream.id} onVideoPresented={onVideoPresented}
@@ -780,7 +828,7 @@ export function RoomStage({
             <PreviewCard
               key={sec.id}
               streamItem={sec}
-              onClick={() => onSelectFeaturedStream(sec.id)}
+              onClick={() => selectPrimary(sec.id)}
             />
           ))}
 
@@ -814,7 +862,14 @@ export function RoomStage({
 }
 
 // Spotlight Video Player Component
+type AudioControl = {
+  selected: boolean; preference: { volume: number; muted: boolean };
+  comparing: boolean; paused: boolean; hasAudio: boolean;
+  select: () => void; change: (patch: Partial<{ volume: number; muted: boolean }>) => void;
+};
+
 function SpotlightVideoPlayer({
+  audio,
   controlsExpanded, onControlsExpandedChange,
   secondary = false, comparisonControl,
   onVideoPresented, remotePeerId,
@@ -837,6 +892,7 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  audio: AudioControl;
   controlsExpanded: boolean;
   onControlsExpandedChange: (expanded: boolean) => void;
   secondary?: boolean;
@@ -865,10 +921,27 @@ function SpotlightVideoPlayer({
   connectionState?: RTCPeerConnectionState;
   onRetry?: () => void;
 }) {
-  // CRITICAL: Local video MUST ALWAYS be muted to prevent acoustic feedback loop!
-  // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
+  // RoomStage selects the sole audible player; local previews never produce sound.
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  useEffect(() => {
+    const tracks = new Set<MediaStreamTrack>();
+    const sync = () => {
+      for (const track of stream?.getAudioTracks() ?? []) {
+        if (!tracks.has(track)) { tracks.add(track); track.addEventListener('ended', sync); }
+      }
+      setHasAudioTrack(Boolean(stream?.getAudioTracks().some(track => track.readyState === 'live')));
+    };
+    sync();
+    stream?.addEventListener('addtrack', sync);
+    stream?.addEventListener('removetrack', sync);
+    return () => {
+      stream?.removeEventListener('addtrack', sync);
+      stream?.removeEventListener('removetrack', sync);
+      tracks.forEach(track => track.removeEventListener('ended', sync));
+    };
+  }, [stream]);
   const [playback, setPlayback] = useState('Conectando');
-  const videoRef = useMediaStreamVideo(stream, isLocal || secondary, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined);
+  const videoRef = useMediaStreamVideo(stream, isLocal || !audio.selected || audio.preference.muted || audio.paused, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined, audio.preference.volume);
   const [tool, setTool] = useState<AnnotationTool>('navigate');
   const canAnnotate = Boolean(!secondary && isLocal && stream && annotationStreamId && annotations?.available);
   const canPoint = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
@@ -895,6 +968,7 @@ function SpotlightVideoPlayer({
     isLocal,
   });
   const controlsRef = useRef<HTMLDivElement>(null);
+  const audioMuteRef = useRef<HTMLButtonElement>(null);
 
   const toolsId = useId();
 
@@ -1044,6 +1118,19 @@ function SpotlightVideoPlayer({
         </Box>
       )}
       <Box className="stage-display-controls" role="group" aria-label="Controles de visualização">
+      {!isLocal && <Popover position="left-start" width={240} trapFocus returnFocus portalProps={{ target: controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined }}>
+        <Popover.Target><Button variant={audio.selected ? 'filled' : 'subtle'} color={audio.selected ? 'blue' : 'gray'} aria-label="Áudio da transmissão" title="Áudio da transmissão">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" />{audio.preference.muted ? <path d="m16 9 6 6m0-6-6 6" /> : <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" />}</svg>
+        </Button></Popover.Target>
+        <Popover.Dropdown style={{ background: '#161b22', color: '#e6edf3', borderColor: '#484f58', maxWidth: 'calc(100vw - 24px)' }}>
+          <Text size="sm" fw={600}>Áudio da transmissão</Text>
+          <Text size="xs" role="status" my="xs">{audio.paused ? 'Transmissão pausada' : !(audio.hasAudio && hasAudioTrack) ? 'Sem faixa de áudio' : audio.preference.muted ? 'Mudo local' : videoRef.audioBlocked ? 'Reprodução bloqueada pelo navegador' : audio.selected ? 'Fonte de áudio selecionada' : 'Áudio disponível · fora da seleção'}</Text>
+          {!/iPad|iPhone|iPod/.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? <label style={{ display: 'block', fontSize: 12 }}>Volume · {Math.round(audio.preference.volume * 100)}%<input aria-label="Volume da transmissão" type="range" min="0" max="1" step="0.05" value={audio.preference.volume} onChange={event => audio.change({ volume: Number(event.target.value) })} style={{ width: '100%', minHeight: 44, accentColor: '#58a6ff' }} /></label> : <Text size="xs">Ajuste o volume pelos controles do dispositivo.</Text>}
+          <Button ref={audioMuteRef} style={{ minHeight: 44 }} fullWidth variant="default" mt="xs" aria-pressed={audio.preference.muted} onClick={() => audio.change({ muted: !audio.preference.muted })}>{audio.preference.muted ? 'Desmutar transmissão' : 'Silenciar transmissão'}</Button>
+          {!audio.selected && <Button style={{ minHeight: 44 }} fullWidth mt="xs" disabled={audio.paused || !audio.hasAudio || !hasAudioTrack} onClick={() => { audio.select(); audioMuteRef.current?.focus(); }}>{audio.comparing ? 'Ouvir esta transmissão' : 'Retomar áudio desta transmissão'}</Button>}
+          {audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button style={{ minHeight: 44 }} fullWidth mt="xs" onClick={() => { void videoRef.enableAudio(); audioMuteRef.current?.focus(); }}>Ativar áudio</Button>}
+        </Popover.Dropdown>
+      </Popover>}
       {comparisonControl}
       {!secondary && onToggleCinema && (
         <Tooltip position="left" label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} events={{ hover: true, focus: true, touch: false }} withArrow>
@@ -1174,7 +1261,7 @@ function SpotlightVideoPlayer({
       </>}</Box>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 44, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8, borderRadius: 8 }}>{pip.error}</Text>}
-    {(statusText || connectionState === 'failed' || (!secondary && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
+    {(statusText || connectionState === 'failed' || (audio.selected && !audio.preference.muted && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
       <Box style={{ position: 'absolute', top: overlayTop, left: 14, zIndex: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
         {stream && statusText && (
           <Text size="xs" fw={500} style={{ background: 'rgba(13, 17, 23, 0.82)', padding: '3px 9px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1182,7 +1269,7 @@ function SpotlightVideoPlayer({
           </Text>
         )}
         {connectionState === 'failed' && <Button size="xs" onClick={onRetry}>Tentar novamente</Button>}
-        {!secondary && videoRef.audioBlocked && <Button size="xs" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
+        {audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button size="xs" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
         {playback === 'Falha na reprodução' && <Button size="xs" onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
       </Box>
     )}
@@ -1209,7 +1296,7 @@ function SpotlightVideoPlayer({
       ref={videoRef}
       autoPlay
       playsInline
-      muted={isLocal || secondary}
+      muted
       disablePictureInPicture={secondary}
       style={{
         width: '100%',
