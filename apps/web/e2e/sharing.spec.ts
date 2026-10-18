@@ -2431,3 +2431,172 @@ for (const width of [1440, 1024, 768, 600, 390, 320]) {
     } finally { await context.close(); await other.close(); }
   });
 }
+
+for (const width of [1440, 320]) {
+  test(`F24 individual playback preferences and comparison at ${width}px`, async ({ browser }) => {
+    const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext({ viewport: { width, height: 900 }, hasTouch: width === 320 })]);
+    try {
+      const [ana, bia, viewer] = await Promise.all(contexts.map(context => context.newPage()));
+      for (const [index, page] of [ana, bia, viewer].entries()) {
+        await syntheticCapture(page, true);
+        await page.addInitScript(name => sessionStorage.setItem('screen_room_display_name', name), ['Ana', 'Bia', 'Vera'][index]);
+        if (index === 2) await page.addInitScript(() => {
+          (window as any).testAudioOverlap = 0;
+          const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted')!;
+          Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+            ...descriptor,
+            set(value: boolean) {
+              descriptor.set!.call(this, value);
+              if ([...document.querySelectorAll<HTMLVideoElement>('.stage-main-container video')].filter(video => !video.muted).length > 1) (window as any).testAudioOverlap++;
+            },
+          });
+        });
+        await page.goto(`/room/f24-${width}`);
+      }
+      await ana.evaluate(() => { (window as any).testAudio = true; });
+      await bia.evaluate(() => { (window as any).testAudio = true; });
+      await startLive(ana); await startLive(bia); await frames(viewer);
+      await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+      const primary = viewer.getByRole('region', { name: 'Transmissão principal', exact: true });
+      const secondary = viewer.getByRole('region', { name: 'Transmissão secundária', exact: true });
+      await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+      const singleAudio = async () => expect(await viewer.locator('video').evaluateAll(videos => videos.filter(video => !(video as HTMLVideoElement).muted).length)).toBeLessThanOrEqual(1);
+      await primary.locator('video').evaluate(video => { (window as any).f24Video = video; (window as any).f24Stream = (video as HTMLVideoElement).srcObject; });
+      await primary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('slider', { name: 'Volume da transmissão' }).fill('0.35');
+      await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).click();
+      expect(await primary.locator('video').evaluate(video => video === (window as any).f24Video && (video as HTMLVideoElement).srcObject === (window as any).f24Stream)).toBe(true);
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Ouvir esta transmissão', exact: true }).click();
+      await viewer.getByRole('slider', { name: 'Volume da transmissão' }).fill('0.65');
+      await expect(primary.locator('option:checked')).toHaveText('Ana');
+      await singleAudio();
+      const bounds = await viewer.getByText('Áudio da transmissão', { exact: true }).boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath(`f24-audio-${width}.png`), fullPage: true });
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      // Pause and F27 replace media without resetting this participant's local preference.
+      await bia.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await expect(secondary.getByText('Transmissão pausada', { exact: true })).toBeVisible();
+      await singleAudio();
+      await bia.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await expect.poll(() => secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await bia.evaluate(() => { (window as any).testAudio = false; });
+      await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await expect(viewer.getByText('Sem faixa de áudio', { exact: true })).toBeVisible();
+      await expect(viewer.getByRole('slider')).toHaveValue('0.65');
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider')).toHaveCount(0);
+      await bia.evaluate(() => { (window as any).testAudio = true; });
+      await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await expect.poll(() => secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await singleAudio();
+      // Following Ana changes only the visual primary; the manual audio choice remains Bia.
+      await viewer.getByRole('button', { name: /^Ver participantes/ }).first().click();
+      await viewer.getByRole('button', { name: 'Acompanhar escolhas de Ana', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+      await ana.getByRole('button', { name: 'Destacar transmissão de Bia', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Bia');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await startLive(viewer);
+      await ana.getByRole('button', { name: 'Destacar transmissão de Vera', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Vera (você)');
+      await expect(secondary.locator('option:checked')).toHaveText('Bia');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      expect(await secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await singleAudio();
+      await ana.getByRole('button', { name: 'Destacar transmissão de Ana (você)', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Ana');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await singleAudio();
+      await viewer.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      // Role swaps preserve the manually selected participant and both preferences.
+      await primary.getByRole('combobox').selectOption({ label: 'Bia' });
+      await singleAudio();
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.35);
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await primary.getByRole('button', { name: 'Sair da comparação', exact: true }).click();
+      await singleAudio();
+      expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await expect(viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true })).toBeVisible();
+      await viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true }).click();
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      // Losing the manually selected source cannot turn the unmuted primary on.
+      await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Ouvir esta transmissão', exact: true }).click();
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider')).toHaveCount(0);
+      await bia.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(secondary).toHaveCount(0);
+      expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await singleAudio();
+      expect(await viewer.evaluate(() => (window as any).testAudioOverlap)).toBe(0);
+    } finally { await Promise.all(contexts.map(context => context.close())); }
+  });
+}
+
+test('F24 iOS exposes mute and device volume guidance without a software slider', async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const viewerContext = await browser.newContext({ viewport: { width: 320, height: 740 }, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1' });
+  try {
+    const host = await hostContext.newPage(), viewer = await viewerContext.newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await host.goto('/room/f24-ios'); await viewer.goto('/room/f24-ios');
+    await startLive(host); await frames(viewer);
+    await viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true }).tap();
+    await expect(viewer.getByRole('slider')).toHaveCount(0);
+    await expect(viewer.getByText('Ajuste o volume pelos controles do dispositivo.')).toBeVisible();
+    await expect(viewer.getByText('Sem faixa de áudio', { exact: true })).toBeVisible();
+    await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).tap();
+    await expect(viewer.getByRole('button', { name: 'Desmutar transmissão' })).toHaveAttribute('aria-pressed', 'true');
+    await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath('f24-ios-mute-320.png') });
+  } finally { await hostContext.close(); await viewerContext.close(); }
+});
+
+test('F24 explicit mute survives blocked autoplay, source replacement and reconnect', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await host.goto('/room/f24-blocked'); await viewer.goto('/room/f24-blocked');
+    await host.evaluate(() => { (window as any).testAudio = true; });
+    await viewer.evaluate(() => { (window as any).testBlockAudio = true; });
+    await startLive(host); await frames(viewer);
+    await expect(viewer.getByRole('button', { name: 'Ativar áudio', exact: true })).toBeVisible();
+    const audioButton = viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true });
+    await audioButton.focus(); await viewer.keyboard.press('Enter');
+    await expect(viewer.getByText('Reprodução bloqueada pelo navegador', { exact: true })).toBeVisible();
+    await viewer.getByRole('slider').focus(); await viewer.keyboard.press('ArrowLeft');
+    await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: 'Ativar áudio', exact: true })).toHaveCount(0);
+    await expect(viewer.getByText('Mudo local', { exact: true })).toBeVisible();
+    await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath('f24-muted-blocked.png') });
+    await viewer.keyboard.press('Escape');
+    await expect(viewer.getByRole('slider')).toHaveCount(0);
+    await expect(audioButton).toBeFocused();
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    const joins = await viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length);
+    await viewer.evaluate(() => (window as any).testSockets.filter((socket: WebSocket) => socket.readyState === WebSocket.OPEN && socket.url.includes('/signal')).forEach((socket: WebSocket) => socket.close(4001, 'test')));
+    await expect.poll(() => viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(joins);
+    await audioButton.click();
+    await expect(viewer.getByRole('slider')).toHaveValue('0.95');
+    await expect(viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true })).toBeVisible();
+    expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+    await viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true }).click();
+    expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.95);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});

@@ -217,3 +217,27 @@ test('F22 entering and leaving comparison preserves primary playback, zoom and P
   await primary.getByRole('combobox').selectOption({ index: 1 });
   await expect.poll(() => page.evaluate(() => document.pictureInPictureElement === null)).toBe(true);
 });
+
+test('F24 volume and mute preserve PiP, media identity, Cinema and fullscreen controls', async ({ page }) => {
+  await mockPiP(page);
+  await page.goto('/room/f24-pip?demo=multi');
+  const video = mainVideo(page);
+  await expect(enterPiP(page)).toBeEnabled();
+  await video.evaluate(video => { (window as any).f24Video = video; (window as any).f24Stream = (video as HTMLVideoElement).srcObject; });
+  await enterPiP(page).click();
+  await page.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+  await page.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await page.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+  await page.getByRole('slider', { name: 'Volume da transmissão' }).fill('0.4');
+  await page.getByRole('button', { name: 'Silenciar transmissão', exact: true }).click();
+  expect(await video.evaluate(video => video === (window as any).f24Video && (video as HTMLVideoElement).srcObject === (window as any).f24Stream && document.pictureInPictureElement === video && (video as HTMLVideoElement).muted && (video as HTMLVideoElement).volume === 0.4)).toBe(true);
+  expect(await page.getByRole('slider').evaluate(slider => document.fullscreenElement?.contains(slider))).toBe(true);
+  await page.screenshot({ animations: 'disabled', path: test.info().outputPath('f24-fullscreen-pip.png') });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('slider')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+  await page.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+  await exitPiP(page).click();
+  expect(await page.evaluate(() => (window as any).pipExits)).toBe(1);
+});
