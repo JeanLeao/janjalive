@@ -5,6 +5,7 @@ import {
   type StageSelection, STAGE_SELECTION_LIMITS, type HandState, type HandsSnapshot, HAND_LIMITS,
   type QaQuestion, type QuestionsSnapshot, type UpdateQuestionMessage, QA_LIMITS,
 } from '@screen-room/protocol';
+import { RoomPolls } from './room-polls.js';
 import * as crypto from 'node:crypto';
 
 export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
@@ -33,6 +34,8 @@ export interface SpectatorDrawingSenderBudget {
 export interface ParticipantMeta {
   hand?: Omit<HandState, 'peerId'>;
   handTimes?: number[];
+  pollIdentity?: string;
+  polls?: QaBudget;
   qa?: QaBudget;
   interactions?: InteractionBudget;
   collaboration?: {
@@ -59,6 +62,8 @@ export interface ParticipantMeta {
 export interface RecoveryReservation {
   hand?: Omit<HandState, 'peerId'>;
   handTimes?: number[];
+  pollIdentity?: string;
+  polls?: QaBudget;
   qa?: QaBudget;
   interactions?: InteractionBudget;
   sharing?: SharingState;
@@ -88,6 +93,7 @@ export class UnauthorizedReconnectError extends Error {
 
 export class RoomRegistry {
   static readonly DEFAULT_RECOVERY_GRACE_MS = 30000;
+  readonly polls = new RoomPolls();
   #handClock = 0;
   #rooms = new Map<string, Map<string, ParticipantMeta>>();
   #qaByRoom = new Map<string, RoomQaState>();
@@ -152,6 +158,8 @@ export class RoomRegistry {
     participants.set(peer, {
       hand: existingMeta?.hand ?? reservation?.hand,
       handTimes: existingMeta?.handTimes ?? reservation?.handTimes,
+      pollIdentity: existingMeta?.pollIdentity ?? reservation?.pollIdentity ?? crypto.randomUUID(),
+      polls: existingMeta?.polls ?? reservation?.polls,
       qa: existingMeta?.qa ?? reservation?.qa,
       interactions: existingMeta?.interactions ?? reservation?.interactions,
       nickname: cleanNickname,
@@ -187,6 +195,7 @@ export class RoomRegistry {
       if (participants.size === 0 && !this.hasAnyRecoveryForRoom(room)) {
         this.#rooms.delete(room);
         this.#qaByRoom.delete(room);
+        this.polls.delete(room);
       }
     } else if (existingMeta) {
       this.clearRecovery(room, peer);
@@ -196,6 +205,7 @@ export class RoomRegistry {
         if ((!currentParticipants || currentParticipants.size === 0) && !this.hasAnyRecoveryForRoom(room)) {
           this.#rooms.delete(room);
           this.#qaByRoom.delete(room);
+          this.polls.delete(room);
         }
       }, graceMs);
 
@@ -208,6 +218,8 @@ export class RoomRegistry {
         nickname: existingMeta.nickname,
         hand: existingMeta.hand,
         handTimes: existingMeta.handTimes,
+        pollIdentity: existingMeta.pollIdentity,
+        polls: existingMeta.polls,
         qa: existingMeta.qa,
         interactions: existingMeta.interactions,
         sharing: existingMeta.sharing,
@@ -257,6 +269,10 @@ export class RoomRegistry {
     if (raised === Boolean(meta.hand?.order)) return true;
     meta.hand = { order: raised ? ++this.#handClock : null, version: version + 1 };
     return true;
+  }
+
+  pollParticipant(roomId: string, peerId: string): ParticipantMeta | undefined {
+    return this.#rooms.get(roomId)?.get(peerId);
   }
 
   #ensureQaState(roomId: string): RoomQaState {

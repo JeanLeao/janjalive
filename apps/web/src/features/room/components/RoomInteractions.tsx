@@ -2,10 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Menu, Popover } from '@mantine/core';
 import {
   INTERACTION_LIMITS, QA_LIMITS, REACTIONS,
-  type ChatMessage, type QaQuestion, type Reaction, type ReactionEvent,
+  type Poll, type ChatMessage, type QaQuestion, type Reaction, type ReactionEvent,
 } from '@screen-room/protocol';
 import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar';
 import { IconDots, IconHand, IconCheck, IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
+import { PollTabView, type PollTabProps } from './RoomPolls';
 import classes from './RoomInteractions.module.css';
 
 const labels: Record<Reaction, string> = {
@@ -32,7 +33,7 @@ const symbols: Record<Reaction, React.ReactNode> = {
 };
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
-export type InteractionTab = 'chat' | 'qa';
+export type InteractionTab = 'chat' | 'qa' | 'polls';
 
 interface InteractionsStateInput {
   roomId: string;
@@ -41,6 +42,7 @@ interface InteractionsStateInput {
   pending: boolean;
   connected: boolean;
   onSendChat: (text: string) => boolean;
+  polls?: Poll[];
   questions?: QaQuestion[];
   qaError?: string | null;
   qaPending?: boolean;
@@ -59,6 +61,7 @@ export function useInteractionsUi({
   pending,
   connected,
   onSendChat,
+  polls = [],
   questions = [],
   qaError = null,
   qaPending = false,
@@ -70,6 +73,7 @@ export function useInteractionsUi({
   const [picker, setPicker] = useState(false);
   const [draft, setDraft] = useState('');
   const [qaDraft, setQaDraft] = useState('');
+  const [pollDraft, setPollDraft] = useState({ question: '', options: ['', ''] });
   const [lastRead, setLastRead] = useState<string>();
   const [atBottom, setAtBottom] = useState(true);
   const scroll = useRef<HTMLDivElement | null>(null);
@@ -82,6 +86,7 @@ export function useInteractionsUi({
     setPicker(false);
     setDraft('');
     setQaDraft('');
+    setPollDraft({ question: '', options: ['', ''] });
     setLastRead(undefined);
     setAtBottom(true);
   }, [roomId]);
@@ -128,6 +133,8 @@ export function useInteractionsUi({
     setDraft,
     qaDraft,
     setQaDraft,
+    pollDraft, setPollDraft,
+    hasOpenPoll: polls.some(poll => poll.closedAt === null),
     atBottom,
     setAtBottom,
     scroll,
@@ -168,12 +175,13 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   };
 
   return <div className={`${classes.actions} ${variant === 'floating' ? classes.floating : ''}`} role="group" aria-label="Interações da sala">
-    <button type="button" className={classes.action} data-chat-trigger data-qa-open={openQuestionsCount || undefined}
+    <button type="button" className={classes.action} data-chat-trigger data-poll-open={ui.hasOpenPoll || undefined} data-qa-open={openQuestionsCount || undefined}
       aria-expanded={opened} aria-controls="room-chat-panel"
-      title={openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto)` : 'Chat e perguntas'}
+      title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto)` : 'Chat e perguntas'}
       aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />
+      {ui.hasOpenPoll && <span className={classes.pollDot} data-testid="poll-open-indicator" aria-label="Enquete aberta" />}
       {unread > 0 && <span className={classes.badge} aria-hidden="true">{badge}</span>}
       {openQuestionsCount > 0 && <span className={`${classes.qaBadge} ${unread > 0 ? classes.qaBadgeOffset : ''}`} data-testid="qa-open-badge" aria-hidden="true">?{qaBadge}</span>}
     </button>
@@ -222,7 +230,8 @@ export function InteractionLayer({
   onWithdrawQuestion,
   onAnswerQuestionText,
   onUpdateQuestionStatus,
-}: {
+  ...pollProps
+}: PollTabProps & {
   ui: InteractionsUi;
   messages: ChatMessage[];
   reactions: ReactionEvent[];
@@ -239,7 +248,7 @@ export function InteractionLayer({
   onAnswerQuestionText?: (questionId: string, answerText: string) => boolean;
   onUpdateQuestionStatus?: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') => boolean;
 }) {
-  const bannerError = error || qaError;
+  const bannerError = error || qaError || pollProps.pollError;
   return <>
     <div className={classes.reactions} aria-live="polite" aria-atomic="false">
       {reactions.map(item => <div key={item.id} className={classes.reaction} data-testid="reaction-event">
@@ -250,6 +259,7 @@ export function InteractionLayer({
     </div>
     {!ui.opened && bannerError && <div role="status" className={classes.error}>{bannerError}</div>}
     {ui.opened && <InteractionsPanel
+      {...pollProps}
       ui={ui}
       messages={messages}
       error={error}
@@ -287,7 +297,8 @@ function InteractionsPanel({
   onWithdrawQuestion,
   onAnswerQuestionText,
   onUpdateQuestionStatus,
-}: {
+  ...pollProps
+}: PollTabProps & {
   ui: InteractionsUi;
   messages: ChatMessage[];
   error: string | null;
@@ -306,6 +317,7 @@ function InteractionsPanel({
   const { tab, setTab, unread, openQuestionsCount } = ui;
   const panel = useRef<HTMLElement>(null);
   const chatTabRef = useRef<HTMLButtonElement>(null);
+  const pollsTabRef = useRef<HTMLButtonElement>(null);
   const qaTabRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
@@ -313,17 +325,18 @@ function InteractionsPanel({
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
-      const next: InteractionTab = tab === 'chat' ? 'qa' : 'chat';
+      const tabs: InteractionTab[] = ['chat', 'qa', 'polls'];
+      const next = tabs[(tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : 2)) % 3]!;
       setTab(next);
-      (next === 'chat' ? chatTabRef.current : qaTabRef.current)?.focus();
+      (next === 'chat' ? chatTabRef.current : next === 'qa' ? qaTabRef.current : pollsTabRef.current)?.focus();
     } else if (event.key === 'Home') {
       event.preventDefault();
       setTab('chat');
       chatTabRef.current?.focus();
     } else if (event.key === 'End') {
       event.preventDefault();
-      setTab('qa');
-      qaTabRef.current?.focus();
+      setTab('polls');
+      pollsTabRef.current?.focus();
     }
   };
 
@@ -366,11 +379,18 @@ function InteractionsPanel({
             </span>
           )}
         </button>
+        <button ref={pollsTabRef} type="button" role="tab" id="room-tab-polls"
+          aria-selected={tab === 'polls'} aria-controls="room-tabpanel-polls" tabIndex={tab === 'polls' ? 0 : -1}
+          className={classes.tab} data-active={tab === 'polls' || undefined} onClick={() => setTab('polls')}>
+          <span>Enquetes</span>{ui.hasOpenPoll && <span className={classes.pollTabDot} aria-label="Enquete aberta" />}
+        </button>
       </div>
       <button type="button" className={classes.close} aria-label="Fechar chat" onClick={ui.closeChat}><IconClose size={16} aria-hidden /></button>
     </div>
     {tab === 'chat' ? (
       <ChatTabView ui={ui} messages={messages} error={error} pending={pending} connected={connected} localPeerId={localPeerId} />
+    ) : tab === 'polls' ? (
+      <PollTabView {...pollProps} ui={ui} connected={connected} isPresenter={isPresenter} />
     ) : (
       <QaTabView
         ui={ui}

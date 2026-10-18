@@ -46,3 +46,14 @@ test('F38 Q&A accepts only newer question snapshots for the active room', () => 
   assert.equal(acceptQuestionsSnapshot(snap2, { ...snap1, roomId: 'other', revision: 9 }, 'room'), snap2);
 });
 
+
+test('poll snapshots reject stale revisions, duplicates and different rooms', async () => {
+  const { acceptPollsSnapshot } = await import('../src/features/room/hooks/useRoomInteractions.ts');
+  const initial = { type: 'polls-snapshot', roomId: 'r', revision: 1, polls: [] };
+  const current = { ...initial, revision: 5 };
+  assert.equal(acceptPollsSnapshot(null, initial, 'r'), initial);
+  assert.equal(acceptPollsSnapshot(initial, current, 'r'), current);
+  assert.equal(acceptPollsSnapshot(current, initial, 'r'), current);
+  assert.equal(acceptPollsSnapshot(current, { ...current }, 'r'), current);
+  assert.equal(acceptPollsSnapshot(current, { ...current, roomId: 'other', revision: 10 }, 'r'), current);
+});

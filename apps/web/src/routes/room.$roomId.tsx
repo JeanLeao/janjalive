@@ -169,6 +169,7 @@ function RoomPage() {
     pending: session.chatPending,
     connected,
     onSendChat: session.sendChat,
+    polls: session.polls,
     questions: session.questions,
     qaError: session.qaError,
     qaPending: session.qaPending,
@@ -320,6 +321,8 @@ function RoomPage() {
           isPresenter={isLocalPresenter}
           questions={session.questions}
           highlightedQuestionId={session.highlightedQuestionId}
+          polls={session.polls} pollsReady={session.pollsReady} pollError={session.pollError} pollPending={session.pollPending}
+          onCreatePoll={session.createPoll} onVotePoll={session.votePoll} onClosePoll={session.closePoll}
           qaError={session.qaError}
           qaPending={session.qaPending}
           onWithdrawQuestion={session.withdrawQuestion}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  CreatePollSchema, VotePollSchema, ClosePollSchema, type PollOperation, type PollsSnapshot,
   ChatTextSchema, INTERACTION_LIMITS, QaQuestionTextSchema, QaAnswerTextSchema, QA_LIMITS,
   type HandsSnapshot, type QuestionsSnapshot, type ChatMessage, type Reaction, type ReactionEvent, type ServerMessage,
 } from '@screen-room/protocol';
@@ -10,6 +11,10 @@ export function acceptHandsSnapshot(previous: HandsSnapshot | null, message: Han
 }
 
 export function acceptQuestionsSnapshot(previous: QuestionsSnapshot | null, message: QuestionsSnapshot, roomId: string): QuestionsSnapshot | null {
+  return message.roomId === roomId && message.revision > (previous?.revision ?? 0) ? message : previous;
+}
+
+export function acceptPollsSnapshot(previous: PollsSnapshot | null, message: PollsSnapshot, roomId: string): PollsSnapshot | null {
   return message.roomId === roomId && message.revision > (previous?.revision ?? 0) ? message : previous;
 }
 
@@ -26,6 +31,16 @@ export function useRoomInteractions(roomId: string) {
   const [qaError, setQaError] = useState<string | null>(null);
   const [qaPending, setQaPending] = useState(false);
   const [qaSubmitPending, setQaSubmitPending] = useState(false);
+  const [polls, setPolls] = useState<PollsSnapshot | null>(null);
+  const pollsRef = useRef<PollsSnapshot | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [pollPending, setPollPending] = useState(false);
+  const pollPendingRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const finishPoll = useCallback(() => {
+    if (pollPendingRef.current) clearTimeout(pollPendingRef.current.timer);
+    pollPendingRef.current = null;
+    setPollPending(false);
+  }, []);
   const ready = useRef(false);
   const [hands, setHands] = useState<HandsSnapshot | null>(null);
   const handsRef = useRef<HandsSnapshot | null>(null);
@@ -47,6 +62,10 @@ export function useRoomInteractions(roomId: string) {
   }, []);
   const resetConnection = useCallback(() => {
     ready.current = false;
+    pollsRef.current = null;
+    setPolls(null);
+    if (pollPendingRef.current) setPollError('Conexão interrompida. A ação não foi confirmada; não será reenviada.');
+    finishPoll();
     handsRef.current = null;
     setHands(null);
     questionsRef.current = null;
@@ -58,17 +77,23 @@ export function useRoomInteractions(roomId: string) {
     timers.current.forEach(clearTimeout);
     timers.current.clear();
     setReactions([]);
-  }, [finish, finishQa]);
+  }, [finish, finishQa, finishPoll]);
   useEffect(() => {
     setDataRoom(roomId);
     setMessages([]);
     setError(null);
     setQaError(null);
+    setPollError(null);
     resetConnection();
     return resetConnection;
   }, [roomId, resetConnection]);
   const receive = useCallback((message: ServerMessage) => {
     if (message.type === 'peers') ready.current = true;
+    if (message.type === 'polls-snapshot' && ready.current) {
+      pollsRef.current = acceptPollsSnapshot(pollsRef.current, message, roomId);
+      setPolls(pollsRef.current);
+    }
+    if (message.type === 'poll-accepted' && ready.current && message.roomId === roomId && pollPendingRef.current?.id === message.requestId) finishPoll();
     if (message.type === 'hands-snapshot' && ready.current) {
       handsRef.current = acceptHandsSnapshot(handsRef.current, message, roomId);
       setHands(handsRef.current);
@@ -81,7 +106,10 @@ export function useRoomInteractions(roomId: string) {
       if (qaPendingRef.current?.id === message.requestId) finishQa();
     }
     if (message.type === 'interaction-rejected') {
-      if (qaPendingRef.current?.id === message.requestId) {
+      if (pollPendingRef.current?.id === message.requestId) {
+        setPollError(message.message);
+        finishPoll();
+      } else if (qaPendingRef.current?.id === message.requestId) {
         setQaError(message.message);
         finishQa();
       } else {
@@ -101,7 +129,7 @@ export function useRoomInteractions(roomId: string) {
       }, INTERACTION_LIMITS.reactionDurationMs);
       timers.current.add(timer);
     }
-  }, [roomId, finish, finishQa]);
+  }, [roomId, finish, finishQa, finishPoll]);
   const sendChat = (client: SignalingClient | null, text: string) => {
     if (pendingRef.current) return false;
     const parsed = ChatTextSchema.safeParse(text);
@@ -201,7 +229,29 @@ export function useRoomInteractions(roomId: string) {
     startQaRequest(requestId, 'action');
     return true;
   };
+  const sendPoll = (client: SignalingClient | null, operation: PollOperation) => {
+    if (pollPendingRef.current) return false;
+    const schema = operation.type === 'create-poll' ? CreatePollSchema : operation.type === 'vote-poll' ? VotePollSchema : ClosePollSchema;
+    const parsed = schema.safeParse(operation);
+    if (!parsed.success) { setPollError('Revise a pergunta (até 300 caracteres) e as 2 a 5 alternativas (até 120 caracteres cada).'); return false; }
+    if (!ready.current || !client?.send(parsed.data)) {
+      setPollError('Sem conexão com a sala. Aguarde a reconexão para tentar novamente.');
+      return false;
+    }
+    setPollError(null);
+    setPollPending(true);
+    pollPendingRef.current = { id: operation.requestId, timer: setTimeout(() => {
+      finishPoll();
+      setPollError('A ação não foi confirmada. Não haverá reenvio automático.');
+    }, 8000) };
+    return true;
+  };
   return {
+    polls: dataRoom === roomId ? polls?.polls ?? [] : [],
+    pollsReady: dataRoom === roomId && polls !== null,
+    pollError: dataRoom === roomId ? pollError : null,
+    pollPending: dataRoom === roomId && pollPending,
+    sendPoll,
     hands: dataRoom === roomId ? hands?.hands ?? [] : [],
     toggleHand,
     questions: dataRoom === roomId ? questions?.questions ?? [] : [],
