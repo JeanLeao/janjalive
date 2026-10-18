@@ -1,5 +1,5 @@
 import { observeVideoPresentation } from '../diagnostics/video-presentation';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 function applyPlaybackMute(video: HTMLVideoElement, muted: boolean) {
   if (!muted) {
@@ -16,74 +16,50 @@ export function useMediaStreamVideo(stream: MediaStream | null, muted = false, o
   const [audioBlocked, setAudioBlocked] = useState(false);
   const desiredMuted = useRef(muted);
   const playbackGeneration = useRef(0);
+  const presentedRef = useRef(onPresented);
+  const playbackRef = useRef(onPlayback);
   desiredMuted.current = muted;
+  presentedRef.current = onPresented;
+  playbackRef.current = onPlayback;
 
-  const enableAudio = async () => {
-    const video = videoRef.current;
-    if (!video || !video.srcObject || desiredMuted.current) return;
-    const source = video.srcObject;
+  const play = async (video: HTMLVideoElement, source: MediaStream) => {
     const generation = ++playbackGeneration.current;
-    applyPlaybackMute(video, false);
+    const current = () => generation === playbackGeneration.current &&
+      videoRef.current === video && video.srcObject === source;
+    applyPlaybackMute(video, desiredMuted.current);
     try {
       await video.play();
-      if (generation === playbackGeneration.current && video.srcObject === source) setAudioBlocked(false);
+      if (current()) setAudioBlocked(false);
     } catch {
-      if (generation !== playbackGeneration.current || video.srcObject !== source || desiredMuted.current) return;
+      if (!current()) return;
       video.muted = true;
-      setAudioBlocked(true);
+      setAudioBlocked(!desiredMuted.current && source.getAudioTracks().some(track => track.readyState === 'live'));
+      // A denied audible play must not freeze the shared video.
+      try { await video.play(); }
+      catch { if (current()) playbackRef.current?.('Falha na reprodução'); }
     }
   };
 
-  // Preference changes must not replace srcObject, restart video or close PiP.
+  const enableAudio = async () => {
+    const video = videoRef.current;
+    if (!video || !stream || video.srcObject !== stream || desiredMuted.current ||
+      !stream.getAudioTracks().some(track => track.readyState === 'live')) return;
+    await play(video, stream);
+  };
+
+  // Only source changes own the attachment and presentation observer, preserving PiP.
   useLayoutEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const generation = ++playbackGeneration.current;
-    applyPlaybackMute(video, muted);
-    if (stream && video.srcObject === stream) void video.play().then(() => {
-      if (generation === playbackGeneration.current) setAudioBlocked(false);
-    }).catch(() => {
-      if (generation !== playbackGeneration.current || desiredMuted.current || video.srcObject !== stream) return;
-      video.muted = true;
-      setAudioBlocked(stream.getAudioTracks().length > 0);
-    });
+    video.srcObject = stream;
+    const stopObserving = stream && presentedRef.current
+      ? observeVideoPresentation(video, stream, presentedRef.current) : () => {};
+    playbackRef.current?.(stream ? 'Conectando' : '');
+    video.onplaying = () => playbackRef.current?.('Ao vivo');
+    video.onwaiting = () => playbackRef.current?.('Reconectando');
     return () => {
       playbackGeneration.current++;
       video.muted = true;
-    };
-  }, [muted, stream]);
-  useLayoutEffect(() => {
-    if (videoRef.current) videoRef.current.volume = volume;
-  }, [volume, stream]);
-
-  const presentedRef = useRef(onPresented);
-  presentedRef.current = onPresented;
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const generation = playbackGeneration.current;
-    let stopObserving = () => {};
-    let disposed = false;
-    if (stream) {
-      video.srcObject = stream;
-      applyPlaybackMute(video, desiredMuted.current);
-      const onFirstPresentation = presentedRef.current;
-      if (onFirstPresentation) stopObserving = observeVideoPresentation(video, stream, onFirstPresentation);
-      setAudioBlocked(false);
-      onPlayback?.('Conectando');
-      video.onplaying = () => onPlayback?.('Ao vivo');
-      video.onwaiting = () => onPlayback?.('Reconectando');
-      video.play().catch(async () => {
-        if (disposed || generation !== playbackGeneration.current || video.srcObject !== stream) return;
-        video.muted = true;
-        setAudioBlocked(!desiredMuted.current && stream.getAudioTracks().length > 0);
-        try { await video.play(); } catch { if (!disposed) onPlayback?.('Falha na reprodução'); }
-      });
-    } else {
-      video.srcObject = null;
-    }
-    return () => {
-      disposed = true;
       stopObserving();
       video.onplaying = null;
       video.onwaiting = null;
@@ -91,5 +67,22 @@ export function useMediaStreamVideo(stream: MediaStream | null, muted = false, o
     };
   }, [stream]);
 
-  return Object.assign(videoRef, { audioBlocked, enableAudio });
+  // Apply a remembered volume before enabling sound on a new video element.
+  useLayoutEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume;
+  }, [volume, stream]);
+
+  useLayoutEffect(() => {
+    const video = videoRef.current;
+    setAudioBlocked(false);
+    if (!video) return;
+    if (stream) void play(video, stream);
+    else applyPlaybackMute(video, muted);
+    return () => {
+      playbackGeneration.current++;
+      video.muted = true;
+    };
+  }, [muted, stream]);
+
+  return Object.assign(videoRef, { audioBlocked: Boolean(stream && !muted && audioBlocked), enableAudio });
 }

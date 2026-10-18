@@ -926,10 +926,17 @@ function SpotlightVideoPlayer({
   useEffect(() => {
     const tracks = new Set<MediaStreamTrack>();
     const sync = () => {
-      for (const track of stream?.getAudioTracks() ?? []) {
+      const liveTracks = new Set(stream?.getAudioTracks().filter(track => track.readyState === 'live') ?? []);
+      for (const track of tracks) {
+        if (!liveTracks.has(track)) {
+          track.removeEventListener('ended', sync);
+          tracks.delete(track);
+        }
+      }
+      for (const track of liveTracks) {
         if (!tracks.has(track)) { tracks.add(track); track.addEventListener('ended', sync); }
       }
-      setHasAudioTrack(Boolean(stream?.getAudioTracks().some(track => track.readyState === 'live')));
+      setHasAudioTrack(liveTracks.size > 0);
     };
     sync();
     stream?.addEventListener('addtrack', sync);
@@ -940,8 +947,9 @@ function SpotlightVideoPlayer({
       tracks.forEach(track => track.removeEventListener('ended', sync));
     };
   }, [stream]);
+  const audioAvailable = Boolean(stream && !audio.paused && audio.hasAudio && hasAudioTrack);
   const [playback, setPlayback] = useState('Conectando');
-  const videoRef = useMediaStreamVideo(stream, isLocal || !audio.selected || audio.preference.muted || audio.paused, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined, audio.preference.volume);
+  const videoRef = useMediaStreamVideo(stream, isLocal || !audio.selected || audio.preference.muted || !audioAvailable, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined, audio.preference.volume);
   const [tool, setTool] = useState<AnnotationTool>('navigate');
   const canAnnotate = Boolean(!secondary && isLocal && stream && annotationStreamId && annotations?.available);
   const canPoint = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
@@ -1127,8 +1135,8 @@ function SpotlightVideoPlayer({
           <Text size="xs" role="status" my="xs">{audio.paused ? 'Transmissão pausada' : !(audio.hasAudio && hasAudioTrack) ? 'Sem faixa de áudio' : audio.preference.muted ? 'Mudo local' : videoRef.audioBlocked ? 'Reprodução bloqueada pelo navegador' : audio.selected ? 'Fonte de áudio selecionada' : 'Áudio disponível · fora da seleção'}</Text>
           {!/iPad|iPhone|iPod/.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? <label style={{ display: 'block', fontSize: 12 }}>Volume · {Math.round(audio.preference.volume * 100)}%<input aria-label="Volume da transmissão" type="range" min="0" max="1" step="0.05" value={audio.preference.volume} onChange={event => audio.change({ volume: Number(event.target.value) })} style={{ width: '100%', minHeight: 44, accentColor: '#58a6ff' }} /></label> : <Text size="xs">Ajuste o volume pelos controles do dispositivo.</Text>}
           <Button ref={audioMuteRef} style={{ minHeight: 44 }} fullWidth variant="default" mt="xs" aria-pressed={audio.preference.muted} onClick={() => audio.change({ muted: !audio.preference.muted })}>{audio.preference.muted ? 'Desmutar transmissão' : 'Silenciar transmissão'}</Button>
-          {!audio.selected && <Button style={{ minHeight: 44 }} fullWidth mt="xs" disabled={audio.paused || !audio.hasAudio || !hasAudioTrack} onClick={() => { audio.select(); audioMuteRef.current?.focus(); }}>{audio.comparing ? 'Ouvir esta transmissão' : 'Retomar áudio desta transmissão'}</Button>}
-          {audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button style={{ minHeight: 44 }} fullWidth mt="xs" onClick={() => { void videoRef.enableAudio(); audioMuteRef.current?.focus(); }}>Ativar áudio</Button>}
+          {!audio.selected && <Button style={{ minHeight: 44 }} fullWidth mt="xs" disabled={!audioAvailable} onClick={() => { audio.select(); audioMuteRef.current?.focus(); }}>{audio.comparing ? 'Ouvir esta transmissão' : 'Retomar áudio desta transmissão'}</Button>}
+          {audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button style={{ minHeight: 44 }} fullWidth mt="xs" onClick={() => { void videoRef.enableAudio(); audioMuteRef.current?.focus(); }}>Ativar áudio</Button>}
         </Popover.Dropdown>
       </Popover>}
       {comparisonControl}
@@ -1261,7 +1269,7 @@ function SpotlightVideoPlayer({
       </>}</Box>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 44, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8, borderRadius: 8 }}>{pip.error}</Text>}
-    {(statusText || connectionState === 'failed' || (audio.selected && !audio.preference.muted && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
+    {(statusText || connectionState === 'failed' || (audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
       <Box style={{ position: 'absolute', top: overlayTop, left: 14, zIndex: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
         {stream && statusText && (
           <Text size="xs" fw={500} style={{ background: 'rgba(13, 17, 23, 0.82)', padding: '3px 9px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1269,7 +1277,7 @@ function SpotlightVideoPlayer({
           </Text>
         )}
         {connectionState === 'failed' && <Button size="xs" onClick={onRetry}>Tentar novamente</Button>}
-        {audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button size="xs" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
+        {audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button size="xs" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
         {playback === 'Falha na reprodução' && <Button size="xs" onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
       </Box>
     )}
