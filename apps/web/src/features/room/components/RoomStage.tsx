@@ -92,6 +92,9 @@ export function RoomStage({
   canShareScreen,
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
+  const [comparison, setComparison] = useState(false);
+  const [secondaryId, setSecondaryId] = useState<string | null>(null);
+  const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -162,6 +165,19 @@ export function RoomStage({
   const secondaryStreams = activeStream
     ? streamItems.filter((s) => s.id !== activeStream.id)
     : [];
+
+  // Comparison is local UI state: only the primary uses the session/F29 callback.
+  const comparing = comparison && secondaryStreams.length > 0;
+  const secondaryStream = secondaryStreams.find(item => item.id === secondaryId)
+    ?? secondaryStreams.find(item => item.id === previousPrimary.current)
+    ?? secondaryStreams[0];
+  const primaryId = activeStream?.id;
+  const resolvedSecondaryId = secondaryStream?.id ?? null;
+  useEffect(() => {
+    if (secondaryStreams.length === 0) setComparison(false);
+    setSecondaryId(resolvedSecondaryId);
+    previousPrimary.current = primaryId ?? null;
+  }, [primaryId, resolvedSecondaryId, secondaryStreams.length]);
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
@@ -281,7 +297,7 @@ export function RoomStage({
   return (
     <Box
       ref={stageContainerRef}
-      className="stage-main-container"
+      className={`stage-main-container${comparing ? ' stage-comparing' : ''}`}
       style={{
         flex: 1,
         display: 'flex',
@@ -295,6 +311,22 @@ export function RoomStage({
       {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
+        .stage-comparing { padding-bottom: 90px; }
+        .stage-comparing:fullscreen { padding-bottom: 0; }
+        .comparison-panel { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; background: #000; }
+        .comparison-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-height: 52px; background: #0d1117; border-bottom: 1px solid #30363d; }
+        .comparison-header select { min-width: 0; flex: 1; min-height: 44px; background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 6px; }
+        .stage-comparing .comparison-panel { border-right: 1px solid #30363d; }
+        .stage-comparing .stage-view-controls { position: relative; inset: auto; margin: 8px; max-width: calc(100% - 16px); flex-shrink: 0; }
+        .stage-comparing .comparison-canvas { display: flex; flex-direction: column; align-items: stretch !important; justify-content: flex-start !important; }
+        .stage-comparing [data-testid="zoom-viewport"] { position: relative !important; flex: 1; min-height: 180px; order: -1; }
+        .stage-comparing .stage-top-right { display: none !important; }
+        .comparison-panel[aria-label="Transmissão secundária"] .stage-display-controls { border: 0; padding-left: 0; }
+        @media (max-width: 768px) {
+          .stage-comparing { overflow-y: auto !important; padding-bottom: 110px; }
+          .stage-comparing .comparison-panel { flex: 0 0 auto; min-height: 420px; }
+          .stage-comparing .comparison-canvas { min-height: 360px; }
+        }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
         .stage-view-controls {
           position: absolute;
@@ -364,8 +396,17 @@ export function RoomStage({
           }
         }
       `}</style>
+      <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined} style={{ display: 'flex', flexDirection: 'column' }}>
+      {comparing && <Box className="comparison-header">
+        <Text size="sm" fw={600}>Principal</Text>
+        <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => onSelectFeaturedStream(event.target.value)}>
+          {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+        </select>
+        {showAccess && interactionAccess}
+      </Box>}
       {/* Main Spotlight Canvas */}
       <Box
+        className="comparison-canvas"
         style={{
           flex: 1,
           display: 'flex',
@@ -399,10 +440,11 @@ export function RoomStage({
           onToggleFullscreen={toggleFullscreen}
           isCinema={isCinema}
           onToggleCinema={onToggleCinema}
-          streamCount={secondaryStreams.length}
+          streamCount={comparing ? 0 : secondaryStreams.length}
           overlayTop={60}
           showStreams={showStreams}
           onToggleStreams={() => setShowStreams(value => !value)}
+          comparisonControl={secondaryStreams.length > 0 ? <Button variant={comparing ? 'filled' : 'subtle'} color={comparing ? 'blue' : 'gray'} aria-pressed={comparing} onClick={() => setComparison(value => !value)}>{comparing ? 'Sair da comparação' : 'Comparar'}</Button> : undefined}
         />
 
         {/* Top-Left Streamer Badge */}
@@ -465,7 +507,7 @@ export function RoomStage({
             zIndex: 26,
           }}
         >
-          {showAccess && interactionAccess}
+          {showAccess && !comparing && interactionAccess}
           <Box
             className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
             style={{
@@ -487,8 +529,29 @@ export function RoomStage({
         </Box>
       </Box>
 
+      </Box>
+      {comparing && secondaryStream && <Box className="comparison-panel" role="region" aria-label="Transmissão secundária" style={{ display: 'flex', flexDirection: 'column' }}>
+        <Box className="comparison-header">
+          <Text size="sm" fw={600}>Secundária · sem áudio</Text>
+          <select aria-label="Transmissão secundária" value={secondaryStream.id} onChange={event => setSecondaryId(event.target.value)}>
+            {secondaryStreams.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+          </select>
+        </Box>
+        <Box className="comparison-canvas" style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+          <SpotlightVideoPlayer key={secondaryStream.id} secondary
+            stream={secondaryStream.paused ? null : secondaryStream.stream} isLocal={secondaryStream.isLocal}
+            remotePeerId={secondaryStream.isLocal ? undefined : secondaryStream.id} onVideoPresented={onVideoPresented}
+            annotations={annotations} localPeerId={participants.find(p => p.isLocal)?.peerId}
+            annotationPeerId={participants.find(p => secondaryStream.isLocal ? p.isLocal : p.peerId === secondaryStream.id)?.peerId}
+            annotationStreamId={participants.find(p => secondaryStream.isLocal ? p.isLocal : p.peerId === secondaryStream.id)?.streamId}
+            connectionState={remoteConnectionStates[secondaryStream.id]} onRetry={() => onRetryPeer?.(secondaryStream.id)}
+            isCinema={isCinema} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
+            streamCount={0} showStreams={false} onToggleStreams={() => {}} />
+        </Box>
+      </Box>}
+
       {/* Multi-Stream Previews (Sidebar on desktop / horizontal carousel on mobile) */}
-      {secondaryStreams.length > 0 && (!isCinema || showStreams) && (
+      {!comparing && secondaryStreams.length > 0 && (!isCinema || showStreams) && (
         <Box
           className="secondary-streams-panel"
           style={{
@@ -546,6 +609,7 @@ export function RoomStage({
 
 // Spotlight Video Player Component
 function SpotlightVideoPlayer({
+  secondary = false, comparisonControl,
   onVideoPresented, remotePeerId,
   annotations, localPeerId, annotationPeerId, annotationStreamId,
   pointingEnabled = true,
@@ -566,6 +630,8 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  secondary?: boolean;
+  comparisonControl?: React.ReactNode;
   overlayTop?: number;
   remotePeerId?: string;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
@@ -593,11 +659,11 @@ function SpotlightVideoPlayer({
   // CRITICAL: Local video MUST ALWAYS be muted to prevent acoustic feedback loop!
   // Remote video plays unmuted so viewers can hear the presenter's system/tab audio.
   const [playback, setPlayback] = useState('Conectando');
-  const videoRef = useMediaStreamVideo(stream, isLocal, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined);
+  const videoRef = useMediaStreamVideo(stream, isLocal || secondary, setPlayback, !isLocal && remotePeerId && stream ? () => onVideoPresented?.(remotePeerId, stream) : undefined);
   const [tool, setTool] = useState<AnnotationTool>('navigate');
-  const canAnnotate = Boolean(isLocal && stream && annotationStreamId && annotations?.available);
-  const canPoint = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
-  const canDraw = Boolean(!isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && drawingEnabled);
+  const canAnnotate = Boolean(!secondary && isLocal && stream && annotationStreamId && annotations?.available);
+  const canPoint = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && pointingEnabled);
+  const canDraw = Boolean(!secondary && !isLocal && stream && annotationPeerId && annotationStreamId && annotations?.available && drawingEnabled);
   const effectiveTool: AnnotationTool =
     isLocal
       ? canAnnotate && (tool === 'laser' || tool === 'draw')
@@ -610,10 +676,10 @@ function SpotlightVideoPlayer({
       : 'navigate';
   useEffect(() => { setTool('navigate'); }, [stream, annotationStreamId, annotations?.available, pointingEnabled, drawingEnabled, isLocal]);
   const zoom = useVideoZoom(videoRef, stream, effectiveTool !== 'navigate');
-  const pip = usePictureInPicture(videoRef, stream);
+  const pip = usePictureInPicture(videoRef, secondary ? null : stream);
   const screenshot = useVideoScreenshot({
     videoRef,
-    stream,
+    stream: secondary ? null : stream,
     streamId: isLocal ? 'local' : remotePeerId,
     isPaused: !stream,
     connectionState,
@@ -652,7 +718,7 @@ function SpotlightVideoPlayer({
   return (
     <>
     <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
-      {isLocal && annotations && annotationStreamId && <Box role="group" aria-label="Anotações temporárias" style={{ display: 'flex', gap: 2 }}>
+      {!secondary && isLocal && annotations && annotationStreamId && <Box role="group" aria-label="Anotações temporárias" style={{ display: 'flex', gap: 2 }}>
         {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} withArrow>
           <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
             disabled={!canAnnotate} aria-pressed={effectiveTool === mode} onClick={() => setTool(effectiveTool === mode ? 'navigate' : mode)}
@@ -696,7 +762,7 @@ function SpotlightVideoPlayer({
           </Menu.Dropdown>
         </Menu>
       </Box>}
-      {!isLocal && annotations && annotationPeerId && annotationStreamId && (
+      {!secondary && !isLocal && annotations && annotationPeerId && annotationStreamId && (
         <Box role="group" aria-label="Ferramentas de colaboração" style={{ display: 'flex', gap: 2 }}>
           <Tooltip
             label={
@@ -778,7 +844,8 @@ function SpotlightVideoPlayer({
         </Box>
       )}
       <Box className="stage-display-controls" role="group" aria-label="Controles de visualização">
-      {onToggleCinema && (
+      {comparisonControl}
+      {!secondary && onToggleCinema && (
         <Tooltip label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} withArrow>
           <Button
             variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
@@ -792,6 +859,7 @@ function SpotlightVideoPlayer({
           {showStreams ? 'Ocultar' : 'Transmissões'} ({streamCount})
         </Button>
       )}
+      {!secondary && <>
       <Tooltip label={pip.available || pip.active ? 'Janela flutuante (PiP) · sem anotações' : 'Janela flutuante indisponível neste navegador ou vídeo'} withArrow>
         <span
           tabIndex={!pip.available && !pip.active ? 0 : undefined}
@@ -856,6 +924,7 @@ function SpotlightVideoPlayer({
       >
         {screenshot.feedbackMessage}
       </Box>
+      </>}
       <Box
         className="zoom-controls"
         role="group"
@@ -884,19 +953,19 @@ function SpotlightVideoPlayer({
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconReset size={16} aria-hidden /></Button>
       </Box>
-      <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
+      {!secondary && <Tooltip label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} withArrow>
         <Button
           variant="subtle" color="gray" onClick={onToggleFullscreen} p={8}
           aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
         >{isFullscreen ? <IconMinimize size={16} aria-hidden /> : <IconMaximize size={16} aria-hidden />}</Button>
-      </Tooltip>
+      </Tooltip>}
       </Box>
     </Box>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 48, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8 }}>{pip.error}</Text>}
     <Box style={{ position: 'absolute', top: overlayTop, left: 12, zIndex: 2 }}>
       {stream && <Text size="sm">{connectionState === 'failed' ? 'Falha na conexão' : connectionState === 'disconnected' ? 'Reconectando' : playback}</Text>}
       {connectionState === 'failed' && <Button onClick={onRetry}>Tentar novamente</Button>}
-      {videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
+      {!secondary && videoRef.audioBlocked && <Button onClick={videoRef.enableAudio}>Ativar áudio</Button>}
       {playback === 'Falha na reprodução' && <Button onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
     </Box>
     <Box
@@ -922,7 +991,8 @@ function SpotlightVideoPlayer({
       ref={videoRef}
       autoPlay
       playsInline
-      muted={isLocal}
+      muted={isLocal || secondary}
+      disablePictureInPicture={secondary}
       style={{
         width: '100%',
         height: '100%',

@@ -2263,3 +2263,48 @@ for (const mobile of [false, true]) {
     } finally { await Promise.all(contexts.map(c => c.close())); }
   });
 }
+
+test('F22 both annotation overlays, silent secondary, replacement and playback cleanup', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const [ana, bia, viewer] = await Promise.all(contexts.map(c => c.newPage()));
+    for (const [i, page] of [ana, bia, viewer].entries()) {
+      await syntheticCapture(page);
+      await page.addInitScript(name => sessionStorage.setItem('screen_room_display_name', name), ['Ana', 'Bia', 'Vera'][i]);
+      await page.goto(`/room/f22-annotations-${test.info().workerIndex}`);
+    }
+    await ana.evaluate(() => { (window as any).testAudio = true; });
+    await bia.evaluate(() => { (window as any).testAudio = true; });
+    await startLive(ana); await startLive(bia); await frames(viewer);
+    const connections = await viewer.evaluate(() => (window as any).testPeers.length);
+    await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+    expect(await viewer.evaluate(() => (window as any).testPeers.length)).toBe(connections);
+    expect(await viewer.locator('video').evaluateAll(v => v.filter(e => !(e as HTMLVideoElement).muted).length)).toBeLessThanOrEqual(1);
+    const primary = viewer.getByRole('region', { name: 'Transmissão principal', exact: true });
+    const secondary = viewer.getByRole('region', { name: 'Transmissão secundária', exact: true });
+    await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+    // Each presenter draws on their own capture.
+    await bia.getByRole('button', { name: 'Destacar transmissão de Bia (você)' }).click();
+    await drawAnnotation(ana); await drawAnnotation(bia);
+    const pixels = (panel: typeof primary) => panel.getByTestId('annotation-overlay').evaluate((canvas: HTMLCanvasElement) =>
+      canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some((v, i) => i % 4 === 3 && v > 0));
+    await expect.poll(() => pixels(primary)).toBe(true);
+    await expect.poll(() => pixels(secondary)).toBe(true);
+    await expect(secondary.getByRole('button', { name: /Desenhar|Apontar|Ponteiro laser/ })).toHaveCount(0);
+    await primary.getByRole('button', { name: 'Ampliar zoom' }).click();
+    // Refresh temporary strokes before checking the zoomed overlay (TTL is eight seconds).
+    await drawAnnotation(ana); await drawAnnotation(bia);
+    await expect.poll(() => pixels(primary)).toBe(true);
+    await expect.poll(() => pixels(secondary)).toBe(true);
+    await secondary.locator('video').evaluate(v => { (window as any).f22OldVideo = v; (window as any).f22OldStream = (v as HTMLVideoElement).srcObject; });
+    const captureId = () => viewer.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'sharing-updated' && m.active).at(-1)?.streamId);
+    const previousCapture = await captureId();
+    await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await expect.poll(captureId).not.toBe(previousCapture);
+    await expect.poll(() => secondary.locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth > 0 && !(v as HTMLVideoElement).paused)).toBe(true);
+    expect(await secondary.locator('video').evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
+    await viewer.getByRole('button', { name: 'Sair da comparação' }).click();
+    await expect.poll(() => viewer.evaluate(() => (window as any).f22OldVideo.srcObject === null && !(window as any).f22OldVideo.isConnected)).toBe(true);
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});

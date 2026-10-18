@@ -277,3 +277,79 @@ for (const [label, viewport, hasTouch] of [['desktop', { width: 1280, height: 80
     } finally { await closeAll([ana.context, bia.context, viewer.context]); }
   });
 }
+
+for (const [label, viewport, touch] of [['desktop', { width: 1440, height: 900 }, false], ['mobile-390', { width: 390, height: 844 }, true], ['mobile-320', { width: 320, height: 740 }, true]] as const) {
+  test(`F22 comparison is local, follows only primary and recovers lifecycle (${label})`, async ({ browser }) => {
+    const room = `f22-${label}-${Date.now()}`;
+    const ana = await open(browser, room, 'Ana'), bia = await open(browser, room, 'Bia');
+    const clara = await open(browser, room, 'Clara');
+    const viewer = await open(browser, room, 'Vera', viewport, touch);
+    const page = viewer.page;
+    const primary = page.getByRole('region', { name: 'Transmissão principal', exact: true });
+    const secondary = page.getByRole('region', { name: 'Transmissão secundária', exact: true });
+    try {
+      await startLive(ana.page); await startLive(bia.page); await startLive(clara.page);
+      await expect(card(page, 'Clara')).toBeVisible();
+      await chooseFollow(page, 'Ana');
+      const selections = await page.evaluate(() => (window as any).testSelections.length);
+      const compare = page.getByRole('button', { name: 'Comparar', exact: true });
+      await compare.focus(); await page.keyboard.press('Enter');
+      await expect(primary).toBeVisible(); await expect(secondary).toBeVisible();
+      const secondarySelect = secondary.getByRole('combobox');
+      await secondarySelect.selectOption({ label: 'Clara' });
+      await expect.poll(() => page.evaluate(() => (window as any).testSelections.length)).toBe(selections);
+      await drawer(page); await expect(status(page)).not.toHaveText('Acompanhamento suspenso'); await closeDrawer(page);
+      await primary.getByRole('button', { name: 'Ampliar zoom' }).click();
+      await expect(primary.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('125%');
+      await expect(secondary.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('100%');
+      if (touch) await secondary.getByRole('button', { name: 'Ampliar zoom' }).tap();
+      else await secondary.getByRole('button', { name: 'Ampliar zoom' }).click();
+      await expect(secondary.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('125%');
+      await expect(secondary.getByRole('button', { name: /Apontar|Desenhar|Salvar imagem|Janela flutuante/ })).toHaveCount(0);
+      expect(await secondary.locator('video').evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
+      expect(await page.locator('video').evaluateAll(v => v.filter(e => !(e as HTMLVideoElement).muted).length)).toBeLessThanOrEqual(1);
+      const a = (await primary.boundingBox())!, b = (await secondary.boundingBox())!;
+      if (touch) { expect(b.y).toBeGreaterThan(a.y); expect(b.width).toBeLessThanOrEqual(viewport.width); }
+      else { expect(b.x).toBeGreaterThan(a.x); expect(Math.abs(a.width - b.width)).toBeLessThan(2); }
+      if (touch) await page.setViewportSize({ width: viewport.width, height: 1500 });
+      await page.locator('.stage-main-container').evaluate(el => { el.scrollTop = 0; });
+      await page.screenshot({ path: test.info().outputPath(`f22-${label}-active.png`), fullPage: true });
+      await page.setViewportSize(viewport);
+      // F29 chooses the former secondary: composition swaps to the previous primary.
+      const oldPrimary = await primary.getByRole('combobox').inputValue();
+      await card(ana.page, 'Clara').click();
+      await expect(primary.getByRole('combobox')).toHaveValue(await clara.page.evaluate(() => (window as any).testPeerId));
+      await expect(secondarySelect).toHaveValue(oldPrimary);
+      await expect.poll(() => page.evaluate(() => (window as any).testSelections.length)).toBe(selections);
+      await bia.page.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await secondarySelect.selectOption({ label: 'Bia' });
+      await expect(secondary.getByText('Transmissão pausada', { exact: true })).toBeVisible();
+      if (touch) await page.setViewportSize({ width: viewport.width, height: 1500 });
+      await page.locator('.stage-main-container').evaluate(el => { el.scrollTop = 0; });
+      await page.screenshot({ path: test.info().outputPath(`f22-${label}-paused.png`), fullPage: true });
+      await page.setViewportSize(viewport);
+      await bia.page.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await expect.poll(() => secondary.locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+      await drop(bia.page); await reconnect(bia.page);
+      await expect.poll(() => secondary.locator('video').evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
+      await primary.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await expect(secondary).toBeVisible();
+      await primary.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => document.fullscreenElement?.contains(document.querySelector('[aria-label="Transmissão secundária"]')))).toBe(true);
+      await primary.getByRole('button', { name: 'Sair da tela cheia' }).click();
+      await primary.getByRole('button', { name: 'Sair do Modo Cinema' }).click();
+      const download = page.waitForEvent('download');
+      await primary.getByRole('button', { name: 'Salvar imagem', exact: true }).click();
+      expect((await download).suggestedFilename()).toMatch(/\.png$/);
+      await page.getByRole('button', { name: 'Sair da comparação' }).click();
+      await expect(secondary).toHaveCount(0);
+      await compare.click();
+      await primary.getByRole('combobox').selectOption({ label: 'Bia' });
+      await drawer(page); await expect(status(page)).toHaveText('Acompanhamento suspenso'); await closeDrawer(page);
+      await ana.page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await clara.page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(secondary).toHaveCount(0);
+      await expect(compare).toHaveCount(0);
+    } finally { await closeAll([ana.context, bia.context, clara.context, viewer.context]); }
+  });
+}
