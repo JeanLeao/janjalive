@@ -80,7 +80,7 @@ for (const mobile of [false, true]) {
       await expect(page.getByRole('button', { name: 'Sair do Modo Cinema' })).toBeVisible();
       await page.getByRole('button', { name: 'Sair da tela cheia' }).click();
       await expect(page.getByRole('button', { name: 'Sair do Modo Cinema' })).toHaveAttribute('aria-pressed', 'true');
-      const streamsButton = page.getByRole('button', { name: 'Transmissões (1)' });
+      const streamsButton = page.getByRole('button', { name: 'Alternar outras transmissões' });
       if (mobile) await streamsButton.tap(); else await streamsButton.click();
       const preview = page.getByRole('button', { name: /Destacar transmissão/ });
       await expect(preview).toBeVisible();
@@ -195,4 +195,25 @@ test('PiP requests remain serialized across stream replacement', async ({ page }
   await expect.poll(() => page.evaluate(() => document.pictureInPictureElement === null)).toBe(true);
   await enterPiP(page).click();
   await expect(exitPiP(page)).toBeVisible();
+});
+
+test('F22 entering and leaving comparison preserves primary playback, zoom and PiP', async ({ page }) => {
+  await mockPiP(page);
+  await page.goto('/room/f22-modes?demo=multi');
+  const video = mainVideo(page);
+  await expect(enterPiP(page)).toBeEnabled();
+  await video.evaluate(v => { (window as any).f22Primary = v; });
+  await page.getByRole('button', { name: 'Ampliar zoom' }).click();
+  await enterPiP(page).click();
+  await page.getByRole('button', { name: 'Comparar', exact: true }).click();
+  const primary = page.getByRole('region', { name: 'Transmissão principal', exact: true });
+  const secondary = page.getByRole('region', { name: 'Transmissão secundária', exact: true });
+  await expect.poll(() => primary.locator('video').evaluate(v => v === (window as any).f22Primary && document.pictureInPictureElement === v)).toBe(true);
+  await expect(primary.getByRole('group', { name: 'Zoom da transmissão' })).toContainText('125%');
+  await expect(secondary.getByRole('button', { name: /Janela flutuante|Salvar imagem/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sair da comparação' }).click();
+  await expect.poll(() => video.evaluate(v => v === (window as any).f22Primary && document.pictureInPictureElement === v)).toBe(true);
+  await page.getByRole('button', { name: 'Comparar', exact: true }).click();
+  await primary.getByRole('combobox').selectOption({ index: 1 });
+  await expect.poll(() => page.evaluate(() => document.pictureInPictureElement === null)).toBe(true);
 });

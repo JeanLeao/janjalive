@@ -28,6 +28,8 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ## Modos de visualização
 
+Com pelo menos duas transmissões, **Comparar** abre dois painéis equivalentes lado a lado no desktop e empilhados com rolagem no mobile. **Principal** continua vinculada ao palco e ao acompanhamento de apresentadores; **Secundária** é uma escolha local e sempre sem áudio. Cada painel tem zoom e arraste independentes e exibe suas próprias anotações; somente o principal oferece ferramentas de anotação, PiP e captura de imagem. Cinema e tela cheia abrangem os dois painéis. **Sair da comparação** restaura o palco; isso também acontece quando resta apenas uma transmissão elegível.
+
 Na barra do palco, **Modo Cinema** recolhe o cabeçalho e as miniaturas para ampliar a transmissão dentro da página. O dock continua disponível; **Transmissões** permite abrir as miniaturas e trocar o destaque. O botão **Sair do Modo Cinema** restaura o layout. A preferência de Cinema e o zoom são preservados ao entrar e sair de tela cheia.
 
 **Janela flutuante (PiP)** usa o vídeo principal na janela nativa do navegador, quando disponível. A ativação é manual; o controle fica indisponível quando o navegador ou o vídeo não permitem PiP. Trocar o destaque, pausar, substituir ou encerrar a transmissão e sair da sala encerram o PiP; uma nova ativação é manual. Reconexões que mantêm o stream não solicitam outra janela.

@@ -465,6 +465,25 @@ export function IconPictureInPicture({ size = 20, ...props }: IconProps) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" /></svg>;
 }
 
+export function IconCompare({ size = 20, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </svg>
+  );
+}
+
 export function IconCamera({ size = 20, ...props }: IconProps) {
   return (
     <svg
