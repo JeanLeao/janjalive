@@ -29,10 +29,108 @@ async function open(browser: Browser, room: string, name: string, viewport?: { w
       value: async () => {
         if ((window as any).testCaptureGate) await (window as any).testCaptureGate;
         const canvas = document.createElement('canvas');
-        canvas.width = 640; canvas.height = 360;
+        const isDashboard = nickname === 'Bia' || nickname === 'Clara';
+        canvas.width = nickname === 'Clara' ? 960 : nickname === 'Bia' ? 1024 : 1280;
+        canvas.height = nickname === 'Clara' ? 720 : nickname === 'Bia' ? 640 : 720;
         const ctx = canvas.getContext('2d')!;
         let frame = 0;
-        const timer = setInterval(() => { ctx.fillStyle = frame++ % 2 ? '#ff0000' : '#0000ff'; ctx.fillRect(0, 0, 640, 360); }, 50);
+        const draw = () => {
+          const w = canvas.width, h = canvas.height;
+          frame++;
+          if (isDashboard) {
+            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 0, w, 46);
+            ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 16px system-ui, sans-serif';
+            ctx.fillText(`${nickname} · Screen Room Analytics (${w}×${h})`, 20, 29);
+            ctx.fillStyle = '#94a3b8'; ctx.font = '13px system-ui, sans-serif';
+            ctx.fillText('https://app.screenroom.dev/metrics/mesh-p2p', 480, 29);
+            const cards = [
+              ['Bitrate de saída', '2.84 Mbps', '#22c55e'],
+              ['Quadros / seg', '30 fps', '#38bdf8'],
+              ['RTT médio (ICE)', '18 ms', '#a78bfa'],
+              ['Perda de pacotes', '0.02%', '#f59e0b'],
+            ];
+            cards.forEach(([label, val, col], idx) => {
+              const cx = 20 + idx * 230, cy = 68;
+              ctx.fillStyle = '#1e293b'; ctx.fillRect(cx, cy, 214, 96);
+              ctx.strokeStyle = '#334155'; ctx.strokeRect(cx, cy, 214, 96);
+              ctx.fillStyle = '#94a3b8'; ctx.font = '13px system-ui, sans-serif'; ctx.fillText(label, cx + 14, cy + 28);
+              ctx.fillStyle = col; ctx.font = 'bold 26px monospace'; ctx.fillText(val, cx + 14, cy + 68);
+            });
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(20, 184, 580, 320); ctx.strokeRect(20, 184, 580, 320);
+            ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 15px system-ui, sans-serif';
+            ctx.fillText('Estabilidade de banda e jitter por par conectado', 38, 214);
+            for (let i = 0; i < 12; i++) {
+              const bh = 70 + ((i * 37 + frame) % 140);
+              ctx.fillStyle = i % 3 === 0 ? '#38bdf8' : '#6366f1';
+              ctx.fillRect(42 + i * 44, 476 - bh, 28, bh);
+            }
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(620, 184, w - 640, 320); ctx.strokeRect(620, 184, w - 640, 320);
+            ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 15px system-ui, sans-serif';
+            ctx.fillText('Topologia da sala', 638, 214);
+            ctx.font = '13px monospace'; ctx.fillStyle = '#cbd5e1';
+            ['• host-ana   1080p  ativo', '• peer-bia    720p  ativo', '• peer-clara  600p  ativo', '• viewer-01  recebendo', '• viewer-02  recebendo'].forEach((line, i) => {
+              ctx.fillText(line, 638, 254 + i * 34);
+            });
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(20, 522, w - 40, h - 542); ctx.strokeRect(20, 522, w - 40, h - 542);
+            ctx.fillStyle = '#94a3b8'; ctx.font = '13px monospace';
+            ctx.fillText('[ICE] Selected candidate pair: host -> srflx (udp) · DTLS connected', 38, 554);
+            ctx.fillText('[QoS] Maintain-resolution active · targetBitrate=2800kbps · audio=opus/48kHz', 38, 584);
+            ctx.fillText(`[SYNC] Frame heartbeat #${frame} · primary & secondary streams nominal`, 38, 614);
+          } else {
+            ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, w, 38);
+            ctx.fillStyle = '#f85149'; ctx.beginPath(); ctx.arc(20, 19, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#d29922'; ctx.beginPath(); ctx.arc(40, 19, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#3fb950'; ctx.beginPath(); ctx.arc(60, 19, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#c9d1d9'; ctx.font = '13px monospace';
+            ctx.fillText(`${nickname} — VS Code · packages/protocol/src/messages.ts (${w}×${h})`, 92, 24);
+            ctx.fillStyle = '#121820'; ctx.fillRect(0, 38, 210, h - 66);
+            ctx.fillStyle = '#8b949e'; ctx.font = 'bold 12px system-ui, sans-serif';
+            ctx.fillText('EXPLORER', 18, 66);
+            ctx.font = '13px monospace';
+            ['▾ apps/web/src', '  ▾ features/room', '    • RoomStage.tsx', '    • PeerManager.ts', '    • useRoomSession.ts', '▾ apps/signaling', '    • room-state.ts', '    • server.ts'].forEach((item, idx) => {
+              ctx.fillStyle = item.includes('RoomStage') ? '#58a6ff' : '#8b949e';
+              ctx.fillText(item, 16, 96 + idx * 26);
+            });
+            const codeLines = [
+              ['01', '#ff7b72', 'export function ', '#d2a8ff', 'syncStageComparison', '#c9d1d9', '(streams: StreamItem[]) {'],
+              ['02', '#8b949e', '  // Mantém seleção secundária estritamente local (F22)', '', '', '', ''],
+              ['03', '#ff7b72', '  const ', '#79c0ff', 'primary ', '#c9d1d9', '= streams.find(s => s.id === featuredId) ?? streams[0];'],
+              ['04', '#ff7b72', '  const ', '#79c0ff', 'secondary ', '#c9d1d9', '= streams.find(s => s.id === secondaryId && s.id !== primary.id);'],
+              ['05', '#ff7b72', '  if ', '#c9d1d9', '(!secondary) ', '#ff7b72', 'return { comparing: false, primary };'],
+              ['06', '#ff7b72', '  return ', '#c9d1d9', '{ comparing: true, primary, secondary, mutedSecondary: true };'],
+              ['07', '#c9d1d9', '}', '', '', '', ''],
+              ['08', '#8b949e', '// Terminal — pnpm --filter @screen-room/web test:e2e', '', '', '', ''],
+              ['09', '#3fb950', '✓ ', '#c9d1d9', 'F22 simultaneous comparison preserves primary audio & zoom', '', ''],
+              ['10', '#3fb950', '✓ ', '#c9d1d9', `Frame tick #${frame} · 0 dropped packets · ICE connected`, '', ''],
+            ];
+            ctx.font = '15px monospace';
+            codeLines.forEach(([ln, c1, t1, c2, t2, c3, t3], idx) => {
+              const y = 84 + idx * 36;
+              ctx.fillStyle = '#484f58'; ctx.fillText(ln, 230, y);
+              let x = 268;
+              for (const [col, txt] of [[c1, t1], [c2, t2], [c3, t3]]) {
+                if (!txt) continue;
+                ctx.fillStyle = col; ctx.fillText(txt, x, y);
+                x += ctx.measureText(txt).width;
+              }
+            });
+            ctx.fillStyle = '#161b22'; ctx.fillRect(210, h - 180, w - 210, 152);
+            ctx.strokeStyle = '#30363d'; ctx.strokeRect(210, h - 180, w - 210, 152);
+            ctx.fillStyle = '#58a6ff'; ctx.font = 'bold 12px monospace';
+            ctx.fillText('TERMINAL · zsh — node v22.23.3', 230, h - 154);
+            ctx.fillStyle = '#7ee787'; ctx.font = '13px monospace';
+            ctx.fillText('$ pnpm typecheck && pnpm test', 230, h - 124);
+            ctx.fillStyle = '#c9d1d9';
+            ctx.fillText('Packages: +3  |  Tests: 237 passed (237)  |  Status: READY', 230, h - 96);
+            ctx.fillStyle = '#1f6feb'; ctx.fillRect(0, h - 28, w, 28);
+            ctx.fillStyle = '#ffffff'; ctx.font = '12px monospace';
+            ctx.fillText(` feat/f22-simultaneous-view  •  UTF-8  •  TypeScript JSX  •  Ln 42, Col 18 `, 16, h - 10);
+          }
+        };
+        draw();
+        const timer = setInterval(draw, 80);
         const stream = canvas.captureStream(20);
         const track = stream.getVideoTracks()[0];
         const stop = track.stop.bind(track);
@@ -290,6 +388,23 @@ for (const [label, viewport, touch] of [['desktop', { width: 1440, height: 900 }
     try {
       await startLive(ana.page); await startLive(bia.page); await startLive(clara.page);
       await expect(card(page, 'Clara')).toBeVisible();
+      await expect.poll(() => page.getByTestId('zoom-viewport').locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+      await expect.poll(() => page.locator('.secondary-preview-btn video').first().evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+      await expect(page.getByText(/(entrou|saiu) da sala/)).toBeHidden();
+      await page.screenshot({ path: test.info().outputPath(`f22-${label}-traditional-multi.png`), animations: 'disabled' });
+      await expect(ana.page.getByText(/(entrou|saiu) da sala/)).toBeHidden();
+      if (label === 'desktop') {
+        await ana.page.setViewportSize({ width: 1440, height: 900 });
+        await expect.poll(() => ana.page.getByTestId('zoom-viewport').locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+        await expect.poll(() => ana.page.locator('.secondary-preview-btn video').first().evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+        await ana.page.screenshot({ path: test.info().outputPath('f22-desktop-presenter-traditional.png'), animations: 'disabled' });
+        await ana.page.getByRole('button', { name: 'Comparar', exact: true }).click();
+        await expect.poll(() => ana.page.getByRole('region', { name: 'Transmissão secundária', exact: true }).locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+        await ana.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await ana.page.mouse.move(0, 0);
+        await ana.page.screenshot({ path: test.info().outputPath('f22-desktop-presenter-compare.png'), animations: 'disabled' });
+        await ana.page.getByRole('button', { name: 'Sair da comparação' }).click();
+      }
       await chooseFollow(page, 'Ana');
       const selections = await page.evaluate(() => (window as any).testSelections.length);
       const compare = page.getByRole('button', { name: 'Comparar', exact: true });
@@ -334,8 +449,19 @@ for (const [label, viewport, touch] of [['desktop', { width: 1440, height: 900 }
       await expect.poll(() => secondary.locator('video').evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
       await primary.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
       await expect(secondary).toBeVisible();
+      if (label === 'desktop') {
+        await expect(page.getByText(/(entrou|saiu) da sala/)).toBeHidden();
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await page.mouse.move(0, 0);
+        await page.screenshot({ path: test.info().outputPath('f22-desktop-cinema.png'), animations: 'disabled' });
+      }
       await primary.getByRole('button', { name: 'Tela cheia', exact: true }).click();
       await expect.poll(() => page.evaluate(() => document.fullscreenElement?.contains(document.querySelector('[aria-label="Transmissão secundária"]')))).toBe(true);
+      if (label === 'desktop') {
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await page.mouse.move(0, 0);
+        await page.screenshot({ path: test.info().outputPath('f22-desktop-fullscreen.png'), animations: 'disabled' });
+      }
       await primary.getByRole('button', { name: 'Sair da tela cheia' }).click();
       await primary.getByRole('button', { name: 'Sair do Modo Cinema' }).click();
       const download = page.waitForEvent('download');
