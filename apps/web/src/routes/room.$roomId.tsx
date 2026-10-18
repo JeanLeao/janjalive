@@ -163,12 +163,23 @@ function RoomPage() {
 
   const connected = session.connectionStatus === 'connected';
   const interactionsUi = useInteractionsUi({
-    roomId, messages: session.chatMessages, error: session.interactionError, pending: session.chatPending,
-    connected, onSendChat: session.sendChat,
+    roomId,
+    messages: session.chatMessages,
+    error: session.interactionError,
+    pending: session.chatPending,
+    connected,
+    onSendChat: session.sendChat,
+    questions: session.questions,
+    qaError: session.qaError,
+    qaPending: session.qaPending,
+    qaSubmitPending: session.qaSubmitPending,
+    onSubmitQuestion: session.submitQuestion,
   });
   const { closePicker } = interactionsUi;
   useEffect(() => { closePicker(); }, [isCinema, isFullscreen, closePicker]);
-  const localPeerId = session.participants.find((p) => p.isLocal)?.peerId;
+  const localParticipant = session.participants.find((p) => p.isLocal);
+  const localPeerId = localParticipant?.peerId;
+  const isLocalPresenter = Boolean(localParticipant?.isSharing || session.isSharing);
   const interactionActions = (variant: 'header' | 'floating') => (
     <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant}
       handRaised={session.participants.some(p => p.isLocal && p.handOrder != null)} handReady={session.handReady} onToggleHand={session.toggleHand} />
@@ -298,8 +309,23 @@ function RoomPage() {
         drawingEnabled={session.drawingEnabled}
         onToggleDrawingPermission={session.toggleDrawingPermission}
         onClearCollaborativeDrawings={session.clearCollaborativeDrawings}
-        interactions={<InteractionLayer ui={interactionsUi} messages={session.chatMessages} reactions={session.reactions}
-          error={session.interactionError} pending={session.chatPending} connected={connected} localPeerId={localPeerId} />}
+        interactions={<InteractionLayer
+          ui={interactionsUi}
+          messages={session.chatMessages}
+          reactions={session.reactions}
+          error={session.interactionError}
+          pending={session.chatPending}
+          connected={connected}
+          localPeerId={localPeerId}
+          isPresenter={isLocalPresenter}
+          questions={session.questions}
+          highlightedQuestionId={session.highlightedQuestionId}
+          qaError={session.qaError}
+          qaPending={session.qaPending}
+          onWithdrawQuestion={session.withdrawQuestion}
+          onAnswerQuestionText={session.answerQuestionText}
+          onUpdateQuestionStatus={session.updateQuestionStatus}
+        />}
         interactionAccess={interactionActions('floating')}
         isCinema={isCinema}
         onToggleCinema={() => setIsCinema(value => !value)}

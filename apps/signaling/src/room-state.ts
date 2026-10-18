@@ -3,10 +3,20 @@ import {
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
   type StageSelection, STAGE_SELECTION_LIMITS, type HandState, type HandsSnapshot, HAND_LIMITS,
+  type QaQuestion, type QuestionsSnapshot, type UpdateQuestionMessage, QA_LIMITS,
 } from '@screen-room/protocol';
 import * as crypto from 'node:crypto';
 
 export interface InteractionBudget { chat: number[]; reaction: number[]; ids: string[] }
+
+export interface QaBudget { times: number[]; ids: string[] }
+
+export interface RoomQaState {
+  revision: number;
+  nextOrder: number;
+  highlightedQuestionId: string | null;
+  questions: Map<string, QaQuestion>;
+}
 
 export interface PointingSenderBudget {
   seq: number;
@@ -23,6 +33,7 @@ export interface SpectatorDrawingSenderBudget {
 export interface ParticipantMeta {
   hand?: Omit<HandState, 'peerId'>;
   handTimes?: number[];
+  qa?: QaBudget;
   interactions?: InteractionBudget;
   collaboration?: {
     streamId: string;
@@ -48,6 +59,7 @@ export interface ParticipantMeta {
 export interface RecoveryReservation {
   hand?: Omit<HandState, 'peerId'>;
   handTimes?: number[];
+  qa?: QaBudget;
   interactions?: InteractionBudget;
   sharing?: SharingState;
   selection?: StageSelection;
@@ -78,6 +90,7 @@ export class RoomRegistry {
   static readonly DEFAULT_RECOVERY_GRACE_MS = 30000;
   #handClock = 0;
   #rooms = new Map<string, Map<string, ParticipantMeta>>();
+  #qaByRoom = new Map<string, RoomQaState>();
   #recoveryReservations = new Map<string, RecoveryReservation>();
   readonly maxParticipants: number;
 
@@ -139,6 +152,7 @@ export class RoomRegistry {
     participants.set(peer, {
       hand: existingMeta?.hand ?? reservation?.hand,
       handTimes: existingMeta?.handTimes ?? reservation?.handTimes,
+      qa: existingMeta?.qa ?? reservation?.qa,
       interactions: existingMeta?.interactions ?? reservation?.interactions,
       nickname: cleanNickname,
       reconnectToken: token,
@@ -149,6 +163,7 @@ export class RoomRegistry {
     });
     const restored = participants.get(peer)!;
     if (restored.selection && !this.#validSelection(participants, restored)) restored.selection = undefined;
+    this.#syncQaNicknames(room, peer, cleanNickname);
     return existingPeers;
   }
 
@@ -171,6 +186,7 @@ export class RoomRegistry {
       this.clearRecovery(room, peer);
       if (participants.size === 0 && !this.hasAnyRecoveryForRoom(room)) {
         this.#rooms.delete(room);
+        this.#qaByRoom.delete(room);
       }
     } else if (existingMeta) {
       this.clearRecovery(room, peer);
@@ -179,6 +195,7 @@ export class RoomRegistry {
         const currentParticipants = this.#rooms.get(room);
         if ((!currentParticipants || currentParticipants.size === 0) && !this.hasAnyRecoveryForRoom(room)) {
           this.#rooms.delete(room);
+          this.#qaByRoom.delete(room);
         }
       }, graceMs);
 
@@ -191,6 +208,7 @@ export class RoomRegistry {
         nickname: existingMeta.nickname,
         hand: existingMeta.hand,
         handTimes: existingMeta.handTimes,
+        qa: existingMeta.qa,
         interactions: existingMeta.interactions,
         sharing: existingMeta.sharing,
         selection: existingMeta.selection,
@@ -239,6 +257,209 @@ export class RoomRegistry {
     if (raised === Boolean(meta.hand?.order)) return true;
     meta.hand = { order: raised ? ++this.#handClock : null, version: version + 1 };
     return true;
+  }
+
+  #ensureQaState(roomId: string): RoomQaState {
+    let state = this.#qaByRoom.get(roomId);
+    if (!state) {
+      state = {
+        revision: 1,
+        nextOrder: 1,
+        highlightedQuestionId: null,
+        questions: new Map(),
+      };
+      this.#qaByRoom.set(roomId, state);
+    }
+    return state;
+  }
+
+  #consumeQaBudget(meta: ParticipantMeta, requestId: string, now: number): string | null {
+    const budget = (meta.qa ||= { times: [], ids: [] });
+    budget.times = budget.times.filter((time) => now - time < QA_LIMITS.windowMs);
+    if (budget.times.length >= QA_LIMITS.burst) {
+      return 'Muitas ações de perguntas. Aguarde alguns segundos.';
+    }
+    budget.times.push(now);
+    if (budget.ids.includes(requestId)) {
+      return 'Esta ação já foi processada.';
+    }
+    budget.ids = [...budget.ids.slice(-63), requestId];
+    return null;
+  }
+
+  /**
+   * Returns current Q&A snapshot for a room, sorted with open questions first (by arrival order),
+   * followed by answered questions (by arrival order).
+   */
+  questionsSnapshot(roomId: string): QuestionsSnapshot {
+    const room = normalizeRoom(roomId);
+    const state = this.#qaByRoom.get(room);
+    if (!state) {
+      return {
+        type: 'questions-snapshot',
+        roomId: room,
+        revision: 1,
+        highlightedQuestionId: null,
+        questions: [],
+      };
+    }
+    const sorted = Array.from(state.questions.values()).sort((a, b) => {
+      const aOpen = a.status === 'open' ? 0 : 1;
+      const bOpen = b.status === 'open' ? 0 : 1;
+      if (aOpen !== bOpen) return aOpen - bOpen;
+      return a.order - b.order;
+    });
+    return {
+      type: 'questions-snapshot',
+      roomId: room,
+      revision: state.revision,
+      highlightedQuestionId:
+        state.highlightedQuestionId && state.questions.has(state.highlightedQuestionId)
+          ? state.highlightedQuestionId
+          : null,
+      questions: sorted,
+    };
+  }
+
+  submitQuestion(
+    roomId: string,
+    peerId: string,
+    requestId: string,
+    text: string,
+    now = Date.now()
+  ): { ok: true; question: QaQuestion; snapshot: QuestionsSnapshot } | { ok: false; message: string } {
+    const room = normalizeRoom(roomId);
+    const peer = normalizePeer(peerId);
+    const participants = this.#rooms.get(room);
+    const meta = participants?.get(peer);
+    if (!participants || !meta) {
+      return { ok: false, message: 'Entre na sala antes de enviar uma pergunta.' };
+    }
+    const budgetErr = this.#consumeQaBudget(meta, requestId, now);
+    if (budgetErr) return { ok: false, message: budgetErr };
+
+    const state = this.#ensureQaState(room);
+    if (state.questions.size >= QA_LIMITS.maxQuestionsPerRoom) {
+      return {
+        ok: false,
+        message: `Limite de ${QA_LIMITS.maxQuestionsPerRoom} perguntas na sala atingido.`,
+      };
+    }
+
+    const question: QaQuestion = {
+      id: crypto.randomUUID(),
+      order: state.nextOrder++,
+      authorPeerId: peer,
+      ...(meta.nickname ? { authorNickname: meta.nickname } : {}),
+      text,
+      createdAt: now,
+      status: 'open',
+    };
+    state.questions.set(question.id, question);
+    state.revision++;
+    return { ok: true, question, snapshot: this.questionsSnapshot(room) };
+  }
+
+  withdrawQuestion(
+    roomId: string,
+    peerId: string,
+    requestId: string,
+    questionId: string,
+    now = Date.now()
+  ): { ok: true; snapshot: QuestionsSnapshot } | { ok: false; message: string } {
+    const room = normalizeRoom(roomId);
+    const peer = normalizePeer(peerId);
+    const participants = this.#rooms.get(room);
+    const meta = participants?.get(peer);
+    if (!participants || !meta) {
+      return { ok: false, message: 'Entre na sala antes de retirar a pergunta.' };
+    }
+    const budgetErr = this.#consumeQaBudget(meta, requestId, now);
+    if (budgetErr) return { ok: false, message: budgetErr };
+
+    const state = this.#qaByRoom.get(room);
+    const question = state?.questions.get(questionId);
+    if (!state || !question) {
+      return { ok: false, message: 'Pergunta não encontrada ou já retirada.' };
+    }
+    if (question.authorPeerId !== peer) {
+      return { ok: false, message: 'Apenas o autor pode retirar a própria pergunta.' };
+    }
+
+    state.questions.delete(questionId);
+    if (state.highlightedQuestionId === questionId) {
+      state.highlightedQuestionId = null;
+    }
+    state.revision++;
+    return { ok: true, snapshot: this.questionsSnapshot(room) };
+  }
+
+  updateQuestion(
+    roomId: string,
+    peerId: string,
+    update: UpdateQuestionMessage,
+    now = Date.now()
+  ): { ok: true; snapshot: QuestionsSnapshot } | { ok: false; message: string } {
+    const room = normalizeRoom(roomId);
+    const peer = normalizePeer(peerId);
+    const participants = this.#rooms.get(room);
+    const meta = participants?.get(peer);
+    if (!participants || !meta) {
+      return { ok: false, message: 'Entre na sala antes de atualizar perguntas.' };
+    }
+    const budgetErr = this.#consumeQaBudget(meta, update.requestId, now);
+    if (budgetErr) return { ok: false, message: budgetErr };
+
+    if (!meta.sharing?.active) {
+      return {
+        ok: false,
+        message: 'Apenas apresentadores compartilhando tela podem gerenciar perguntas.',
+      };
+    }
+
+    const state = this.#qaByRoom.get(room);
+    const question = state?.questions.get(update.questionId);
+    if (!state || !question) {
+      return { ok: false, message: 'Pergunta não encontrada.' };
+    }
+
+    if (update.action === 'answer-text') {
+      state.questions.set(question.id, {
+        ...question,
+        status: 'answered-text',
+        answer: {
+          text: update.answerText ?? '',
+          answeredByPeerId: peer,
+          ...(meta.nickname ? { answeredByNickname: meta.nickname } : {}),
+          answeredAt: now,
+        },
+      });
+    } else if (update.action === 'answer-verbal') {
+      state.questions.set(question.id, {
+        ...question,
+        status: 'answered-verbal',
+        answer: {
+          answeredByPeerId: peer,
+          ...(meta.nickname ? { answeredByNickname: meta.nickname } : {}),
+          answeredAt: now,
+        },
+      });
+    } else if (update.action === 'reopen') {
+      const { answer: _discarded, ...rest } = question;
+      state.questions.set(question.id, {
+        ...rest,
+        status: 'open',
+      });
+    } else if (update.action === 'highlight') {
+      state.highlightedQuestionId = question.id;
+    } else if (update.action === 'unhighlight') {
+      if (state.highlightedQuestionId === question.id) {
+        state.highlightedQuestionId = null;
+      }
+    }
+
+    state.revision++;
+    return { ok: true, snapshot: this.questionsSnapshot(room) };
   }
 
   #validSelection(participants: Map<string, ParticipantMeta>, presenter: ParticipantMeta): boolean {
@@ -503,7 +724,36 @@ export class RoomRegistry {
       return { changed: false, nickname: cleanNickname };
     }
     meta.nickname = cleanNickname;
+    this.#syncQaNicknames(room, peer, cleanNickname);
     return { changed: true, nickname: cleanNickname };
+  }
+
+  #syncQaNicknames(room: string, peer: string, cleanNickname: string | undefined): void {
+    const qaState = this.#qaByRoom.get(room);
+    if (!qaState || qaState.questions.size === 0) return;
+    let qaUpdated = false;
+    for (const [qId, q] of qaState.questions.entries()) {
+      let nextQ = q;
+      if (q.authorPeerId === peer && q.authorNickname !== cleanNickname) {
+        const { authorNickname: _old, ...rest } = nextQ;
+        nextQ = { ...rest, ...(cleanNickname ? { authorNickname: cleanNickname } : {}) };
+        qaUpdated = true;
+      }
+      if (nextQ.answer && nextQ.answer.answeredByPeerId === peer && nextQ.answer.answeredByNickname !== cleanNickname) {
+        const { answeredByNickname: _oldAns, ...ansRest } = nextQ.answer;
+        nextQ = {
+          ...nextQ,
+          answer: { ...ansRest, ...(cleanNickname ? { answeredByNickname: cleanNickname } : {}) },
+        };
+        qaUpdated = true;
+      }
+      if (nextQ !== q) {
+        qaState.questions.set(qId, nextQ);
+      }
+    }
+    if (qaUpdated) {
+      qaState.revision++;
+    }
   }
 
   has(roomId: unknown): boolean {

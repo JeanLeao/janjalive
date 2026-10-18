@@ -486,6 +486,7 @@ export function createSignalServer({
               ? message.nickname.trim().slice(0, 32)
               : undefined;
 
+          const prevQaRev = rooms.questionsSnapshot(normalizedRoom).revision;
           let peers: string[];
           try {
             peers = rooms.join(normalizedRoom, normalizedPeer, rawNick, message.reconnectToken);
@@ -547,6 +548,12 @@ export function createSignalServer({
             normalizedPeer
           );
           broadcast(normalizedRoom, rooms.handsSnapshot(normalizedRoom));
+          const qaSnap = rooms.questionsSnapshot(normalizedRoom);
+          if (qaSnap.revision > prevQaRev) {
+            broadcast(normalizedRoom, qaSnap);
+          } else {
+            send(socket, qaSnap);
+          }
           const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
           if (restoredSelection) {
             broadcast(
@@ -641,6 +648,64 @@ export function createSignalServer({
             return;
           }
           broadcast(meta.roomId, rooms.handsSnapshot(meta.roomId));
+          return;
+        }
+
+        if (message.type === 'submit-question' || message.type === 'withdraw-question' || message.type === 'update-question') {
+          const reject = (messageText: string) => send(socket, {
+            type: 'interaction-rejected', requestId: message.requestId, message: messageText,
+          });
+          const meta = socket.meta;
+          if (!meta) {
+            reject('Entre na sala antes de enviar.');
+            return;
+          }
+          // Ignore stale sockets silently without rejecting the active session
+          if (peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) {
+            return;
+          }
+          if (message.type === 'submit-question') {
+            const result = rooms.submitQuestion(meta.roomId, meta.peerId, message.requestId, message.text);
+            if (!result.ok) {
+              reject(result.message);
+              return;
+            }
+            send(socket, {
+              type: 'question-accepted',
+              requestId: message.requestId,
+              roomId: meta.roomId,
+              questionId: result.question.id,
+            });
+            broadcast(meta.roomId, result.snapshot);
+            return;
+          }
+          if (message.type === 'withdraw-question') {
+            const result = rooms.withdrawQuestion(meta.roomId, meta.peerId, message.requestId, message.questionId);
+            if (!result.ok) {
+              reject(result.message);
+              return;
+            }
+            send(socket, {
+              type: 'question-accepted',
+              requestId: message.requestId,
+              roomId: meta.roomId,
+              questionId: message.questionId,
+            });
+            broadcast(meta.roomId, result.snapshot);
+            return;
+          }
+          const result = rooms.updateQuestion(meta.roomId, meta.peerId, message);
+          if (!result.ok) {
+            reject(result.message);
+            return;
+          }
+          send(socket, {
+            type: 'question-accepted',
+            requestId: message.requestId,
+            roomId: meta.roomId,
+            questionId: message.questionId,
+          });
+          broadcast(meta.roomId, result.snapshot);
           return;
         }
 
@@ -747,6 +812,7 @@ export function createSignalServer({
             return;
           }
           const { roomId, peerId } = socket.meta;
+          const prevQaRev = rooms.questionsSnapshot(roomId).revision;
           const result = rooms.updateNickname(roomId, peerId, message.nickname);
           if (result.changed) {
             signalLog('update-nickname', {
@@ -763,6 +829,10 @@ export function createSignalServer({
               },
               peerId
             );
+            const nextQa = rooms.questionsSnapshot(roomId);
+            if (nextQa.revision > prevQaRev) {
+              broadcast(roomId, nextQa);
+            }
           }
           return;
         }
