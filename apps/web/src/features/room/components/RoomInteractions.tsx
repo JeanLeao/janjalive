@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Popover } from '@mantine/core';
-import { INTERACTION_LIMITS, REACTIONS, type ChatMessage, type Reaction, type ReactionEvent } from '@screen-room/protocol';
+import {
+  INTERACTION_LIMITS, QA_LIMITS, REACTIONS,
+  type ChatMessage, type QaQuestion, type Reaction, type ReactionEvent,
+} from '@screen-room/protocol';
 import { formatDisplayName, getAvatarColor, getInitials } from '../utils/avatar';
 import { IconHand, IconCheck, IconChat, IconClose, IconFlagBrazil, IconSend, IconSmile } from './Icons';
 import classes from './RoomInteractions.module.css';
@@ -29,45 +32,84 @@ const symbols: Record<Reaction, React.ReactNode> = {
 };
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
+export type InteractionTab = 'chat' | 'qa';
+
 interface InteractionsStateInput {
-  roomId: string; messages: ChatMessage[]; error: string | null; pending: boolean;
-  connected: boolean; onSendChat: (text: string) => boolean;
+  roomId: string;
+  messages: ChatMessage[];
+  error: string | null;
+  pending: boolean;
+  connected: boolean;
+  onSendChat: (text: string) => boolean;
+  questions?: QaQuestion[];
+  qaError?: string | null;
+  qaPending?: boolean;
+  qaSubmitPending?: boolean;
+  onSubmitQuestion?: (text: string) => boolean;
 }
 
 /**
- * Estado de interações elevado para a rota: chat aberto, rascunho, leitura e seletor
+ * Estado de interações elevado para a rota: chat/perguntas abertos, rascunhos, leitura e seletor
  * sobrevivem a mudanças de modo (normal, Cinema e tela cheia) sem remontar a sessão.
  */
-export function useInteractionsUi({ roomId, messages, error, pending, connected, onSendChat }: InteractionsStateInput) {
+export function useInteractionsUi({
+  roomId,
+  messages,
+  error,
+  pending,
+  connected,
+  onSendChat,
+  questions = [],
+  qaError = null,
+  qaPending = false,
+  qaSubmitPending = false,
+  onSubmitQuestion,
+}: InteractionsStateInput) {
   const [opened, setOpened] = useState(false);
+  const [tab, setTab] = useState<InteractionTab>('chat');
   const [picker, setPicker] = useState(false);
   const [draft, setDraft] = useState('');
+  const [qaDraft, setQaDraft] = useState('');
   const [lastRead, setLastRead] = useState<string>();
   const [atBottom, setAtBottom] = useState(true);
   const scroll = useRef<HTMLDivElement | null>(null);
   const wasPending = useRef(false);
+  const wasQaSubmitPending = useRef(false);
 
   useEffect(() => {
-    setOpened(false); setPicker(false); setDraft(''); setLastRead(undefined); setAtBottom(true);
+    setOpened(false);
+    setTab('chat');
+    setPicker(false);
+    setDraft('');
+    setQaDraft('');
+    setLastRead(undefined);
+    setAtBottom(true);
   }, [roomId]);
   useEffect(() => {
     if (wasPending.current && !pending && !error) setDraft('');
     wasPending.current = pending;
   }, [pending, error]);
+  useEffect(() => {
+    if (wasQaSubmitPending.current && !qaSubmitPending && !qaError) setQaDraft('');
+    wasQaSubmitPending.current = qaSubmitPending;
+  }, [qaSubmitPending, qaError]);
 
   const newest = messages.at(-1)?.id;
   const unread = newest && newest !== lastRead
     ? (lastRead ? messages.length - messages.findIndex(m => m.id === lastRead) - 1 : messages.length)
     : 0;
+  const openQuestionsCount = questions.filter(q => q.status === 'open').length;
+
   useEffect(() => {
-    if (opened && atBottom) {
+    if (opened && tab === 'chat' && atBottom) {
       scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
       setLastRead(newest);
     }
-  }, [newest, opened, atBottom]);
+  }, [newest, opened, tab, atBottom]);
   useEffect(() => { if (!connected) setPicker(false); }, [connected]);
 
   const send = () => { if (onSendChat(draft)) setAtBottom(true); };
+  const submitQa = () => { onSubmitQuestion?.(qaDraft); };
   const openChat = useCallback(() => { setOpened(true); setPicker(false); setAtBottom(true); }, []);
   const closeChat = useCallback(() => {
     setOpened(false);
@@ -75,17 +117,40 @@ export function useInteractionsUi({ roomId, messages, error, pending, connected,
   }, []);
   const toggleChat = useCallback(() => { if (opened) closeChat(); else openChat(); }, [opened, openChat, closeChat]);
   const closePicker = useCallback(() => setPicker(false), []);
-  return { opened, picker, setPicker, closePicker, draft, setDraft, atBottom, setAtBottom, scroll, unread, send, openChat, closeChat, toggleChat };
+  return {
+    opened,
+    tab,
+    setTab,
+    picker,
+    setPicker,
+    closePicker,
+    draft,
+    setDraft,
+    qaDraft,
+    setQaDraft,
+    atBottom,
+    setAtBottom,
+    scroll,
+    unread,
+    openQuestionsCount,
+    qaPending,
+    send,
+    submitQa,
+    openChat,
+    closeChat,
+    toggleChat,
+  };
 }
 export type InteractionsUi = ReturnType<typeof useInteractionsUi>;
 
-/** Acesso social compacto (chat + reações): no header ou como controle contextual no Cinema/tela cheia. */
+/** Acesso social compacto (chat/perguntas + levantar mão + reações): no header ou como controle contextual no Cinema/tela cheia. */
 export function InteractionActions({ ui, connected, onSendReaction, variant, handRaised = false, handReady = false, onToggleHand }: {
   handRaised?: boolean; handReady?: boolean; onToggleHand?: () => void;
   ui: InteractionsUi; connected: boolean; onSendReaction: (reaction: Reaction) => void; variant: 'header' | 'floating';
 }) {
-  const { unread, opened, picker } = ui;
+  const { unread, openQuestionsCount, opened, picker } = ui;
   const badge = unread > 99 ? '99+' : String(unread);
+  const qaBadge = openQuestionsCount > 99 ? '99+' : String(openQuestionsCount);
   const onPickerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -103,11 +168,14 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   };
 
   return <div className={`${classes.actions} ${variant === 'floating' ? classes.floating : ''}`} role="group" aria-label="Interações da sala">
-    <button type="button" className={classes.action} data-chat-trigger aria-expanded={opened} aria-controls="room-chat-panel"
-      title="Chat" aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
+    <button type="button" className={classes.action} data-chat-trigger data-qa-open={openQuestionsCount || undefined}
+      aria-expanded={opened} aria-controls="room-chat-panel"
+      title={openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto)` : 'Chat e perguntas'}
+      aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />
       {unread > 0 && <span className={classes.badge} aria-hidden="true">{badge}</span>}
+      {openQuestionsCount > 0 && <span className={`${classes.qaBadge} ${unread > 0 ? classes.qaBadgeOffset : ''}`} data-testid="qa-open-badge" aria-hidden="true">?{qaBadge}</span>}
     </button>
     <button type="button" className={`${classes.action} ${classes.handAction}`} disabled={!connected || !handReady}
       aria-label={handRaised ? 'Abaixar mão' : 'Levantar mão'} title={handRaised ? 'Abaixar mão' : 'Levantar mão'}
@@ -137,11 +205,41 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   </div>;
 }
 
-/** Painel do chat, reações temporárias e aviso de erro. Renderizado dentro do palco (inclusive em tela cheia). */
-export function InteractionLayer({ ui, messages, reactions, error, pending, connected, localPeerId }: {
-  ui: InteractionsUi; messages: ChatMessage[]; reactions: ReactionEvent[]; error: string | null; pending: boolean;
-  connected: boolean; localPeerId?: string;
+/** Painel de interações (Chat + Perguntas), reações temporárias e aviso de erro. Renderizado dentro do palco (inclusive em tela cheia). */
+export function InteractionLayer({
+  ui,
+  messages,
+  reactions,
+  error,
+  pending,
+  connected,
+  localPeerId,
+  isPresenter = false,
+  questions = [],
+  highlightedQuestionId = null,
+  qaError = null,
+  qaPending = false,
+  onWithdrawQuestion,
+  onAnswerQuestionText,
+  onUpdateQuestionStatus,
+}: {
+  ui: InteractionsUi;
+  messages: ChatMessage[];
+  reactions: ReactionEvent[];
+  error: string | null;
+  pending: boolean;
+  connected: boolean;
+  localPeerId?: string;
+  isPresenter?: boolean;
+  questions?: QaQuestion[];
+  highlightedQuestionId?: string | null;
+  qaError?: string | null;
+  qaPending?: boolean;
+  onWithdrawQuestion?: (questionId: string) => boolean;
+  onAnswerQuestionText?: (questionId: string, answerText: string) => boolean;
+  onUpdateQuestionStatus?: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') => boolean;
 }) {
+  const bannerError = error || qaError;
   return <>
     <div className={classes.reactions} aria-live="polite" aria-atomic="false">
       {reactions.map(item => <div key={item.id} className={classes.reaction} data-testid="reaction-event">
@@ -150,8 +248,23 @@ export function InteractionLayer({ ui, messages, reactions, error, pending, conn
         <span className={classes.srOnly}> reagiu: {labels[item.reaction]}</span>
       </div>)}
     </div>
-    {!ui.opened && error && <div role="status" className={classes.error}>{error}</div>}
-    {ui.opened && <ChatPanel ui={ui} messages={messages} error={error} pending={pending} connected={connected} localPeerId={localPeerId} />}
+    {!ui.opened && bannerError && <div role="status" className={classes.error}>{bannerError}</div>}
+    {ui.opened && <InteractionsPanel
+      ui={ui}
+      messages={messages}
+      error={error}
+      pending={pending}
+      connected={connected}
+      localPeerId={localPeerId}
+      isPresenter={isPresenter}
+      questions={questions}
+      highlightedQuestionId={highlightedQuestionId}
+      qaError={qaError}
+      qaPending={qaPending}
+      onWithdrawQuestion={onWithdrawQuestion}
+      onAnswerQuestionText={onAnswerQuestionText}
+      onUpdateQuestionStatus={onUpdateQuestionStatus}
+    />}
   </>;
 }
 
@@ -159,13 +272,131 @@ function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function ChatPanel({ ui, messages, error, pending, connected, localPeerId }: {
+function InteractionsPanel({
+  ui,
+  messages,
+  error,
+  pending,
+  connected,
+  localPeerId,
+  isPresenter,
+  questions,
+  highlightedQuestionId,
+  qaError,
+  qaPending,
+  onWithdrawQuestion,
+  onAnswerQuestionText,
+  onUpdateQuestionStatus,
+}: {
+  ui: InteractionsUi;
+  messages: ChatMessage[];
+  error: string | null;
+  pending: boolean;
+  connected: boolean;
+  localPeerId?: string;
+  isPresenter: boolean;
+  questions: QaQuestion[];
+  highlightedQuestionId: string | null;
+  qaError: string | null;
+  qaPending: boolean;
+  onWithdrawQuestion?: (questionId: string) => boolean;
+  onAnswerQuestionText?: (questionId: string, answerText: string) => boolean;
+  onUpdateQuestionStatus?: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') => boolean;
+}) {
+  const { tab, setTab, unread, openQuestionsCount } = ui;
+  const panel = useRef<HTMLElement>(null);
+  const chatTabRef = useRef<HTMLButtonElement>(null);
+  const qaTabRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
+
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      const next: InteractionTab = tab === 'chat' ? 'qa' : 'chat';
+      setTab(next);
+      (next === 'chat' ? chatTabRef.current : qaTabRef.current)?.focus();
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setTab('chat');
+      chatTabRef.current?.focus();
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setTab('qa');
+      qaTabRef.current?.focus();
+    }
+  };
+
+  return <section ref={panel} id="room-chat-panel" className={classes.panel} role="dialog" aria-modal="false" aria-labelledby="room-chat-title" tabIndex={-1}
+    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); ui.closeChat(); } }}>
+    <header className={classes.panelHeader}>
+      <div className={classes.panelTitle}>
+        <h2 id="room-chat-title">{tab === 'chat' ? 'Chat da sala' : 'Perguntas da sala'}</h2>
+        <p>Só nesta sessão</p>
+      </div>
+      <button type="button" className={classes.close} aria-label="Fechar chat" onClick={ui.closeChat}><IconClose size={16} aria-hidden /></button>
+    </header>
+    <div className={classes.tabs} role="tablist" aria-label="Abas de interação" onKeyDown={onTabKeyDown}>
+      <button
+        ref={chatTabRef}
+        type="button"
+        role="tab"
+        id="room-tab-chat"
+        aria-selected={tab === 'chat'}
+        aria-controls="room-tabpanel-chat"
+        tabIndex={tab === 'chat' ? 0 : -1}
+        className={classes.tab}
+        data-active={tab === 'chat' || undefined}
+        onClick={() => setTab('chat')}
+      >
+        <span>Chat</span>
+        {unread > 0 && <span className={classes.tabBadge} aria-label={`${unread} não lidas`}>{unread > 99 ? '99+' : unread}</span>}
+      </button>
+      <button
+        ref={qaTabRef}
+        type="button"
+        role="tab"
+        id="room-tab-qa"
+        aria-selected={tab === 'qa'}
+        aria-controls="room-tabpanel-qa"
+        tabIndex={tab === 'qa' ? 0 : -1}
+        className={classes.tab}
+        data-active={tab === 'qa' || undefined}
+        onClick={() => setTab('qa')}
+      >
+        <span>Perguntas</span>
+        {openQuestionsCount > 0 && (
+          <span className={`${classes.tabBadge} ${classes.tabBadgeQa}`} data-testid="qa-tab-count" aria-label={`${openQuestionsCount} em aberto`}>
+            {openQuestionsCount > 99 ? '99+' : openQuestionsCount}
+          </span>
+        )}
+      </button>
+    </div>
+    {tab === 'chat' ? (
+      <ChatTabView ui={ui} messages={messages} error={error} pending={pending} connected={connected} localPeerId={localPeerId} />
+    ) : (
+      <QaTabView
+        ui={ui}
+        questions={questions}
+        highlightedQuestionId={highlightedQuestionId}
+        qaError={qaError}
+        qaPending={qaPending}
+        connected={connected}
+        localPeerId={localPeerId}
+        isPresenter={isPresenter}
+        onWithdrawQuestion={onWithdrawQuestion}
+        onAnswerQuestionText={onAnswerQuestionText}
+        onUpdateQuestionStatus={onUpdateQuestionStatus}
+      />
+    )}
+  </section>;
+}
+
+function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
   ui: InteractionsUi; messages: ChatMessage[]; error: string | null; pending: boolean; connected: boolean; localPeerId?: string;
 }) {
   const { draft, setDraft, scroll, atBottom, setAtBottom, unread } = ui;
-  const panel = useRef<HTMLElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
   useLayoutEffect(() => { scroll.current?.scrollTo({ top: scroll.current.scrollHeight }); }, [scroll]);
   useLayoutEffect(() => {
     const node = field.current;
@@ -176,15 +407,7 @@ function ChatPanel({ ui, messages, error, pending, connected, localPeerId }: {
   const canSend = connected && !pending && Boolean(draft.trim());
   const status = error || (!connected ? 'Sem conexão. Aguarde a reconexão para enviar.' : pending ? 'Enviando…' : '');
   const nearLimit = draft.length >= INTERACTION_LIMITS.textLength * 0.8;
-  return <section ref={panel} id="room-chat-panel" className={classes.panel} role="dialog" aria-modal="false" aria-labelledby="room-chat-title" tabIndex={-1}
-    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); ui.closeChat(); } }}>
-    <header className={classes.panelHeader}>
-      <div className={classes.panelTitle}>
-        <h2 id="room-chat-title">Chat da sala</h2>
-        <p>Só nesta sessão</p>
-      </div>
-      <button type="button" className={classes.close} aria-label="Fechar chat" onClick={ui.closeChat}><IconClose size={16} aria-hidden /></button>
-    </header>
+  return <div id="room-tabpanel-chat" role="tabpanel" aria-labelledby="room-tab-chat" className={classes.tabPanel}>
     <div className={classes.logWrap}>
       <div className={classes.log} ref={scroll} role="log" aria-label="Mensagens da sala" aria-live="polite" tabIndex={0}
         onScroll={event => { const node = event.currentTarget; setAtBottom(node.scrollHeight - node.scrollTop - node.clientHeight < 48); }}>
@@ -237,5 +460,313 @@ function ChatPanel({ ui, messages, error, pending, connected, localPeerId }: {
         {nearLimit && <span className={classes.counter}>{draft.length}/{INTERACTION_LIMITS.textLength}</span>}
       </div>
     </form>
-  </section>;
+  </div>;
 }
+
+function statusLabel(status: QaQuestion['status']): string {
+  if (status === 'answered-text') return 'Respondida';
+  if (status === 'answered-verbal') return 'Respondida ao vivo';
+  return 'Aberta';
+}
+
+function QaTabView({
+  ui,
+  questions,
+  highlightedQuestionId,
+  qaError,
+  qaPending,
+  connected,
+  localPeerId,
+  isPresenter,
+  onWithdrawQuestion,
+  onAnswerQuestionText,
+  onUpdateQuestionStatus,
+}: {
+  ui: InteractionsUi;
+  questions: QaQuestion[];
+  highlightedQuestionId: string | null;
+  qaError: string | null;
+  qaPending: boolean;
+  connected: boolean;
+  localPeerId?: string;
+  isPresenter: boolean;
+  onWithdrawQuestion?: (questionId: string) => boolean;
+  onAnswerQuestionText?: (questionId: string, answerText: string) => boolean;
+  onUpdateQuestionStatus?: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') => boolean;
+}) {
+  const { qaDraft, setQaDraft } = ui;
+  const field = useRef<HTMLTextAreaElement>(null);
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+
+  useLayoutEffect(() => {
+    const node = field.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${Math.min(node.scrollHeight, 108)}px`;
+  }, [qaDraft]);
+
+  useEffect(() => {
+    if (replyingId && !questions.some(q => q.id === replyingId)) {
+      setReplyingId(null);
+      setReplyText('');
+    }
+  }, [questions, replyingId]);
+
+  const highlighted = highlightedQuestionId
+    ? questions.find(q => q.id === highlightedQuestionId) ?? null
+    : null;
+
+  const canSend = connected && !qaPending && Boolean(qaDraft.trim());
+  const status = qaError || (!connected ? 'Sem conexão. Aguarde a reconexão para enviar.' : qaPending ? 'Sincronizando…' : '');
+  const nearLimit = qaDraft.length >= QA_LIMITS.questionLength * 0.8;
+
+  const submitInlineAnswer = (questionId: string) => {
+    if (!connected || qaPending || !replyText.trim()) return;
+    if (onAnswerQuestionText?.(questionId, replyText)) {
+      setReplyingId(null);
+      setReplyText('');
+    }
+  };
+
+  return <div id="room-tabpanel-qa" role="tabpanel" aria-labelledby="room-tab-qa" className={classes.tabPanel}>
+    <div className={classes.logWrap}>
+      <div className={classes.log} role="region" aria-label="Lista de perguntas da sala" aria-live="polite" tabIndex={0}>
+        {highlighted && (
+          <aside className={classes.qaSpotlight} data-testid="qa-highlighted" aria-label="Pergunta em destaque">
+            <div className={classes.qaSpotlightHeader}>
+              <span className={classes.qaSpotlightBadge}>Em destaque na sala</span>
+              <span className={classes.qaSpotlightAuthor}>
+                {Boolean(localPeerId) && highlighted.authorPeerId === localPeerId
+                  ? 'Você'
+                  : (highlighted.authorNickname || 'Visitante')}
+              </span>
+            </div>
+            <p className={classes.qaSpotlightText}>{highlighted.text}</p>
+            {highlighted.answer?.text && (
+              <div className={classes.qaAnswer}>
+                <span className={classes.qaAnswerMeta}>
+                  Resposta de {highlighted.answer.answeredByNickname || 'Apresentador'}
+                </span>
+                <p className={classes.qaAnswerText}>{highlighted.answer.text}</p>
+              </div>
+            )}
+            {isPresenter && (
+              <div className={classes.qaActions}>
+                <button
+                  type="button"
+                  className={classes.qaActionBtn}
+                  disabled={!connected || qaPending}
+                  onClick={() => onUpdateQuestionStatus?.(highlighted.id, 'unhighlight')}
+                >
+                  Remover destaque
+                </button>
+              </div>
+            )}
+          </aside>
+        )}
+
+        {questions.length === 0 && (
+          <div className={classes.empty}>
+            <span className={classes.emptyIcon} aria-hidden="true">?</span>
+            <strong>Nenhuma pergunta ainda</strong>
+            <span>Envie uma pergunta para os apresentadores. Perguntas em aberto ficam no topo da fila.</span>
+          </div>
+        )}
+
+        {questions.map(item => {
+          const own = Boolean(localPeerId) && item.authorPeerId === localPeerId;
+          const isHighlighted = item.id === highlightedQuestionId;
+          const isOpen = item.status === 'open';
+          const isReplying = isPresenter && replyingId === item.id;
+          const name = formatDisplayName(item.authorNickname, false);
+          const color = getAvatarColor(name);
+
+          return (
+            <article
+              key={item.id}
+              data-testid="qa-question-card"
+              data-status={item.status}
+              data-highlighted={isHighlighted || undefined}
+              className={`${classes.qaCard} ${!isOpen ? classes.qaCardAnswered : ''} ${isHighlighted ? classes.qaCardHighlighted : ''}`}
+            >
+              <div className={classes.qaCardHeader}>
+                <div className={classes.qaAuthor}>
+                  <span className={classes.avatar} aria-hidden="true" style={{ background: color.bg, color: color.text }}>
+                    {getInitials(name)}
+                  </span>
+                  <div className={classes.qaAuthorMeta}>
+                    <strong>{own ? 'Você' : (item.authorNickname || 'Visitante')}</strong>
+                    <time dateTime={new Date(item.createdAt).toISOString()}>{formatTime(item.createdAt)}</time>
+                  </div>
+                </div>
+                <div className={classes.qaBadges}>
+                  {isHighlighted && <span className={classes.qaStatusHighlight}>Em destaque</span>}
+                  <span
+                    className={`${classes.qaStatusBadge} ${isOpen ? classes.qaStatusOpen : classes.qaStatusDone}`}
+                    data-testid="qa-question-status"
+                  >
+                    {statusLabel(item.status)}
+                  </span>
+                </div>
+              </div>
+
+              <p className={classes.qaText}>{item.text}</p>
+
+              {item.status === 'answered-verbal' && (
+                <p className={classes.qaVerbalMeta}>
+                  Respondida verbalmente por {item.answer?.answeredByNickname || 'Apresentador'}
+                </p>
+              )}
+
+              {item.answer?.text && (
+                <div className={classes.qaAnswer} data-testid="qa-question-answer">
+                  <span className={classes.qaAnswerMeta}>
+                    Resposta de {item.answer.answeredByNickname || 'Apresentador'} · {formatTime(item.answer.answeredAt)}
+                  </span>
+                  <p className={classes.qaAnswerText}>{item.answer.text}</p>
+                </div>
+              )}
+
+              {isReplying && (
+                <div className={classes.qaReplyBox}>
+                  <textarea
+                    aria-label="Resposta da pergunta"
+                    placeholder="Escreva a resposta…"
+                    rows={2}
+                    maxLength={QA_LIMITS.answerLength}
+                    value={replyText}
+                    onChange={event => setReplyText(event.currentTarget.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        submitInlineAnswer(item.id);
+                      } else if (event.key === 'Escape') {
+                        event.stopPropagation();
+                        setReplyingId(null);
+                        setReplyText('');
+                      }
+                    }}
+                  />
+                  <div className={classes.qaReplyActions}>
+                    <button
+                      type="button"
+                      className={classes.qaActionBtn}
+                      onClick={() => { setReplyingId(null); setReplyText(''); }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      className={`${classes.qaActionBtn} ${classes.qaActionPrimary}`}
+                      disabled={!connected || qaPending || !replyText.trim()}
+                      onClick={() => submitInlineAnswer(item.id)}
+                    >
+                      Publicar resposta
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(own || isPresenter) && (
+                <div className={classes.qaActions}>
+                  {isPresenter && (
+                    <>
+                      <button
+                        type="button"
+                        className={classes.qaActionBtn}
+                        disabled={!connected || qaPending}
+                        aria-pressed={isHighlighted}
+                        onClick={() => onUpdateQuestionStatus?.(item.id, isHighlighted ? 'unhighlight' : 'highlight')}
+                      >
+                        {isHighlighted ? 'Remover destaque' : 'Destacar'}
+                      </button>
+                      {!isReplying && (
+                        <button
+                          type="button"
+                          className={classes.qaActionBtn}
+                          disabled={!connected || qaPending}
+                          onClick={() => {
+                            setReplyingId(item.id);
+                            setReplyText(item.answer?.text ?? '');
+                          }}
+                        >
+                          {item.answer ? 'Editar resposta' : 'Responder'}
+                        </button>
+                      )}
+                      {isOpen ? (
+                        <button
+                          type="button"
+                          className={classes.qaActionBtn}
+                          disabled={!connected || qaPending}
+                          onClick={() => onUpdateQuestionStatus?.(item.id, 'answer-verbal')}
+                        >
+                          Respondida ao vivo
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={classes.qaActionBtn}
+                          disabled={!connected || qaPending}
+                          onClick={() => onUpdateQuestionStatus?.(item.id, 'reopen')}
+                        >
+                          Reabrir
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {own && (
+                    <button
+                      type="button"
+                      className={`${classes.qaActionBtn} ${classes.qaActionDanger}`}
+                      disabled={!connected || qaPending}
+                      aria-label="Retirar pergunta"
+                      onClick={() => onWithdrawQuestion?.(item.id)}
+                    >
+                      Retirar
+                    </button>
+                  )}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+
+    <form className={classes.composer} onSubmit={event => { event.preventDefault(); if (canSend) ui.submitQa(); }}>
+      <div role="status" className={`${classes.status} ${qaError ? classes.statusError : ''}`}>
+        {status}
+      </div>
+      <div className={classes.field} data-disabled={!connected || undefined}>
+        <textarea
+          ref={field}
+          aria-label="Pergunta"
+          aria-describedby="room-qa-hint"
+          placeholder="Faça uma pergunta para a sala"
+          value={qaDraft}
+          readOnly={qaPending}
+          rows={1}
+          maxLength={QA_LIMITS.questionLength}
+          onChange={event => setQaDraft(event.currentTarget.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (canSend) ui.submitQa();
+            }
+          }}
+        />
+        <button type="submit" className={classes.send} aria-label="Enviar pergunta" aria-busy={qaPending} disabled={!canSend}>
+          {qaPending ? <span className={classes.spinner} aria-hidden="true" /> : <IconSend size={16} aria-hidden />}
+        </button>
+      </div>
+      <div className={classes.footnote}>
+        <span id="room-qa-hint">
+          {isPresenter ? 'Você está apresentando: pode responder e destacar' : 'Apresentadores podem responder e destacar'}
+        </span>
+        {nearLimit && <span className={classes.counter}>{qaDraft.length}/{QA_LIMITS.questionLength}</span>}
+      </div>
+    </form>
+  </div>;
+}
+

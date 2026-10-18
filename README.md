@@ -288,7 +288,7 @@ foi confirmado. Uma confirmação tardia ainda pode aparecer no histórico, sem
 promessa de recuperação. Reações são descartadas na desconexão; o histórico local
 continua durante a reconexão, mas é limpo ao encerrar ou trocar a sessão/sala.
 
-### Levantar a mão (F38)
+### Levantar a mão e Perguntas e Respostas (F38)
 
 Qualquer participante conectado pode levantar ou abaixar a própria mão pelo
 controle junto ao chat e às reações, também no Cinema e em fullscreen. O contador
@@ -297,12 +297,21 @@ aparecem primeiro na ordem atribuída pelo servidor; os demais ficam em ordem de
 identidade estável. O controle expõe `aria-pressed` e a lista identifica o estado
 por ícone e texto.
 
-O estado vive apenas na presença efêmera do signaling, sem relação com iniciar,
+O estado de mãos vive apenas na presença efêmera do signaling, sem relação com iniciar,
 pausar, trocar ou encerrar compartilhamento. Entradas tardias recebem snapshot;
 quedas involuntárias ocultam a mão até a recuperação autenticada dentro da reserva,
 preservando a ordem original. Saída voluntária ou expiração descarta a solicitação.
 O servidor associa a intenção ao socket ativo, valida versões para impedir reversões
 obsoletas e limita tentativas a 6 por participante em janela móvel de 10 segundos
-(`HAND_LIMITS`), inclusive durante recuperação. A interface aguarda confirmação;
-não enfileira nem reenvia intenções após desconexão. Este slice da proposta F38
-não inclui perguntas, enquetes, moderação ou permissões especiais.
+(`HAND_LIMITS`), inclusive durante recuperação.
+
+O painel de interações integra uma segunda aba, **Perguntas**, acessível mesmo
+sem transmissões ativas, em desktop, mobile, Modo Cinema e fullscreen:
+
+- Qualquer participante conectado pode enviar perguntas e retirar apenas a própria pergunta.
+- Perguntas pertencem à sala (não a uma transmissão específica) e permanecem enquanto a sala existir, mesmo que o autor saia ou um apresentador interrompa a transmissão, sendo descartadas apenas quando a sala é destruída (respeitando reservas de reconexão).
+- Perguntas abertas são exibidas antes das respondidas, mantendo a ordem previsível de chegada atribuída pelo servidor (`order`) e sincronizadas por `questions-snapshot` (com `revision` monotônica) na entrada tardia e reconexão.
+- Participantes que estão compartilhando tela (`sharing.active === true`, inclusive em pausa) podem responder por texto, marcar como respondida ao vivo, reabrir ou destacar uma pergunta por vez na sala. Múltiplos apresentadores têm as mesmas capacidades.
+- Limites em `QA_LIMITS` (`packages/protocol/src/messages.ts`): pergunta até 500 caracteres, resposta até 1000 caracteres, máximo de 100 perguntas por sala e até 8 ações de Q&A por participante a cada 10 segundos (com deduplicação dos últimos 64 `requestId`, preservada em substituição de socket e reserva de reconexão).
+- **Limitação conhecida do modelo de confiança:** como o estado de compartilhamento (`update-sharing`) é anunciado pelo cliente no modelo atual sem contas ou papéis permanentes, a verificação de apresentador no servidor reflete o estado anunciado na sala e não constitui autenticação forte de apresentador.
+

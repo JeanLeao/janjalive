@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChatTextSchema, INTERACTION_LIMITS, type HandsSnapshot, type ChatMessage, type Reaction, type ReactionEvent, type ServerMessage } from '@screen-room/protocol';
+import {
+  ChatTextSchema, INTERACTION_LIMITS, QaQuestionTextSchema, QaAnswerTextSchema, QA_LIMITS,
+  type HandsSnapshot, type QuestionsSnapshot, type ChatMessage, type Reaction, type ReactionEvent, type ServerMessage,
+} from '@screen-room/protocol';
 import type { SignalingClient } from '../signaling/signaling-client';
 
 export function acceptHandsSnapshot(previous: HandsSnapshot | null, message: HandsSnapshot, roomId: string): HandsSnapshot | null {
+  return message.roomId === roomId && message.revision > (previous?.revision ?? 0) ? message : previous;
+}
+
+export function acceptQuestionsSnapshot(previous: QuestionsSnapshot | null, message: QuestionsSnapshot, roomId: string): QuestionsSnapshot | null {
   return message.roomId === roomId && message.revision > (previous?.revision ?? 0) ? message : previous;
 }
 
@@ -16,30 +23,47 @@ export function useRoomInteractions(roomId: string) {
   const [reactions, setReactions] = useState<ReactionEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [qaError, setQaError] = useState<string | null>(null);
+  const [qaPending, setQaPending] = useState(false);
+  const [qaSubmitPending, setQaSubmitPending] = useState(false);
   const ready = useRef(false);
   const [hands, setHands] = useState<HandsSnapshot | null>(null);
   const handsRef = useRef<HandsSnapshot | null>(null);
+  const [questions, setQuestions] = useState<QuestionsSnapshot | null>(null);
+  const questionsRef = useRef<QuestionsSnapshot | null>(null);
   const pendingRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const qaPendingRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout>; kind: 'submit' | 'action' } | null>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const finish = useCallback(() => {
     if (pendingRef.current) clearTimeout(pendingRef.current.timer);
     pendingRef.current = null;
     setPending(false);
   }, []);
+  const finishQa = useCallback(() => {
+    if (qaPendingRef.current) clearTimeout(qaPendingRef.current.timer);
+    qaPendingRef.current = null;
+    setQaPending(false);
+    setQaSubmitPending(false);
+  }, []);
   const resetConnection = useCallback(() => {
     ready.current = false;
     handsRef.current = null;
     setHands(null);
+    questionsRef.current = null;
+    setQuestions(null);
     if (pendingRef.current) setError('Conexão interrompida. O envio não foi confirmado; não será reenviado.');
+    if (qaPendingRef.current) setQaError('Conexão interrompida. A ação não foi confirmada; não será reenviada.');
     finish();
+    finishQa();
     timers.current.forEach(clearTimeout);
     timers.current.clear();
     setReactions([]);
-  }, [finish]);
+  }, [finish, finishQa]);
   useEffect(() => {
     setDataRoom(roomId);
     setMessages([]);
     setError(null);
+    setQaError(null);
     resetConnection();
     return resetConnection;
   }, [roomId, resetConnection]);
@@ -49,9 +73,21 @@ export function useRoomInteractions(roomId: string) {
       handsRef.current = acceptHandsSnapshot(handsRef.current, message, roomId);
       setHands(handsRef.current);
     }
+    if (message.type === 'questions-snapshot' && ready.current) {
+      questionsRef.current = acceptQuestionsSnapshot(questionsRef.current, message, roomId);
+      setQuestions(questionsRef.current);
+    }
+    if (message.type === 'question-accepted' && message.roomId === roomId) {
+      if (qaPendingRef.current?.id === message.requestId) finishQa();
+    }
     if (message.type === 'interaction-rejected') {
-      setError(message.message);
-      if (pendingRef.current?.id === message.requestId) finish();
+      if (qaPendingRef.current?.id === message.requestId) {
+        setQaError(message.message);
+        finishQa();
+      } else {
+        setError(message.message);
+        if (pendingRef.current?.id === message.requestId) finish();
+      }
     }
     if (message.type === 'chat-message' && message.roomId === roomId) {
       setMessages(previous => appendChatMessage(previous, message));
@@ -65,7 +101,7 @@ export function useRoomInteractions(roomId: string) {
       }, INTERACTION_LIMITS.reactionDurationMs);
       timers.current.add(timer);
     }
-  }, [roomId, finish]);
+  }, [roomId, finish, finishQa]);
   const sendChat = (client: SignalingClient | null, text: string) => {
     if (pendingRef.current) return false;
     const parsed = ChatTextSchema.safeParse(text);
@@ -98,8 +134,92 @@ export function useRoomInteractions(roomId: string) {
     }
     setError(null);
   };
-  return { hands: dataRoom === roomId ? hands?.hands ?? [] : [], toggleHand,
-    messages: dataRoom === roomId ? messages : [], reactions: dataRoom === roomId ? reactions : [],
-    error: dataRoom === roomId ? error : null, pending: dataRoom === roomId && pending,
-    receive, resetConnection, sendChat, sendReaction };
+  const startQaRequest = (requestId: string, kind: 'submit' | 'action') => {
+    setQaError(null);
+    setQaPending(true);
+    setQaSubmitPending(kind === 'submit');
+    qaPendingRef.current = {
+      id: requestId,
+      kind,
+      timer: setTimeout(() => {
+        finishQa();
+        setQaError('A ação não foi confirmada. Não haverá reenvio automático.');
+      }, 8000),
+    };
+  };
+  const submitQuestion = (client: SignalingClient | null, text: string) => {
+    if (qaPendingRef.current) return false;
+    const parsed = QaQuestionTextSchema.safeParse(text);
+    if (!parsed.success) {
+      setQaError(`Use de 1 a ${QA_LIMITS.questionLength} caracteres, sem caracteres de controle.`);
+      return false;
+    }
+    const requestId = crypto.randomUUID();
+    if (!ready.current || !client?.send({ type: 'submit-question', requestId, text: parsed.data })) {
+      setQaError('Sem conexão com a sala. Tente enviar novamente quando reconectar.');
+      return false;
+    }
+    startQaRequest(requestId, 'submit');
+    return true;
+  };
+  const withdrawQuestion = (client: SignalingClient | null, questionId: string) => {
+    if (qaPendingRef.current) return false;
+    const requestId = crypto.randomUUID();
+    if (!ready.current || !client?.send({ type: 'withdraw-question', requestId, questionId })) {
+      setQaError('Sem conexão com a sala. Reconecte para retirar a pergunta.');
+      return false;
+    }
+    startQaRequest(requestId, 'action');
+    return true;
+  };
+  const answerQuestionText = (client: SignalingClient | null, questionId: string, answerText: string) => {
+    if (qaPendingRef.current) return false;
+    const parsed = QaAnswerTextSchema.safeParse(answerText);
+    if (!parsed.success) {
+      setQaError(`Use de 1 a ${QA_LIMITS.answerLength} caracteres na resposta, sem caracteres de controle.`);
+      return false;
+    }
+    const requestId = crypto.randomUUID();
+    if (!ready.current || !client?.send({ type: 'update-question', requestId, questionId, action: 'answer-text', answerText: parsed.data })) {
+      setQaError('Sem conexão com a sala. Reconecte para responder.');
+      return false;
+    }
+    startQaRequest(requestId, 'action');
+    return true;
+  };
+  const updateQuestionStatus = (
+    client: SignalingClient | null,
+    questionId: string,
+    action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight'
+  ) => {
+    if (qaPendingRef.current) return false;
+    const requestId = crypto.randomUUID();
+    if (!ready.current || !client?.send({ type: 'update-question', requestId, questionId, action })) {
+      setQaError('Sem conexão com a sala. Reconecte para atualizar a pergunta.');
+      return false;
+    }
+    startQaRequest(requestId, 'action');
+    return true;
+  };
+  return {
+    hands: dataRoom === roomId ? hands?.hands ?? [] : [],
+    toggleHand,
+    questions: dataRoom === roomId ? questions?.questions ?? [] : [],
+    highlightedQuestionId: dataRoom === roomId ? questions?.highlightedQuestionId ?? null : null,
+    qaError: dataRoom === roomId ? qaError : null,
+    qaPending: dataRoom === roomId && qaPending,
+    qaSubmitPending: dataRoom === roomId && qaSubmitPending,
+    submitQuestion,
+    withdrawQuestion,
+    answerQuestionText,
+    updateQuestionStatus,
+    messages: dataRoom === roomId ? messages : [],
+    reactions: dataRoom === roomId ? reactions : [],
+    error: dataRoom === roomId ? error : null,
+    pending: dataRoom === roomId && pending,
+    receive,
+    resetConnection,
+    sendChat,
+    sendReaction,
+  };
 }

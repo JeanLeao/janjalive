@@ -1021,6 +1021,17 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     chatPending: interactions.pending,
     sendChat: (text: string) => interactions.sendChat(signalingRoomRef.current === roomId ? signalingRef.current : null, text),
     sendReaction: (reaction: Reaction) => interactions.sendReaction(signalingRoomRef.current === roomId ? signalingRef.current : null, reaction),
+    questions: interactions.questions,
+    highlightedQuestionId: interactions.highlightedQuestionId,
+    qaError: interactions.qaError,
+    qaPending: interactions.qaPending,
+    qaSubmitPending: interactions.qaSubmitPending,
+    submitQuestion: (text: string) => interactions.submitQuestion(signalingRoomRef.current === roomId ? signalingRef.current : null, text),
+    withdrawQuestion: (questionId: string) => interactions.withdrawQuestion(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId),
+    answerQuestionText: (questionId: string, answerText: string) =>
+      interactions.answerQuestionText(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, answerText),
+    updateQuestionStatus: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') =>
+      interactions.updateQuestionStatus(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, action),
     captureState,
     pendingStream,
     switchCapture,

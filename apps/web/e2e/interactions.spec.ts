@@ -202,3 +202,187 @@ test('reconnection preserves accepted chat without replay; rejection keeps the d
   } finally { await context.close(); }
 });
 
+test('F38 Q&A: questions without stream, ordering, multiple presenters, answers, highlight, author withdraw, late join, reconnect, 320px mobile, Cinema and fullscreen', async ({ browser }) => {
+  const artifactDir = '/home/aldobmigge/.gemini/antigravity-cli/brain/c6ba6b4a-5aae-4a72-8e0d-d3baa31d4a9d';
+  const contextPresA = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const contextPresB = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const contextViewer = await browser.newContext({ viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+
+  for (const ctx of [contextPresA, contextPresB]) {
+    await ctx.addInitScript(() => {
+      const NativeSocket = window.WebSocket;
+      (window as any).qaSockets = [];
+      window.WebSocket = class extends NativeSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          (window as any).qaSockets.push(this);
+        }
+      };
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+        configurable: true,
+        value: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 640;
+          canvas.height = 360;
+          const ctx2d = canvas.getContext('2d')!;
+          ctx2d.fillStyle = '#0f172a';
+          ctx2d.fillRect(0, 0, 640, 360);
+          return canvas.captureStream(15);
+        },
+      });
+    });
+  }
+
+  const presA = await contextPresA.newPage();
+  const presB = await contextPresB.newPage();
+  const viewer = await contextViewer.newPage();
+  const late = await browser.newPage();
+
+  try {
+    await presA.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Ana'));
+    await presB.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Bruno'));
+    await viewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Clara'));
+
+    await Promise.all([
+      presA.goto('/room/e2e-f38-qa'),
+      presB.goto('/room/e2e-f38-qa'),
+      viewer.goto('/room/e2e-f38-qa'),
+    ]);
+    await expect(presA.getByText('3', { exact: true }).first()).toBeVisible();
+
+    // 1. Access Q&A when no streams are active (empty stage) + Raise hand preserved
+    await viewer.getByRole('button', { name: 'Levantar mão', exact: true }).tap();
+    await expect(viewer.getByRole('button', { name: 'Abaixar mão', exact: true })).toBeVisible();
+
+    await viewer.getByRole('button', { name: 'Abrir chat', exact: true }).tap();
+    const viewerQaTab = viewer.getByRole('tab', { name: /Perguntas/ });
+    await viewerQaTab.tap();
+    await expect(viewer.getByText('Nenhuma pergunta ainda')).toBeVisible();
+
+    // Viewer submits two questions
+    const viewerInput = viewer.getByRole('textbox', { name: 'Pergunta', exact: true });
+    await viewerInput.fill('Como funciona a reconexão automática?');
+    await viewer.getByRole('button', { name: 'Enviar pergunta', exact: true }).tap();
+    await expect(viewer.getByTestId('qa-question-card')).toHaveCount(1);
+
+    await viewerInput.fill('Posso retirar esta pergunta?');
+    await viewer.getByRole('button', { name: 'Enviar pergunta', exact: true }).tap();
+    await expect(viewer.getByTestId('qa-question-card')).toHaveCount(2);
+
+    // Check open question counter badge on header button of presA
+    await expect(presA.getByTestId('qa-open-badge')).toHaveText('?2');
+
+    // Keyboard tab navigation on presA
+    await presA.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    const chatTabA = presA.getByRole('tab', { name: /^Chat/ });
+    await chatTabA.focus();
+    await presA.keyboard.press('ArrowRight');
+    const qaTabA = presA.getByRole('tab', { name: /^Perguntas/ });
+    await expect(qaTabA).toBeFocused();
+    await expect(qaTabA).toHaveAttribute('aria-selected', 'true');
+    await expect(presA.getByTestId('qa-question-card')).toHaveCount(2);
+
+    // Non-presenter (presA before sharing, and viewer) cannot see presenter controls
+    await expect(presA.getByRole('button', { name: 'Destacar' })).toHaveCount(0);
+    await expect(viewer.getByRole('button', { name: 'Destacar' })).toHaveCount(0);
+    // Non-author (presA) cannot see 'Retirar pergunta' on Clara's questions
+    await expect(presA.getByRole('button', { name: 'Retirar pergunta' })).toHaveCount(0);
+
+    // Author (viewer) withdraws her second question
+    await viewer.getByTestId('qa-question-card').nth(1).getByRole('button', { name: 'Retirar pergunta' }).tap();
+    await expect(viewer.getByTestId('qa-question-card')).toHaveCount(1);
+    await expect(presA.getByTestId('qa-question-card')).toHaveCount(1);
+
+    // Submit another question from presB so we have 2 open questions in order
+    await presB.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await presB.getByRole('tab', { name: /^Perguntas/ }).click();
+    await presB.getByRole('textbox', { name: 'Pergunta', exact: true }).fill('Qual é o limite de participantes na sala?');
+    await presB.getByRole('textbox', { name: 'Pergunta', exact: true }).press('Enter');
+    await expect(presA.getByTestId('qa-question-card')).toHaveCount(2);
+
+    // Screenshot empty-stream Q&A on mobile 320px and verify no horizontal overflow
+    await viewer.screenshot({ animations: 'disabled', path: `${artifactDir}/f38-mobile-320-qa.png` });
+    const noOverflow320 = await viewer.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+    expect(noOverflow320).toBe(true);
+
+    // 2. Both presA and presB start sharing screen (multiple presenters)
+    await presA.getByRole('button', { name: 'Fechar chat' }).click();
+    await presB.getByRole('button', { name: 'Fechar chat' }).click();
+
+    await presA.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+    await presA.getByRole('button', { name: 'Entrar ao vivo', exact: true }).click();
+    await presB.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+    await presB.getByRole('button', { name: 'Entrar ao vivo', exact: true }).click();
+
+    await presA.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await presA.getByRole('tab', { name: /^Perguntas/ }).click();
+    await presB.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await presB.getByRole('tab', { name: /^Perguntas/ }).click();
+
+    // Presenter A answers the first question via text -> it moves below open question 2!
+    const firstCardA = presA.getByTestId('qa-question-card').first();
+    await firstCardA.getByRole('button', { name: 'Responder', exact: true }).click();
+    await firstCardA.getByRole('textbox', { name: 'Resposta da pergunta' }).fill('Usa reserva temporária com token.');
+    await firstCardA.getByRole('button', { name: 'Publicar resposta', exact: true }).click();
+
+    // Verify open question is now first, and answered question is second
+    await expect(presA.getByTestId('qa-question-card').nth(0)).toHaveAttribute('data-status', 'open');
+    await expect(presA.getByTestId('qa-question-card').nth(1)).toHaveAttribute('data-status', 'answered-text');
+    await expect(presA.getByTestId('qa-question-card').nth(1).getByTestId('qa-question-answer')).toContainText('Usa reserva temporária com token.');
+    await expect(presA.getByTestId('qa-open-badge')).toHaveText('?1');
+
+    // Presenter B highlights the open question and marks it as answered verbally
+    const openCardB = presB.getByTestId('qa-question-card').first();
+    await openCardB.getByRole('button', { name: 'Destacar', exact: true }).click();
+    await expect(presA.getByTestId('qa-highlighted')).toContainText('Qual é o limite de participantes na sala?');
+    await expect(viewer.getByTestId('qa-highlighted')).toContainText('Qual é o limite de participantes na sala?');
+
+    await openCardB.getByRole('button', { name: 'Respondida ao vivo', exact: true }).click();
+    await expect(presA.getByTestId('qa-question-card').nth(1)).toHaveAttribute('data-status', 'answered-verbal');
+
+    // Desktop screenshot with spotlight + textual answer + verbal answer
+    await presA.screenshot({ animations: 'disabled', path: `${artifactDir}/f38-desktop-presenter-qa.png` });
+    await viewer.screenshot({ animations: 'disabled', path: `${artifactDir}/f38-mobile-320-answered.png` });
+
+    // 3. Cinema mode and Fullscreen mode on presA preserve Q&A panel
+    await presA.getByRole('button', { name: /Modo Cinema/ }).click();
+    await expect(presA.getByTestId('qa-highlighted')).toBeVisible();
+    await presA.screenshot({ animations: 'disabled', path: `${artifactDir}/f38-cinema-qa.png` });
+
+    await presA.getByRole('button', { name: 'Fechar chat' }).click();
+    await presA.getByRole('button', { name: /Tela cheia/i }).first().click();
+    await expect.poll(() => presA.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+    await presA.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await expect(presA.getByTestId('qa-highlighted')).toBeVisible();
+    expect(await presA.getByTestId('qa-highlighted').evaluate(node => document.fullscreenElement?.contains(node))).toBe(true);
+    await presA.screenshot({ animations: 'disabled', path: `${artifactDir}/f38-fullscreen-qa.png` });
+    await presA.keyboard.press('Escape'); // closes Q&A panel
+    await presA.getByRole('button', { name: 'Sair da tela cheia' }).click();
+    await presA.getByRole('button', { name: /Sair do Modo Cinema/ }).click();
+
+    // 4. Late joiner receives full synchronized Q&A snapshot
+    await late.goto('/room/e2e-f38-qa');
+    await expect(late.getByText('Conectado', { exact: true })).toBeVisible();
+    await late.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await late.getByRole('tab', { name: /^Perguntas/ }).click();
+    await expect(late.getByTestId('qa-highlighted')).toContainText('Qual é o limite de participantes na sala?');
+    await expect(late.getByTestId('qa-question-card')).toHaveCount(2);
+
+    // 5. Stopping stream and participant leaving do not lose questions; reconnecting recovers state
+    await presA.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    await contextViewer.close();
+    await expect(late.getByTestId('qa-question-card')).toHaveCount(2);
+
+    await presA.evaluate(() => (window as any).qaSockets.at(-1).close(4001, 'test qa reconnect'));
+    await expect.poll(() => presA.evaluate(() => (window as any).qaSockets.length)).toBe(2);
+    await presA.getByRole('button', { name: 'Abrir chat', exact: true }).click();
+    await expect(presA.getByTestId('qa-question-card')).toHaveCount(2);
+  } finally {
+    await contextPresA.close().catch(() => {});
+    await contextPresB.close().catch(() => {});
+    await contextViewer.close().catch(() => {});
+    await late.close().catch(() => {});
+  }
+});
+
+
