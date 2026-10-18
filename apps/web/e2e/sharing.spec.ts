@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+import fs from 'node:fs';
 
-async function syntheticCapture(page: Page) {
-  await page.addInitScript(() => {
+async function syntheticCapture(page: Page, representative: boolean | 'browser' = false) {
+  await page.addInitScript((representative) => {
     document.addEventListener('pointerdown', () => { (window as any).testAudioAllowed = true; });
     (window as any).testRenderedFrames = new WeakMap<HTMLVideoElement, number>();
     const nativePlay = HTMLMediaElement.prototype.play;
@@ -36,13 +37,41 @@ async function syntheticCapture(page: Page) {
         ((window as any).testCaptureActivations ||= []).push(navigator.userActivation.isActive);
         if ((window as any).testRejectCapture) throw new DOMException('Selection cancelled', (window as any).testRejectCapture);
         const canvas = document.createElement('canvas');
-        canvas.width = 640; canvas.height = 360;
+        canvas.width = 640; canvas.height = representative === 'browser' ? 480 : 360;
         const ctx = canvas.getContext('2d')!;
         let frame = 0;
         const timer = setInterval(() => {
           ctx.fillStyle = frame++ % 2 ? '#ff0000' : '#0000ff';
           ctx.fillRect(0, 0, 640, 360);
           ctx.fillStyle = '#ffffff'; ctx.fillRect(frame % 600, 40, 40, 40);
+          if (representative) {
+            ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, 640, 360);
+            ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, 640, 32); ctx.fillRect(0, 250, 640, 110);
+            ctx.font = '14px monospace'; ctx.fillStyle = '#8c959f';
+            ctx.fillText('Screen Room  /  peer-manager.ts', 18, 22);
+            const lines = ['export async function shareScreen() {', '  const stream = await captureDisplay();', '  await peers.attachTracks(stream);', '  publishSharingState({ active: true });', '}', '', '// Keep connections reusable after capture stops'];
+            lines.forEach((line, i) => { ctx.fillStyle = i === 6 ? '#8c959f' : '#79c0ff'; ctx.fillText(line, 24, 64 + i * 23); });
+            ctx.fillStyle = '#7ee787'; ctx.fillText('$ pnpm test', 18, 277);
+            ctx.fillText('✓ Sharing, reconnection and cleanup passed', 18, 305);
+            ctx.fillStyle = '#e6edf3'; ctx.fillText(`Live preview · frame ${frame}`, 18, 337);
+          }
+          if (representative === 'browser') {
+            ctx.fillStyle = '#f6f8fa'; ctx.fillRect(0, 0, 640, 480);
+            ctx.fillStyle = '#d0d7de'; ctx.fillRect(0, 0, 640, 38);
+            ctx.font = '13px monospace'; ctx.fillStyle = '#24292f';
+            ctx.fillText('←  →   localhost:3000 / overview', 20, 24);
+            ctx.fillStyle = '#0969da'; ctx.fillRect(0, 38, 140, 442);
+            ctx.fillStyle = '#ffffff'; ctx.fillText('SCREEN ROOM', 16, 74);
+            ['Overview', 'Sessions', 'Reports', 'Settings'].forEach((label, i) => ctx.fillText(label, 16, 130 + i * 44));
+            ctx.fillStyle = '#24292f'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('Session overview', 168, 88);
+            ctx.font = '14px sans-serif'; ctx.fillText('Live transmission quality', 168, 124);
+            ['Direct P2P connection', 'Screen + system audio', 'No recording stored'].forEach((label, i) => {
+              ctx.fillStyle = '#ffffff'; ctx.fillRect(168, 152 + i * 72, 440, 56);
+              ctx.fillStyle = '#1a7f37'; ctx.fillText('✓', 184, 186 + i * 72);
+              ctx.fillStyle = '#24292f'; ctx.fillText(label, 212, 186 + i * 72);
+            });
+            ctx.fillStyle = '#57606a'; ctx.fillText(`Updated just now · ${frame}`, 168, 428);
+          }
         }, 50);
         const stream = canvas.captureStream(20);
         if ((window as any).testAudio) {
@@ -91,7 +120,7 @@ async function syntheticCapture(page: Page) {
         return stream;
       },
     });
-  });
+  }, representative);
 }
 
 async function mockPausePiP(page: Page) {
@@ -147,16 +176,43 @@ async function frames(page: Page) {
   } catch (error) {
     const state = await page.evaluate(() => [...document.querySelectorAll('video')].map(v => ({
       paused: v.paused, width: v.videoWidth, time: v.currentTime, frames: v.getVideoPlaybackQuality().totalVideoFrames,
+      presentedCallbacks: (window as any).testRenderedFrames.get(v) || 0,
+      readyState: v.readyState, error: v.error?.code,
       tracks: (v.srcObject as MediaStream | null)?.getTracks().map(t => ({ id: t.id, kind: t.kind, readyState: t.readyState, muted: t.muted })),
     })));
-    const peers = await page.evaluate(() => (window as any).testPeers.map((pc: RTCPeerConnection) => ({
-      state: pc.connectionState, transceivers: pc.getTransceivers().map(t => ({
-        mid: t.mid, direction: t.direction, currentDirection: t.currentDirection,
-        receiver: { id: t.receiver.track.id, muted: t.receiver.track.muted, readyState: t.receiver.track.readyState },
-        sender: t.sender.track?.id,
+    // Do not attach raw signaling messages/SDP: they can contain credentials.
+    // Separate transport, inbound decoding and presentation when the deadline fails.
+    const transport = await page.evaluate(async () => ({
+      visibility: document.visibilityState,
+      sockets: (window as any).testSockets.map((ws: WebSocket) => ({ state: ws.readyState })),
+      messages: ((window as any).testMessages || []).map((m: any) => ({
+        type: m.type, signal: m.type === 'signal' ? m.data?.type : undefined,
       })),
-    })));
-    await test.info().attach('playback-state', { body: JSON.stringify({ state, peers }), contentType: 'application/json' });
+      peers: await Promise.all(((window as any).testPeers as RTCPeerConnection[]).map(async pc => {
+        const inbound: Record<string, unknown>[] = [];
+        if (pc.connectionState !== 'closed') {
+          (await pc.getStats()).forEach(report => {
+            if (report.type === 'inbound-rtp' && report.kind === 'video') inbound.push({
+              trackIdentifier: report.trackIdentifier, packetsReceived: report.packetsReceived,
+              bytesReceived: report.bytesReceived, framesReceived: report.framesReceived,
+              framesDecoded: report.framesDecoded, framesDropped: report.framesDropped,
+              keyFramesDecoded: report.keyFramesDecoded,
+            });
+          });
+        }
+        return {
+          state: pc.connectionState, ice: pc.iceConnectionState, signaling: pc.signalingState,
+          localDescription: pc.localDescription?.type, remoteDescription: pc.remoteDescription?.type,
+          inbound,
+          transceivers: pc.getTransceivers().map(t => ({
+            mid: t.mid, direction: t.direction, currentDirection: t.currentDirection,
+            receiver: { id: t.receiver.track.id, muted: t.receiver.track.muted, readyState: t.receiver.track.readyState },
+            sender: t.sender.track?.id,
+          })),
+        };
+      })),
+    }));
+    await test.info().attach('playback-state', { body: JSON.stringify({ state, transport }), contentType: 'application/json' });
     throw error;
   }
 }
@@ -205,7 +261,7 @@ test('late join and a presenter serving nine spectators', async ({ browser }) =>
   const contexts = await Promise.all(Array.from({ length: 10 }, () => browser.newContext()));
   try {
     const pages = await Promise.all(contexts.map(context => context.newPage()));
-    await Promise.all(pages.map(syntheticCapture));
+    await Promise.all(pages.map(page => syntheticCapture(page)));
     const host = pages[0];
     await host.goto('/room/e2e-capacity');
     await expect(host.getByText('Conectado', { exact: true })).toBeVisible();
@@ -1733,12 +1789,19 @@ test('F13 collaborative drawing permissions: disabled by default, presenter enab
     await expect(late.getByTestId('collaborative-author-badge')).toHaveCount(0);
 
     // 7. Viewer reconnects: retains permission to draw on the active capture, without history
+    const priorJoins = await viewer.evaluate(() =>
+      ((window as any).testMessages || []).filter((m: any) => m.type === 'peers').length);
     await viewer.evaluate(() => {
-      for (const ws of (window as any).testSockets) {
-        if (ws.readyState === 1) ws.close(4100, 'test reconnect');
+      for (const ws of (window as any).testSockets as WebSocket[]) {
+        // Vite's HMR socket also lives here; closing it can reload the page.
+        if (ws.readyState === WebSocket.OPEN && ws.url.includes('/signal')) ws.close(4100, 'test reconnect');
       }
     });
-    await expect.poll(() => viewer.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1).length)).toBe(1);
+    await expect.poll(() => viewer.evaluate(before => ({
+      sockets: ((window as any).testSockets as WebSocket[])
+        .filter(s => s.url.includes('/signal') && s.readyState === WebSocket.OPEN).length,
+      joinedAgain: ((window as any).testMessages || []).filter((m: any) => m.type === 'peers').length > before,
+    }), priorJoins)).toEqual({ sockets: 1, joinedAgain: true });
     await frames(viewer);
     await expect(viewer.getByRole('button', { name: 'Desenhar', exact: true })).toBeEnabled();
     expect((await annotationPixels(viewer)).count).toBe(0);
@@ -1880,6 +1943,14 @@ for (const width of [1280, 390, 320]) {
           expect(box.y).toBeGreaterThanOrEqual(0);
           expect(await drawing.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
         }
+        for (const bar of await page.locator('.stage-view-controls').all()) {
+          const bounds = (await bar.boundingBox())!;
+          for (const button of await bar.getByRole('button').all()) {
+            const target = (await button.boundingBox())!;
+            expect(target.x).toBeGreaterThanOrEqual(bounds.x);
+            expect(target.x + target.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+          }
+        }
         await page.screenshot({ path: test.info().outputPath(`${state}-${width}.png`), animations: 'disabled' });
       };
       await trigger.focus(); await page.keyboard.press('Enter');
@@ -1911,7 +1982,7 @@ for (const width of [1280, 390, 320]) {
         const bar = (await viewer.locator('.stage-view-controls').boundingBox())!;
         const dock = (await viewer.locator('.floating-dock-wrapper').boundingBox())!;
         expect(bar.x).toBeGreaterThanOrEqual(0); expect(bar.x + bar.width).toBeLessThanOrEqual(width);
-        expect(bar.y + bar.height).toBeLessThanOrEqual(dock.y);
+        if (bar.x < dock.x + dock.width + 12 && bar.x + bar.width > dock.x - 12) expect(bar.y + bar.height).toBeLessThanOrEqual(dock.y);
         await expect(viewer.getByRole('button', { name: 'Anotações', exact: true })).toHaveCount(0);
         await viewer.screenshot({ path: test.info().outputPath(`viewer-${width}.png`), animations: 'disabled' });
       } finally { await viewerContext.close(); }
@@ -1931,3 +2002,601 @@ for (const width of [1280, 390, 320]) {
     } finally { await context.close(); }
   });
 }
+
+for (const width of [1280, 390]) {
+  test(`F18 connectivity and remote presentation diagnostics ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width === 390 });
+    const host = await context.newPage(), viewer = await context.newPage();
+    const hostEvents: string[] = [], viewerEvents: string[] = [];
+    host.on('console', message => hostEvents.push(message.text()));
+    viewer.on('console', message => viewerEvents.push(message.text()));
+    try {
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await host.goto(`/room/e2e-f18-${width}`);
+      await viewer.goto(`/room/e2e-f18-${width}`);
+      await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+      const openNetwork = async () => {
+        const trigger = viewer.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+        await trigger.focus(); await viewer.keyboard.press('Enter');
+        await viewer.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+        const tab = viewer.getByRole('tab', { name: /Rede/ });
+        if (width === 390) await tab.tap(); else await tab.click();
+      };
+      await openNetwork();
+      const dialog = viewer.getByRole('dialog');
+      await expect(dialog).toContainText('WebSocket: connected');
+      await expect(dialog.getByText('0', { exact: true })).toBeVisible();
+      await viewer.keyboard.press('Escape');
+      await startLive(host); await frames(viewer);
+      await expect.poll(() => viewerEvents.some(event => event.includes(' first-frame-presented '))).toBe(true);
+      await expect.poll(() => viewerEvents.some(event => event.includes(' first-frame ') && event.includes('evidence=decoded'))).toBe(true);
+      expect(hostEvents.some(event => event.includes(' first-frame-presented '))).toBe(false);
+      await openNetwork();
+      await expect(dialog).toContainText('WebRTC: connected');
+      await expect(dialog).toContainText('Frames decodificados:');
+      await expect(dialog).toContainText('Bytes recebidos');
+      await dialog.screenshot({ path: `/tmp/f18-network-${width}.png` });
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await viewer.keyboard.press('Escape');
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(viewer.locator('video')).toHaveCount(0);
+    } finally { await context.close(); }
+  });
+}
+
+test('F18 missing presentation API keeps playback and decoded evidence available', async ({ browser }) => {
+  const context = await browser.newContext();
+  const host = await context.newPage(), viewer = await context.newPage();
+  const events: string[] = [];
+  viewer.on('console', message => events.push(message.text()));
+  try {
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await viewer.addInitScript(() => {
+      Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });
+    });
+    await Promise.all([host.goto('/room/e2e-f18-no-callback'), viewer.goto('/room/e2e-f18-no-callback')]);
+    await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+    await startLive(host);
+    await expect.poll(() => viewer.evaluate(() => {
+      const video = document.querySelector('video');
+      return !!video && !video.paused && video.videoWidth > 0;
+    })).toBe(true);
+    await expect.poll(() => events.some(event => event.includes(' first-frame ') && event.includes('evidence=decoded'))).toBe(true);
+    expect(events.some(event => event.includes(' first-frame-presented '))).toBe(false);
+  } finally { await context.close(); }
+});
+
+test('F30 privacy notice appears in capture preview without blocking confirmation', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await syntheticCapture(page);
+    await page.goto('/room/e2e-f30-notice');
+    await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+
+    // Verify privacy notice is clearly present
+    const notice = page.getByText('Participantes da sala podem salvar imagens da tela compartilhada.', { exact: true });
+    await expect(notice).toBeVisible();
+
+    // Verify it doesn't block confirmation
+    const confirmBtn = page.getByRole('button', { name: 'Entrar ao vivo', exact: true });
+    await expect(confirmBtn).toBeEnabled();
+    await confirmBtn.click();
+
+    // Verify live state
+    await expect(page.getByText(/Transmitindo/)).toBeVisible();
+    await page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+  } finally {
+    await context.close();
+  }
+});
+
+test('F30 screenshot captures unzoomed frame in PNG, disables on pause, and works in cinema mode', async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const viewerContext = await browser.newContext();
+  try {
+    const host = await hostContext.newPage();
+    const viewer = await viewerContext.newPage();
+    await syntheticCapture(host);
+    await syntheticCapture(viewer);
+
+    await Promise.all([
+      host.goto('/room/e2e-f30-capture'),
+      viewer.goto('/room/e2e-f30-capture'),
+    ]);
+    await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
+
+    // Start sharing
+    await startLive(host);
+    await frames(viewer);
+
+    // 1. Viewer saves screenshot
+    const viewerBtn = viewer.getByRole('button', { name: 'Salvar imagem', exact: true });
+    await expect(viewerBtn).toBeEnabled();
+
+    const viewerDownloadPromise = viewer.waitForEvent('download');
+    await viewerBtn.click();
+    const viewerDownload = await viewerDownloadPromise;
+    expect(viewerDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+    const viewerFilePath = test.info().outputPath('viewer-screenshot.png');
+    await viewerDownload.saveAs(viewerFilePath);
+    const viewerBuffer = fs.readFileSync(viewerFilePath);
+
+    // Validate PNG signature: 89 50 4E 47 0D 0A 1A 0A
+    expect(viewerBuffer[0]).toBe(0x89);
+    expect(viewerBuffer[1]).toBe(0x50);
+    expect(viewerBuffer[2]).toBe(0x4e);
+    expect(viewerBuffer[3]).toBe(0x47);
+    // Validate width and height from PNG IHDR chunk (synthetic capture creates 640x360)
+    expect(viewerBuffer.readUInt32BE(16)).toBe(640);
+    expect(viewerBuffer.readUInt32BE(20)).toBe(360);
+
+    // 2. Presenter saves screenshot of own featured stream
+    const hostBtn = host.getByRole('button', { name: 'Salvar imagem', exact: true });
+    await expect(hostBtn).toBeEnabled();
+
+    const hostDownloadPromise = host.waitForEvent('download');
+    await hostBtn.click();
+    const hostDownload = await hostDownloadPromise;
+    expect(hostDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+    const hostFilePath = test.info().outputPath('host-screenshot.png');
+    await hostDownload.saveAs(hostFilePath);
+    const hostBuffer = fs.readFileSync(hostFilePath);
+    expect(hostBuffer.readUInt32BE(16)).toBe(640);
+    expect(hostBuffer.readUInt32BE(20)).toBe(360);
+
+    // 3. Zooming in preserves intrinsic resolution and does not alter image dimensions
+    await viewer.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+    await expect(viewer.getByText('125%')).toBeVisible();
+
+    const zoomedDownloadPromise = viewer.waitForEvent('download');
+    await viewerBtn.click();
+    const zoomedDownload = await zoomedDownloadPromise;
+    const zoomedFilePath = test.info().outputPath('viewer-zoomed.png');
+    await zoomedDownload.saveAs(zoomedFilePath);
+    const zoomedBuffer = fs.readFileSync(zoomedFilePath);
+    // The exported image must be the raw decoded 640x360 frame, not zoomed or cropped by CSS
+    expect(zoomedBuffer.readUInt32BE(16)).toBe(640);
+    expect(zoomedBuffer.readUInt32BE(20)).toBe(360);
+
+    // 4. Cinema mode allows screenshot
+    await viewer.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: 'Sair do Modo Cinema', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+    await viewer.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+
+    // 5. Pause disables screenshot button on both peers
+    await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeDisabled();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeDisabled();
+
+    // Resume re-enables screenshot
+    await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+    await expect(viewer.getByRole('button', { name: 'Salvar imagem', exact: true })).toBeEnabled();
+
+    // Cleanup
+    await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+  } finally {
+    await hostContext.close();
+    await viewerContext.close();
+  }
+});
+
+for (const width of [390, 320]) {
+  test(`F30 screenshot controls responsive layout and touch targets at ${width}px`, async ({ browser }) => {
+    const hostContext = await browser.newContext();
+    const viewerContext = await browser.newContext({
+      viewport: { width, height: 844 },
+      hasTouch: true,
+    });
+    try {
+      const host = await hostContext.newPage();
+      const viewer = await viewerContext.newPage();
+      await syntheticCapture(host);
+      await syntheticCapture(viewer);
+
+      await Promise.all([
+        host.goto(`/room/e2e-f30-mobile-${width}`),
+        viewer.goto(`/room/e2e-f30-mobile-${width}`),
+      ]);
+      await startLive(host);
+      await frames(viewer);
+
+      const btn = viewer.getByRole('button', { name: 'Salvar imagem', exact: true });
+      await expect(btn).toBeVisible();
+      await expect(btn).toBeEnabled();
+
+      const box = await btn.boundingBox();
+      expect(box).not.toBeNull();
+      // On mobile / coarse pointer, controls should have at least 44px height for touch ergonomics
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+
+      // Verify controls bar stays within viewport width
+      const bar = await viewer.locator('.stage-view-controls').boundingBox();
+      expect(bar).not.toBeNull();
+      expect(bar!.x).toBeGreaterThanOrEqual(0);
+      expect(bar!.x + bar!.width).toBeLessThanOrEqual(width);
+
+      // Tap to save image on touch device
+      const downloadPromise = viewer.waitForEvent('download');
+      await btn.tap();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+    } finally {
+      await hostContext.close();
+      await viewerContext.close();
+    }
+  });
+}
+
+
+for (const mobile of [false, true]) {
+  test(`F38 hands synchronize, survive media and recovery, and remain accessible ${mobile ? 'mobile' : 'desktop'}`, async ({ browser }) => {
+    const contexts = await Promise.all([
+      browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, hasTouch: mobile }),
+      browser.newContext(), browser.newContext(),
+    ]);
+    try {
+      const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
+      for (const page of [host, viewer, late]) await syntheticCapture(page);
+      const room = `/room/f38-${mobile ? 'mobile' : 'desktop'}`;
+      await host.goto(room); await viewer.goto(room);
+      const up = (page: Page) => page.getByRole('button', { name: 'Levantar mão', exact: true });
+      const down = (page: Page) => page.getByRole('button', { name: 'Abaixar mão', exact: true });
+      await expect(up(host)).toBeEnabled();
+      if (mobile) await up(host).tap();
+      else { await up(host).focus(); await host.keyboard.press('Enter'); }
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await up(viewer).click(); await expect(down(viewer)).toHaveAttribute('aria-pressed', 'true');
+      await expect(host.getByRole('button', { name: /Ver participantes \(2\), 2 mãos levantadas/ }).first()).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-raised.png`) });
+      await late.goto(room);
+      await expect(late.getByRole('button', { name: /Ver participantes \(3\), 2 mãos levantadas/ }).first()).toBeVisible();
+      await host.getByRole('button', { name: /Ver participantes/ }).first().click();
+      await expect(host.getByText('Mão levantada', { exact: true })).toHaveCount(2);
+      const rows = host.getByText('Mão levantada', { exact: true });
+      await expect(rows.first().locator('..').locator('..')).toContainText('(você)');
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-participants.png`) });
+      await host.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+      if (mobile) {
+        const box = (await down(host).boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      await startLive(host); await frames(viewer);
+      await startLive(viewer); await frames(host);
+      await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await expect(down(host)).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-cinema.png`) });
+      await down(host).click(); await expect(up(host)).toHaveAttribute('aria-pressed', 'false');
+      await up(host).click(); await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => host.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+      await expect(down(host)).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-fullscreen.png`) });
+      await down(host).click(); await expect(up(host)).toHaveAttribute('aria-pressed', 'false');
+      await up(host).click(); await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+      await host.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+      await host.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1 && s.url.includes('/signal')).forEach((s: WebSocket) => s.close(4001)));
+      await expect(up(host)).toBeDisabled();
+      await expect(down(host)).toBeEnabled({ timeout: 15000 });
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(down(host)).toHaveAttribute('aria-pressed', 'true');
+      await host.getByRole('button', { name: 'Sair da sala', exact: true }).last().click();
+      await expect(late.getByRole('button', { name: /Ver participantes \(2\), 1 mão levantada/ }).first()).toBeVisible();
+    } finally { await Promise.all(contexts.map(c => c.close())); }
+  });
+}
+
+test('F22 both annotation overlays, silent secondary, replacement and playback cleanup', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const [ana, bia, viewer] = await Promise.all(contexts.map(c => c.newPage()));
+    for (const [i, page] of [ana, bia, viewer].entries()) {
+      await syntheticCapture(page);
+      await page.addInitScript(name => sessionStorage.setItem('screen_room_display_name', name), ['Ana', 'Bia', 'Vera'][i]);
+      await page.goto(`/room/f22-annotations-${test.info().workerIndex}`);
+    }
+    await ana.evaluate(() => { (window as any).testAudio = true; });
+    await bia.evaluate(() => { (window as any).testAudio = true; });
+    await startLive(ana); await startLive(bia); await frames(viewer);
+    const connections = await viewer.evaluate(() => (window as any).testPeers.length);
+    await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+    expect(await viewer.evaluate(() => (window as any).testPeers.length)).toBe(connections);
+    expect(await viewer.locator('video').evaluateAll(v => v.filter(e => !(e as HTMLVideoElement).muted).length)).toBeLessThanOrEqual(1);
+    const primary = viewer.getByRole('region', { name: 'Transmissão principal', exact: true });
+    const secondary = viewer.getByRole('region', { name: 'Transmissão secundária', exact: true });
+    await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+    // Each presenter draws on their own capture.
+    await bia.getByRole('button', { name: 'Destacar transmissão de Bia (você)' }).click();
+    await drawAnnotation(ana); await drawAnnotation(bia);
+    const pixels = (panel: typeof primary) => panel.getByTestId('annotation-overlay').evaluate((canvas: HTMLCanvasElement) =>
+      canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some((v, i) => i % 4 === 3 && v > 0));
+    await expect.poll(() => pixels(primary)).toBe(true);
+    await expect.poll(() => pixels(secondary)).toBe(true);
+    await expect(secondary.getByRole('button', { name: /Desenhar|Apontar|Ponteiro laser/ })).toHaveCount(0);
+    await primary.getByRole('button', { name: 'Ampliar zoom' }).click();
+    // Refresh temporary strokes before checking the zoomed overlay (TTL is eight seconds).
+    await drawAnnotation(ana); await drawAnnotation(bia);
+    await expect.poll(() => pixels(primary)).toBe(true);
+    await expect.poll(() => pixels(secondary)).toBe(true);
+    await secondary.locator('video').evaluate(v => { (window as any).f22OldVideo = v; (window as any).f22OldStream = (v as HTMLVideoElement).srcObject; });
+    const captureId = () => viewer.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'sharing-updated' && m.active).at(-1)?.streamId);
+    const previousCapture = await captureId();
+    await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await expect.poll(captureId).not.toBe(previousCapture);
+    await expect.poll(() => secondary.locator('video').evaluate(v => (v as HTMLVideoElement).videoWidth > 0 && !(v as HTMLVideoElement).paused)).toBe(true);
+    expect(await secondary.locator('video').evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
+    await viewer.getByRole('button', { name: 'Sair da comparação' }).click();
+    await expect.poll(() => viewer.evaluate(() => (window as any).f22OldVideo.srcObject === null && !(window as any).f22OldVideo.isConnected)).toBe(true);
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
+
+
+for (const width of [1440, 1024, 768, 600, 390, 320]) {
+  test(`F22 collapsible stage toolbar geometry and input at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 400 });
+    const other = await browser.newContext({ viewport: { width, height: 900 } });
+    try {
+      const page = await context.newPage();
+      const peer = await other.newPage();
+      const room = `/room/f22-toolbar-${width}`;
+      await syntheticCapture(page, true); await page.goto(room); await startLive(page);
+      await syntheticCapture(peer, 'browser'); await peer.goto(room); await frames(peer);
+      await peer.screenshot({ path: test.info().outputPath(`viewer-traditional-${width}.png`) });
+      await startLive(peer);
+      await frames(page);
+      await expect(page.getByText('Visitante entrou na sala.', { exact: true })).toBeHidden({ timeout: 10000 });
+      const primary = page.locator('.stage-view-controls').first();
+      const inspect = async (state: string) => {
+        await expect.poll(async () => page.locator('.stage-view-controls').evaluateAll(elements => elements.every(el => {
+          const r = el.getBoundingClientRect();
+          const panel = el.closest('.comparison-panel')!.getBoundingClientRect();
+          const stage = el.closest('.stage-main-container')!.getBoundingClientRect();
+          // Compare visible intersections: stacked panels intentionally scroll outside the stage.
+          const top = Math.max(r.top, stage.top), bottom = Math.min(r.bottom, stage.bottom);
+          const dock = document.querySelector('.floating-dock-wrapper')!.getBoundingClientRect();
+          return r.left >= panel.left && r.right <= panel.right && r.width <= 56 &&
+            (bottom <= top || !!document.fullscreenElement || r.right <= dock.left || r.left >= dock.right || bottom <= dock.top || top >= dock.bottom);
+        }))).toBe(true);
+        await page.locator('.stage-controls-scroll').evaluateAll(elements => elements.forEach(el => { el.scrollTop = 0; }));
+        await page.screenshot({ path: test.info().outputPath(`${state}-${width}.png`), animations: 'disabled' });
+      };
+      const toggle = primary.locator('.stage-controls-toggle');
+      const originalVideo = await page.getByTestId('zoom-viewport').first().boundingBox();
+      await inspect('traditional-expanded');
+      await primary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+      await primary.getByRole('button', { name: 'Desenhar', exact: true }).click();
+      await toggle.focus(); await page.keyboard.press('Enter');
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toggle).toBeFocused();
+      expect(await toggle.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid');
+      await expect(primary.getByRole('button')).toHaveCount(1);
+      await expect(page.getByTestId('zoom-viewport').first()).not.toHaveAttribute('aria-label', /Área de desenho/);
+      await inspect('traditional-collapsed');
+      expect(await page.getByTestId('zoom-viewport').first().boundingBox()).toEqual(originalVideo);
+      await page.keyboard.press('Tab');
+      expect(await primary.evaluate(el => el.contains(document.activeElement))).toBe(false);
+      await toggle.focus();
+      await page.mouse.move(10, 10); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await page.keyboard.press('Space');
+      await expect(primary.getByRole('button', { name: 'Restaurar enquadramento' })).toHaveText('125%');
+      await expect(primary.getByRole('button', { name: 'Desenhar', exact: true })).toHaveAttribute('aria-pressed', 'false');
+      await primary.getByRole('button', { name: 'Comparar', exact: true }).click();
+      await expect(page.locator('.stage-view-controls')).toHaveCount(2);
+      await inspect('comparison-expanded');
+      const secondary = page.getByRole('region', { name: 'Transmissão secundária', exact: true });
+      await secondary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+      if (width < 400) await toggle.tap(); else await toggle.click();
+      await expect(secondary.getByRole('button', { name: 'Restaurar enquadramento' })).toHaveText('125%');
+      await inspect('comparison-collapsed');
+      const selector = page.getByRole('region', { name: 'Transmissão principal', exact: true }).getByRole('combobox');
+      const alternative = await selector.locator('option').evaluateAll(options => options.find(o => !(o as HTMLOptionElement).selected)?.getAttribute('value'));
+      await selector.selectOption(alternative!);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await page.screenshot({ path: test.info().outputPath(`viewer-comparison-${width}.png`) });
+      await secondary.getByRole('button', { name: 'Recolher ferramentas' }).click();
+      await expect(page.getByRole('button', { name: 'Expandir ferramentas' })).toHaveCount(2);
+      await toggle.click();
+      await primary.getByRole('button', { name: 'Sair da comparação' }).click();
+      await primary.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+      await inspect('cinema-expanded'); await toggle.click(); await inspect('cinema-collapsed'); await toggle.click();
+      await primary.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await inspect('fullscreen-expanded'); await toggle.click(); await inspect('fullscreen-collapsed'); await toggle.click();
+      await primary.getByRole('button', { name: 'Sair da tela cheia' }).click();
+      await expect(page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true })).toBeVisible();
+      await page.setViewportSize({ width, height: 600 });
+      await primary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+      await inspect('resized-expanded');
+      if (width < 800) {
+        await page.setViewportSize({ width: 844, height: 390 });
+        await expect(toggle).toBeInViewport();
+        await primary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
+        await page.screenshot({ path: test.info().outputPath(`landscape-${width}.png`) });
+      }
+    } finally { await context.close(); await other.close(); }
+  });
+}
+
+for (const width of [1440, 320]) {
+  test(`F24 individual playback preferences and comparison at ${width}px`, async ({ browser }) => {
+    const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext({ viewport: { width, height: 900 }, hasTouch: width === 320 })]);
+    try {
+      const [ana, bia, viewer] = await Promise.all(contexts.map(context => context.newPage()));
+      for (const [index, page] of [ana, bia, viewer].entries()) {
+        await syntheticCapture(page, true);
+        await page.addInitScript(name => sessionStorage.setItem('screen_room_display_name', name), ['Ana', 'Bia', 'Vera'][index]);
+        if (index === 2) await page.addInitScript(() => {
+          (window as any).testAudioOverlap = 0;
+          const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted')!;
+          Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+            ...descriptor,
+            set(value: boolean) {
+              descriptor.set!.call(this, value);
+              if ([...document.querySelectorAll<HTMLVideoElement>('.stage-main-container video')].filter(video => !video.muted).length > 1) (window as any).testAudioOverlap++;
+            },
+          });
+        });
+        await page.goto(`/room/f24-${width}`);
+      }
+      await ana.evaluate(() => { (window as any).testAudio = true; });
+      await bia.evaluate(() => { (window as any).testAudio = true; });
+      await startLive(ana); await startLive(bia); await frames(viewer);
+      await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+      const primary = viewer.getByRole('region', { name: 'Transmissão principal', exact: true });
+      const secondary = viewer.getByRole('region', { name: 'Transmissão secundária', exact: true });
+      await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+      const singleAudio = async () => expect(await viewer.locator('video').evaluateAll(videos => videos.filter(video => !(video as HTMLVideoElement).muted).length)).toBeLessThanOrEqual(1);
+      await primary.locator('video').evaluate(video => { (window as any).f24Video = video; (window as any).f24Stream = (video as HTMLVideoElement).srcObject; });
+      await primary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('slider', { name: 'Volume da transmissão' }).fill('0.35');
+      await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).click();
+      expect(await primary.locator('video').evaluate(video => video === (window as any).f24Video && (video as HTMLVideoElement).srcObject === (window as any).f24Stream)).toBe(true);
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Ouvir esta transmissão', exact: true }).click();
+      await viewer.getByRole('slider', { name: 'Volume da transmissão' }).fill('0.65');
+      await expect(primary.locator('option:checked')).toHaveText('Ana');
+      await singleAudio();
+      const bounds = await viewer.getByText('Áudio da transmissão', { exact: true }).boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath(`f24-audio-${width}.png`), fullPage: true });
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      // Pause and F27 replace media without resetting this participant's local preference.
+      await bia.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await expect(secondary.getByText('Transmissão pausada', { exact: true })).toBeVisible();
+      await singleAudio();
+      await bia.getByRole('button', { name: 'Retomar transmissão', exact: true }).click();
+      await expect.poll(() => secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await bia.evaluate(() => { (window as any).testAudio = false; });
+      await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await expect(viewer.getByText('Sem faixa de áudio', { exact: true })).toBeVisible();
+      await expect(viewer.getByRole('slider')).toHaveValue('0.65');
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider')).toHaveCount(0);
+      await bia.evaluate(() => { (window as any).testAudio = true; });
+      await bia.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+      await bia.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+      await expect.poll(() => secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await singleAudio();
+      // Following Ana changes only the visual primary; the manual audio choice remains Bia.
+      await viewer.getByRole('button', { name: /^Ver participantes/ }).first().click();
+      await viewer.getByRole('button', { name: 'Acompanhar escolhas de Ana', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+      await ana.getByRole('button', { name: 'Destacar transmissão de Bia', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Bia');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await startLive(viewer);
+      await ana.getByRole('button', { name: 'Destacar transmissão de Vera', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Vera (você)');
+      await expect(secondary.locator('option:checked')).toHaveText('Bia');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      expect(await secondary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await singleAudio();
+      await ana.getByRole('button', { name: 'Destacar transmissão de Ana (você)', exact: true }).click();
+      await expect(primary.locator('option:checked')).toHaveText('Ana');
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await singleAudio();
+      await viewer.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      // Role swaps preserve the manually selected participant and both preferences.
+      await primary.getByRole('combobox').selectOption({ label: 'Bia' });
+      await singleAudio();
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.65);
+      await primary.getByRole('combobox').selectOption({ label: 'Ana' });
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.35);
+      expect(await primary.locator('video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await primary.getByRole('button', { name: 'Sair da comparação', exact: true }).click();
+      await singleAudio();
+      expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await expect(viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true })).toBeVisible();
+      await viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true }).click();
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider', { name: 'Volume da transmissão' })).toHaveCount(0);
+      // Losing the manually selected source cannot turn the unmuted primary on.
+      await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+      await secondary.getByRole('button', { name: 'Áudio da transmissão', exact: true }).click();
+      await viewer.getByRole('button', { name: 'Ouvir esta transmissão', exact: true }).click();
+      await viewer.keyboard.press('Escape');
+      await expect(viewer.getByRole('slider')).toHaveCount(0);
+      await bia.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await expect(secondary).toHaveCount(0);
+      expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+      await singleAudio();
+      expect(await viewer.evaluate(() => (window as any).testAudioOverlap)).toBe(0);
+    } finally { await Promise.all(contexts.map(context => context.close())); }
+  });
+}
+
+test('F24 iOS exposes mute and device volume guidance without a software slider', async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const viewerContext = await browser.newContext({ viewport: { width: 320, height: 740 }, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1' });
+  try {
+    const host = await hostContext.newPage(), viewer = await viewerContext.newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await host.goto('/room/f24-ios'); await viewer.goto('/room/f24-ios');
+    await startLive(host); await frames(viewer);
+    await viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true }).tap();
+    await expect(viewer.getByRole('slider')).toHaveCount(0);
+    await expect(viewer.getByText('Ajuste o volume pelos controles do dispositivo.')).toBeVisible();
+    await expect(viewer.getByText('Sem faixa de áudio', { exact: true })).toBeVisible();
+    await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).tap();
+    await expect(viewer.getByRole('button', { name: 'Desmutar transmissão' })).toHaveAttribute('aria-pressed', 'true');
+    await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath('f24-ios-mute-320.png') });
+  } finally { await hostContext.close(); await viewerContext.close(); }
+});
+
+test('F24 explicit mute survives blocked autoplay, source replacement and reconnect', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await host.goto('/room/f24-blocked'); await viewer.goto('/room/f24-blocked');
+    await host.evaluate(() => { (window as any).testAudio = true; });
+    await viewer.evaluate(() => { (window as any).testBlockAudio = true; });
+    await startLive(host); await frames(viewer);
+    await expect(viewer.getByRole('button', { name: 'Ativar áudio', exact: true })).toBeVisible();
+    const audioButton = viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true });
+    await audioButton.focus(); await viewer.keyboard.press('Enter');
+    await expect(viewer.getByText('Reprodução bloqueada pelo navegador', { exact: true })).toBeVisible();
+    await viewer.getByRole('slider').focus(); await viewer.keyboard.press('ArrowLeft');
+    await viewer.getByRole('button', { name: 'Silenciar transmissão', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: 'Ativar áudio', exact: true })).toHaveCount(0);
+    await expect(viewer.getByText('Mudo local', { exact: true })).toBeVisible();
+    await viewer.screenshot({ animations: 'disabled', path: test.info().outputPath('f24-muted-blocked.png') });
+    await viewer.keyboard.press('Escape');
+    await expect(viewer.getByRole('slider')).toHaveCount(0);
+    await expect(audioButton).toBeFocused();
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    const joins = await viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length);
+    await viewer.evaluate(() => (window as any).testSockets.filter((socket: WebSocket) => socket.readyState === WebSocket.OPEN && socket.url.includes('/signal')).forEach((socket: WebSocket) => socket.close(4001, 'test')));
+    await expect.poll(() => viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(joins);
+    await audioButton.click();
+    await expect(viewer.getByRole('slider')).toHaveValue('0.95');
+    await expect(viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true })).toBeVisible();
+    expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).muted)).toBe(true);
+    await viewer.getByRole('button', { name: 'Desmutar transmissão', exact: true }).click();
+    expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.95);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});

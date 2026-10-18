@@ -163,14 +163,27 @@ function RoomPage() {
 
   const connected = session.connectionStatus === 'connected';
   const interactionsUi = useInteractionsUi({
-    roomId, messages: session.chatMessages, error: session.interactionError, pending: session.chatPending,
-    connected, onSendChat: session.sendChat,
+    roomId,
+    messages: session.chatMessages,
+    error: session.interactionError,
+    pending: session.chatPending,
+    connected,
+    onSendChat: session.sendChat,
+    polls: session.polls,
+    questions: session.questions,
+    qaError: session.qaError,
+    qaPending: session.qaPending,
+    qaSubmitPending: session.qaSubmitPending,
+    onSubmitQuestion: session.submitQuestion,
   });
   const { closePicker } = interactionsUi;
   useEffect(() => { closePicker(); }, [isCinema, isFullscreen, closePicker]);
-  const localPeerId = session.participants.find((p) => p.isLocal)?.peerId;
+  const localParticipant = session.participants.find((p) => p.isLocal);
+  const localPeerId = localParticipant?.peerId;
+  const isLocalPresenter = Boolean(localParticipant?.isSharing || session.isSharing);
   const interactionActions = (variant: 'header' | 'floating') => (
-    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant} />
+    <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant}
+      handRaised={session.participants.some(p => p.isLocal && p.handOrder != null)} handReady={session.handReady} onToggleHand={session.toggleHand} />
   );
 
   const handleLeave = () => {
@@ -279,6 +292,7 @@ function RoomPage() {
       {!isCinema && (
         <RoomHeader
           roomId={roomId}
+          raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
           participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
           connectionStatus={session.connectionStatus}
           onOpenParticipants={() => setIsParticipantsOpen(true)}
@@ -290,13 +304,31 @@ function RoomPage() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        onVideoPresented={session.onVideoPresented}
         annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
         onTogglePointingPermission={session.togglePointingPermission}
         drawingEnabled={session.drawingEnabled}
         onToggleDrawingPermission={session.toggleDrawingPermission}
         onClearCollaborativeDrawings={session.clearCollaborativeDrawings}
-        interactions={<InteractionLayer ui={interactionsUi} messages={session.chatMessages} reactions={session.reactions}
-          error={session.interactionError} pending={session.chatPending} connected={connected} localPeerId={localPeerId} />}
+        interactions={<InteractionLayer
+          ui={interactionsUi}
+          messages={session.chatMessages}
+          reactions={session.reactions}
+          error={session.interactionError}
+          pending={session.chatPending}
+          connected={connected}
+          localPeerId={localPeerId}
+          isPresenter={isLocalPresenter}
+          questions={session.questions}
+          highlightedQuestionId={session.highlightedQuestionId}
+          polls={session.polls} pollsReady={session.pollsReady} pollError={session.pollError} pollPending={session.pollPending}
+          onCreatePoll={session.createPoll} onVotePoll={session.votePoll} onClosePoll={session.closePoll}
+          qaError={session.qaError}
+          qaPending={session.qaPending}
+          onWithdrawQuestion={session.withdrawQuestion}
+          onAnswerQuestionText={session.answerQuestionText}
+          onUpdateQuestionStatus={session.updateQuestionStatus}
+        />}
         interactionAccess={interactionActions('floating')}
         isCinema={isCinema}
         onToggleCinema={() => setIsCinema(value => !value)}
@@ -345,6 +377,7 @@ function RoomPage() {
         isAudioMuted={session.isAudioMuted}
         onToggleAudioMute={session.toggleAudioMute}
         onOpenParticipants={() => setIsParticipantsOpen(true)}
+        raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
         participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onLeave={handleLeave}
@@ -358,6 +391,11 @@ function RoomPage() {
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
         onUpdateNickname={session.updateNickname}
         currentNickname={session.currentNickname}
+        followPresenterId={session.followPresenterId}
+        followStatus={session.followStatus}
+        onFollowPresenter={isDemo ? undefined : session.followPresenter}
+        onResumeFollowing={session.resumeFollowing}
+        onStopFollowing={session.stopFollowing}
       />
 
       {/* Right Drawer: Settings & Diagnostics */}

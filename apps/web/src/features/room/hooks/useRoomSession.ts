@@ -1,8 +1,10 @@
+import { StageSelectionPublisher } from './stage-selection-publisher';
 import { LiveAnnotations } from '../collaboration/live-annotations';
 import type { CollaborationMessage } from '@screen-room/protocol';
 import { useRoomInteractions } from './useRoomInteractions';
 import type { Reaction } from '@screen-room/protocol';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
+import { canSendStageSelection, followReducer, followDisplayStatus, followTarget, initialFollowState } from './follow-presenter';
 import {
   type QualitySelection,
   DEFAULT_QUALITY, normalizeQuality, resolveQuality, downgradeQuality,
@@ -83,6 +85,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   participantsRef.current = participants;
   const [featuredStreamId, setFeaturedStreamId] = useState<string | null>(null);
   const [currentNickname, setCurrentNickname] = useState<string>('');
+  const [follow, dispatchFollow] = useReducer(followReducer, initialFollowState);
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const featuredStreamIdRef = useRef<string | null>(null);
+  featuredStreamIdRef.current = featuredStreamId;
+  const followExpiryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     if (displayName) {
@@ -111,6 +119,18 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
   const nicknameRef = useRef<string | undefined>(displayName?.trim() || undefined);
   const reconnectTokenRef = useRef<string | undefined>(undefined);
+
+  const stageSelectionPublisher = useMemo(() => new StageSelectionPublisher({
+    canSend: () => canSendStageSelection({
+      connected: signalingRef.current?.getState() === 'connected',
+      roomReady: collaborationReadyRef.current && signalingRoomRef.current === roomId,
+      sharing: Boolean(sharingIdRef.current),
+    }),
+    isValidTarget: (id) => id === localPeerRef.current
+      ? Boolean(sharingIdRef.current)
+      : participantsRef.current.some(p => p.peerId === id && p.isSharing),
+    send: (targetPeerId) => signalingRef.current?.send({ type: 'select-stage', targetPeerId }) ?? false,
+  }), [roomId]);
 
   remoteStreamsRef.current = remoteStreams;
 
@@ -141,6 +161,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     setRemoteConnectionStates({});
     setFeaturedStreamId(null);
+    dispatchFollow({ type: 'reset' });
     setErrorMessage(null);
     setParticipants([
       {
@@ -216,12 +237,35 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
     statsCollectorRef.current = statsCollector;
 
+    // F29: a followed presenter that dropped involuntarily keeps its slot for the server grace period.
+    const followExpiryTimers = followExpiryTimersRef.current;
+    const clearFollowExpiry = (presenterId: string) => {
+      const timer = followExpiryTimers.get(presenterId);
+      if (timer) clearTimeout(timer);
+      followExpiryTimers.delete(presenterId);
+    };
+    const presenterLeft = (presenterId: string, reconnectGraceMs?: number) => {
+      clearFollowExpiry(presenterId);
+      dispatchFollow({ type: 'presenter-left', presenterId, reserved: Boolean(reconnectGraceMs) });
+      if (reconnectGraceMs && followRef.current.presenterId === presenterId) {
+        followExpiryTimers.set(presenterId, setTimeout(() => {
+          followExpiryTimers.delete(presenterId);
+          if (!isDisposed) dispatchFollow({ type: 'presenter-expired', presenterId });
+        }, reconnectGraceMs + 1000));
+      }
+    };
+    const presenterBack = (presenterId: string) => {
+      clearFollowExpiry(presenterId);
+      dispatchFollow({ type: 'presenter-back', presenterId });
+    };
+
     // Create SignalingClient
     const signaling = new SignalingClient({
       onStateChange: (state) => {
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state !== 'connected') {
+          stageSelectionPublisher.cancel();
           interactionsRef.current.resetConnection();
           collaborationReadyRef.current = false;
           annotations.reset();
@@ -243,6 +287,22 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           collaborationReadyRef.current = true;
           for (const p of message.participants || []) if (p.peerId !== peerId) annotations.setCapture(p.peerId, p.sharing?.active ? p.sharing.streamId : undefined);
           annotations.setCapture(peerId, sharingIdRef.current);
+          const snapshot: Record<string, { targetPeerId: string | null; seq: number }> = {};
+          for (const p of message.participants || []) if (p.peerId !== peerId && p.selection) snapshot[p.peerId] = p.selection;
+          dispatchFollow({ type: 'snapshot', selections: snapshot });
+          const followed = followRef.current.presenterId;
+          if (followed) {
+            if ((message.participants || []).some((p) => p.peerId === followed)) {
+              presenterBack(followed);
+            } else {
+              const reserved = message.reservedPeers?.find((r) => r.peerId === followed);
+              if (reserved) {
+                presenterLeft(followed, reserved.reconnectGraceMs);
+              } else {
+                presenterLeft(followed, undefined);
+              }
+            }
+          }
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
           }
@@ -286,7 +346,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             return [local, ...remoteList];
           });
 
+        } else if (message.type === 'stage-selected') {
+          if (message.peerId === peerId) stageSelectionPublisher.acknowledge(message.targetPeerId, message.seq);
+          dispatchFollow({ type: 'selection', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
         } else if (message.type === 'peer-joined') {
+          presenterBack(message.peerId);
           peerManager.addParticipant(message.peerId);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
@@ -314,7 +378,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
 
         } else if (message.type === 'peer-left') {
+          stageSelectionPublisher.invalidate(message.peerId);
           annotations.removePeer(message.peerId);
+          presenterLeft(message.peerId, message.reconnectGraceMs);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
             const leaving = prev.find((p) => p.peerId === message.peerId);
@@ -339,6 +405,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             showToast('Participante removeu o nickname.');
           }
         } else if (message.type === 'sharing-updated') {
+          if (!message.active) stageSelectionPublisher.invalidate(message.peerId);
           annotations.setCapture(message.peerId, message.active ? message.streamId : undefined);
           if (message.active && message.pointingEnabled === false) annotations.clearPointers(message.peerId);
           if (message.active && message.drawingEnabled === false) annotations.clearCollaborativeDrawings(message.peerId);
@@ -382,6 +449,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     return () => {
       isDisposed = true;
+      stageSelectionPublisher.cancel();
+      for (const timer of followExpiryTimers.values()) clearTimeout(timer);
+      followExpiryTimers.clear();
+      dispatchFollow({ type: 'reset' });
       signalingRoomRef.current = null;
       collaborationReadyRef.current = false;
       annotations.reset();
@@ -416,9 +487,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       peerManager.dispose();
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled, annotations]);
+  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher]);
 
   const stopSharing = useCallback(() => {
+    stageSelectionPublisher.cancel();
     qualityOperationRef.current = null;
     setQualityPending(false);
     setQualityNotice(null);
@@ -465,7 +537,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (generation === captureGenerationRef.current) transition('idle');
     });
     loggerRef.current?.log('screen-stopped');
-  }, [annotations]);
+  }, [annotations, stageSelectionPublisher]);
 
   const startSharing = useCallback(async () => {
     if (captureStateRef.current !== 'idle') return;
@@ -546,12 +618,17 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       sharingIdRef.current ||= crypto.randomUUID();
       setIsSharing(true);
       signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: stream.getAudioTracks().length > 0, audioMuted: stream.getAudioTracks().some(track => !track.enabled) });
+      if (state === 'preview') {
+        const stageId = featuredStreamIdRef.current;
+        const targetPeerId = !stageId || stageId === 'local' ? localPeerRef.current : stageId;
+        stageSelectionPublisher.select(targetPeerId);
+      }
     } catch {
       if (generation !== captureGenerationRef.current) return;
       stopSharing();
       setErrorMessage('Não foi possível publicar a captura. Compartilhamento encerrado.');
     }
-  }, [stopSharing, annotations]);
+  }, [stopSharing, annotations, stageSelectionPublisher]);
 
   const pauseSharing = useCallback(async () => {
     if (!['sharing', 'publishing', 'resuming'].includes(captureStateRef.current)) return;
@@ -699,8 +776,23 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, [cancelSwitch, stopSharing, annotations]);
 
   const selectFeaturedStream = useCallback((streamId: string) => {
+    // Only this explicit UI action publishes a choice. Remote follow and automatic fallback
+    // call setFeaturedStreamId directly, so following another presenter cannot create a relay chain.
+    if (streamId === featuredStreamIdRef.current) return;
+    // Demo streams are supplied by the route while the real room session is disabled.
+    if (!enabled) {
+      featuredStreamIdRef.current = streamId;
+      setFeaturedStreamId(streamId);
+      return;
+    }
+    const targetPeerId = streamId === 'local' ? localPeerRef.current : streamId;
+    if (streamId !== 'local' && !participantsRef.current.some(p => p.peerId === streamId && p.isSharing)) return;
+    if (streamId === 'local' && !sharingIdRef.current) return;
+    dispatchFollow({ type: 'manual-select' });
+    featuredStreamIdRef.current = streamId;
     setFeaturedStreamId(streamId);
-  }, []);
+    stageSelectionPublisher.select(targetPeerId);
+  }, [enabled, stageSelectionPublisher]);
 
   const updateNickname = useCallback(
     (nickname: string) => {
@@ -751,6 +843,26 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         : p.isSharing || remoteStreams.some((r) => r.peerId === p.peerId),
     }));
   }, [participants, isSharing, remoteStreams, captureState, pointingEnabled, drawingEnabled]);
+
+  // Applies the followed presenter's selection (or, once, their own stream) to the local highlight.
+  useEffect(() => {
+    const target = followTarget(follow, {
+      localPeerId: localPeerRef.current,
+      isSharing: (peerId) => peerId === localPeerRef.current
+        ? isSharing
+        : participantsWithSharing.some((p) => p.peerId === peerId && p.isSharing),
+    });
+    if (!target) return;
+    if (target.consumesFallback) dispatchFollow({ type: 'fallback-done' });
+    if (featuredStreamId !== target.stageId) setFeaturedStreamId(target.stageId);
+  }, [follow, participantsWithSharing, isSharing, featuredStreamId]);
+
+  const followPresenter = useCallback((presenterId: string) => {
+    if (presenterId === localPeerRef.current) return;
+    dispatchFollow({ type: 'follow', presenterId });
+  }, []);
+  const resumeFollowing = useCallback(() => dispatchFollow({ type: 'resume' }), []);
+  const stopFollowing = useCallback(() => dispatchFollow({ type: 'stop' }), []);
 
   const togglePointingPermission = useCallback(() => {
     if (!sharingIdRef.current || switchRef.current) return;
@@ -891,6 +1003,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   };
 
   return {
+    onVideoPresented: (peerId: string, stream: MediaStream) => {
+      if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
+        loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });
+      }
+    },
     annotations, sendCollaboration,
     collaborationAvailable: connectionStatus === 'connected' && collaborationReadyRef.current,
     pointingEnabled,
@@ -904,6 +1021,27 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     chatPending: interactions.pending,
     sendChat: (text: string) => interactions.sendChat(signalingRoomRef.current === roomId ? signalingRef.current : null, text),
     sendReaction: (reaction: Reaction) => interactions.sendReaction(signalingRoomRef.current === roomId ? signalingRef.current : null, reaction),
+    polls: interactions.polls,
+    pollsReady: interactions.pollsReady,
+    pollError: interactions.pollError,
+    pollPending: interactions.pollPending,
+    createPoll: (question: string, options: string[]) => interactions.sendPoll(signalingRoomRef.current === roomId ? signalingRef.current : null,
+      { type: 'create-poll', requestId: crypto.randomUUID(), question, options }),
+    votePoll: (pollId: string, option: number) => interactions.sendPoll(signalingRoomRef.current === roomId ? signalingRef.current : null,
+      { type: 'vote-poll', requestId: crypto.randomUUID(), pollId, option }),
+    closePoll: (pollId: string) => interactions.sendPoll(signalingRoomRef.current === roomId ? signalingRef.current : null,
+      { type: 'close-poll', requestId: crypto.randomUUID(), pollId }),
+    questions: interactions.questions,
+    highlightedQuestionId: interactions.highlightedQuestionId,
+    qaError: interactions.qaError,
+    qaPending: interactions.qaPending,
+    qaSubmitPending: interactions.qaSubmitPending,
+    submitQuestion: (text: string) => interactions.submitQuestion(signalingRoomRef.current === roomId ? signalingRef.current : null, text),
+    withdrawQuestion: (questionId: string) => interactions.withdrawQuestion(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId),
+    answerQuestionText: (questionId: string, answerText: string) =>
+      interactions.answerQuestionText(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, answerText),
+    updateQuestionStatus: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') =>
+      interactions.updateQuestionStatus(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, action),
     captureState,
     pendingStream,
     switchCapture,
@@ -915,7 +1053,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     retryPeer: (id: string) => peerManagerRef.current?.recoverPeer(id),
     connectionStatus,
     participantCount,
-    participants: participantsWithSharing,
+    participants: participantsWithSharing.map(p => ({ ...p, handOrder: interactions.hands.find(h => h.peerId === p.peerId)?.order ?? null })),
+    handReady: interactions.hands.some(h => h.peerId === localPeerRef.current),
+    toggleHand: () => interactions.toggleHand(signalingRoomRef.current === roomId ? signalingRef.current : null, localPeerRef.current),
     localStream,
     isSharing,
     isAudioMuted,
@@ -923,6 +1063,19 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     remoteStreams,
     featuredStreamId,
     selectFeaturedStream,
+    followPresenterId: follow.presenterId,
+    followStatus: followDisplayStatus(follow, {
+      localPeerId: localPeerRef.current,
+      isSharing: (id) => {
+        if (id === localPeerRef.current) return isSharing && Boolean(localStream?.getVideoTracks().some(track => track.readyState === 'live'));
+        const participant = participantsWithSharing.find(p => p.peerId === id);
+        return Boolean(participant?.isSharing && (participant.isPaused || remoteStreams.some(entry =>
+          entry.peerId === id && entry.stream.getVideoTracks().some(track => track.readyState === 'live'))));
+      },
+    }, connectionStatus === 'connected' && collaborationReadyRef.current),
+    followPresenter,
+    resumeFollowing,
+    stopFollowing,
     updateNickname,
     currentNickname,
     quality,

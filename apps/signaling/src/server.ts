@@ -306,10 +306,18 @@ export function createSignalServer({
     // Deterministic check: only remove if THIS socket is the active one (BUG-01)
     if (clients.get(key) === socket) {
       clients.delete(key);
+      const clearedSelections = rooms.clearSelections(roomId, peerId, effectiveVoluntary);
       rooms.leave(roomId, peerId, effectiveVoluntary, recoveryGraceMs);
       const count = rooms.peers(roomId).length;
       signalLog('leave', { roomId, peerId, count, isVoluntary: effectiveVoluntary });
-      broadcast(roomId, { type: 'peer-left', peerId, count }, peerId);
+      broadcast(roomId, {
+        type: 'peer-left', peerId, count,
+        ...(effectiveVoluntary ? {} : { reconnectGraceMs: Math.max(1, Math.round(recoveryGraceMs)) }),
+      }, peerId);
+      broadcast(roomId, rooms.handsSnapshot(roomId));
+      for (const { presenterPeerId, seq } of clearedSelections) {
+        if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
+      }
     } else {
       signalLog('superseded-leave-ignored', { roomId, peerId });
     }
@@ -478,6 +486,7 @@ export function createSignalServer({
               ? message.nickname.trim().slice(0, 32)
               : undefined;
 
+          const prevQaRev = rooms.questionsSnapshot(normalizedRoom).revision;
           let peers: string[];
           try {
             peers = rooms.join(normalizedRoom, normalizedPeer, rawNick, message.reconnectToken);
@@ -508,6 +517,7 @@ export function createSignalServer({
 
           const count = rooms.peers(normalizedRoom).length;
           const participants = rooms.getParticipants(normalizedRoom);
+          const reservedPeers = rooms.getReservedPeers(normalizedRoom);
           const effectiveNick = rooms.getNickname(normalizedRoom, normalizedPeer);
           const reconnectToken = rooms.getReconnectToken(normalizedRoom, normalizedPeer);
           signalLog('join', {
@@ -523,6 +533,7 @@ export function createSignalServer({
             peers,
             count,
             participants,
+            ...(reservedPeers.length > 0 ? { reservedPeers } : {}),
             reconnectToken,
           });
 
@@ -536,6 +547,22 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          broadcast(normalizedRoom, rooms.handsSnapshot(normalizedRoom));
+          const qaSnap = rooms.questionsSnapshot(normalizedRoom);
+          if (qaSnap.revision > prevQaRev) {
+            broadcast(normalizedRoom, qaSnap);
+          } else {
+            send(socket, qaSnap);
+          }
+          send(socket, rooms.polls.snapshot(normalizedRoom, rooms.pollParticipant(normalizedRoom, normalizedPeer)));
+          const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
+          if (restoredSelection) {
+            broadcast(
+              normalizedRoom,
+              { type: 'stage-selected', peerId: normalizedPeer, targetPeerId: restoredSelection.targetPeerId, seq: restoredSelection.seq },
+              normalizedPeer
+            );
+          }
           return;
         }
 
@@ -610,6 +637,96 @@ export function createSignalServer({
             const target = peerSocket(meta.roomId, peerId);
             if (peerId !== meta.peerId && target && target.bufferedAmount < COLLABORATION_LIMITS.maxBufferedBytes) send(target, event);
           }
+          return;
+        }
+
+        if (message.type === 'set-hand') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          if (!rooms.setHand(meta.roomId, meta.peerId, message.raised, message.version)) {
+            send(socket, { type: 'error', code: 'HAND_REJECTED', message: 'Não foi possível alterar a mão. Aguarde alguns segundos e tente novamente.' });
+            send(socket, rooms.handsSnapshot(meta.roomId));
+            return;
+          }
+          broadcast(meta.roomId, rooms.handsSnapshot(meta.roomId));
+          return;
+        }
+
+        if (message.type === 'create-poll' || message.type === 'vote-poll' || message.type === 'close-poll') {
+          const meta = socket.meta;
+          if (!meta) {
+            send(socket, { type: 'interaction-rejected', requestId: message.requestId, message: 'Entre na sala antes de usar enquetes.' });
+            return;
+          }
+          if (peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          const error = rooms.polls.apply(meta.roomId, rooms.pollParticipant(meta.roomId, meta.peerId), message);
+          if (error) {
+            send(socket, { type: 'interaction-rejected', requestId: message.requestId, message: error });
+            return;
+          }
+          send(socket, { type: 'poll-accepted', requestId: message.requestId, roomId: meta.roomId });
+          for (const peer of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peer);
+            if (target) send(target, rooms.polls.snapshot(meta.roomId, rooms.pollParticipant(meta.roomId, peer)));
+          }
+          return;
+        }
+
+        if (message.type === 'submit-question' || message.type === 'withdraw-question' || message.type === 'update-question') {
+          const reject = (messageText: string) => send(socket, {
+            type: 'interaction-rejected', requestId: message.requestId, message: messageText,
+          });
+          const meta = socket.meta;
+          if (!meta) {
+            reject('Entre na sala antes de enviar.');
+            return;
+          }
+          // Ignore stale sockets silently without rejecting the active session
+          if (peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) {
+            return;
+          }
+          if (message.type === 'submit-question') {
+            const result = rooms.submitQuestion(meta.roomId, meta.peerId, message.requestId, message.text);
+            if (!result.ok) {
+              reject(result.message);
+              return;
+            }
+            send(socket, {
+              type: 'question-accepted',
+              requestId: message.requestId,
+              roomId: meta.roomId,
+              questionId: result.question.id,
+            });
+            broadcast(meta.roomId, result.snapshot);
+            return;
+          }
+          if (message.type === 'withdraw-question') {
+            const result = rooms.withdrawQuestion(meta.roomId, meta.peerId, message.requestId, message.questionId);
+            if (!result.ok) {
+              reject(result.message);
+              return;
+            }
+            send(socket, {
+              type: 'question-accepted',
+              requestId: message.requestId,
+              roomId: meta.roomId,
+              questionId: message.questionId,
+            });
+            broadcast(meta.roomId, result.snapshot);
+            return;
+          }
+          const result = rooms.updateQuestion(meta.roomId, meta.peerId, message);
+          if (!result.ok) {
+            reject(result.message);
+            return;
+          }
+          send(socket, {
+            type: 'question-accepted',
+            requestId: message.requestId,
+            roomId: meta.roomId,
+            questionId: message.questionId,
+          });
+          broadcast(meta.roomId, result.snapshot);
           return;
         }
 
@@ -692,7 +809,22 @@ export function createSignalServer({
           if (peerSocket(roomId, peerId) !== socket) return;
           const { type, ...sharing } = message;
           const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
+          send(socket, rooms.polls.snapshot(roomId, rooms.pollParticipant(roomId, peerId)));
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
+          if (!effective.active) {
+            for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {
+              broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
+            }
+          }
+          return;
+        }
+
+        if (message.type === 'select-stage') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
+          const selection = rooms.selectStage(meta.roomId, meta.peerId, message.targetPeerId);
+          if (!selection) return;
+          broadcast(meta.roomId, { type: 'stage-selected', peerId: meta.peerId, targetPeerId: selection.targetPeerId, seq: selection.seq });
           return;
         }
 
@@ -702,6 +834,7 @@ export function createSignalServer({
             return;
           }
           const { roomId, peerId } = socket.meta;
+          const prevQaRev = rooms.questionsSnapshot(roomId).revision;
           const result = rooms.updateNickname(roomId, peerId, message.nickname);
           if (result.changed) {
             signalLog('update-nickname', {
@@ -718,6 +851,10 @@ export function createSignalServer({
               },
               peerId
             );
+            const nextQa = rooms.questionsSnapshot(roomId);
+            if (nextQa.revision > prevQaRev) {
+              broadcast(roomId, nextQa);
+            }
           }
           return;
         }

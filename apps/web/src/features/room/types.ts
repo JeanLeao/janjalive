@@ -10,6 +10,7 @@ export interface RemoteStreamEntry {
 export interface RoomParticipant {
   peerId: string;
   nickname?: string;
+  handOrder?: number | null;
   isLocal: boolean;
   isSharing: boolean;
   isPaused?: boolean;
@@ -20,10 +21,11 @@ export interface RoomParticipant {
 }
 
 export interface NetworkMetrics {
-  bitrateKbps: number;
-  lossPercent: number;
-  rttMs: number;
+  bitrateKbps: number | null;
+  lossPercent: number | null;
+  rttMs: number | null;
   activeConnections: number;
+  peers: PeerDiagnostics[];
 }
 
 export interface DiagnosticEntry {
@@ -31,4 +33,19 @@ export interface DiagnosticEntry {
   timestamp: string;
   event: string;
   details: Record<string, unknown>;
+}
+
+export interface PeerDiagnostics {
+  peerId: string;
+  connection: RTCPeerConnectionState;
+  ice: RTCIceConnectionState;
+  signaling: RTCSignalingState;
+  negotiated: boolean;
+  stats: 'available' | 'unavailable';
+  measurement: Record<'bitrate' | 'loss' | 'rtt', 'unavailable' | 'no-report' | 'unsupported' | 'pending' | 'measured'>;
+  receiving: boolean | null;
+  framesDecoded: number | null;
+  bitrateKbps: number | null;
+  lossPercent: number | null;
+  rttMs: number | null;
 }

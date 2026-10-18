@@ -23,6 +23,8 @@ function connect(url, options = {}) {
     const waiters = [];
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
+      // F38 snapshots are verified in hands.test.js and qa.test.js; these queues assert presence/relay ordering.
+      if (parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {
@@ -313,6 +315,7 @@ test('REL-01: terminates unresponsive sockets and cleans up presence', async (t)
   const peerLeftMessage = await nextMessage(host, 1500);
   assert.deepEqual(peerLeftMessage, {
     type: 'peer-left',
+    reconnectGraceMs: 30000,
     peerId: 'viewer-1',
     count: 1,
   });

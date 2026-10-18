@@ -28,6 +28,8 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ## Modos de visualização
 
+Com pelo menos duas transmissões, **Comparar** abre dois painéis equivalentes lado a lado no desktop e empilhados com rolagem no mobile. **Principal** continua vinculada ao palco e ao acompanhamento de apresentadores; **Secundária** é uma escolha local e sempre sem áudio. Cada painel tem zoom e arraste independentes e exibe suas próprias anotações; somente o principal oferece ferramentas de anotação, PiP e captura de imagem. Cinema e tela cheia abrangem os dois painéis. **Sair da comparação** restaura o palco; isso também acontece quando resta apenas uma transmissão elegível.
+
 Na barra do palco, **Modo Cinema** recolhe o cabeçalho e as miniaturas para ampliar a transmissão dentro da página. O dock continua disponível; **Transmissões** permite abrir as miniaturas e trocar o destaque. O botão **Sair do Modo Cinema** restaura o layout. A preferência de Cinema e o zoom são preservados ao entrar e sair de tela cheia.
 
 **Janela flutuante (PiP)** usa o vídeo principal na janela nativa do navegador, quando disponível. A ativação é manual; o controle fica indisponível quando o navegador ou o vídeo não permitem PiP. Trocar o destaque, pausar, substituir ou encerrar a transmissão e sair da sala encerram o PiP; uma nova ativação é manual. Reconexões que mantêm o stream não solicitam outra janela.
@@ -287,3 +289,44 @@ após reconexão; uma interrupção ou timeout de 8 segundos informa que o envio
 foi confirmado. Uma confirmação tardia ainda pode aparecer no histórico, sem
 promessa de recuperação. Reações são descartadas na desconexão; o histórico local
 continua durante a reconexão, mas é limpo ao encerrar ou trocar a sessão/sala.
+
+### Levantar a mão, Perguntas e Enquetes (F38)
+
+Qualquer participante conectado pode levantar ou abaixar a própria mão pelo
+controle junto ao chat e às reações, também no Cinema e em fullscreen. O contador
+junto aos participantes considera apenas conexões ativas. Na lista, mãos levantadas
+aparecem primeiro na ordem atribuída pelo servidor; os demais ficam em ordem de
+identidade estável. O controle expõe `aria-pressed` e a lista identifica o estado
+por ícone e texto.
+
+O estado de mãos vive apenas na presença efêmera do signaling, sem relação com iniciar,
+pausar, trocar ou encerrar compartilhamento. Entradas tardias recebem snapshot;
+quedas involuntárias ocultam a mão até a recuperação autenticada dentro da reserva,
+preservando a ordem original. Saída voluntária ou expiração descarta a solicitação.
+O servidor associa a intenção ao socket ativo, valida versões para impedir reversões
+obsoletas e limita tentativas a 6 por participante em janela móvel de 10 segundos
+(`HAND_LIMITS`), inclusive durante recuperação.
+
+O painel de interações inclui a aba **Perguntas**, acessível mesmo
+sem transmissões ativas, em desktop, mobile, Modo Cinema e fullscreen:
+
+- Qualquer participante conectado pode enviar perguntas e retirar apenas a própria pergunta.
+- Perguntas pertencem à sala (não a uma transmissão específica) e permanecem enquanto a sala existir, mesmo que o autor saia ou um apresentador interrompa a transmissão, sendo descartadas apenas quando a sala é destruída (respeitando reservas de reconexão).
+- Perguntas abertas são exibidas antes das respondidas, mantendo a ordem previsível de chegada atribuída pelo servidor (`order`) e sincronizadas por `questions-snapshot` (com `revision` monotônica) na entrada tardia e reconexão.
+- Participantes que estão compartilhando tela (`sharing.active === true`, inclusive em pausa) podem responder por texto, marcar como respondida ao vivo, reabrir ou destacar uma pergunta por vez na sala. Múltiplos apresentadores têm as mesmas capacidades.
+- Limites em `QA_LIMITS` (`packages/protocol/src/messages.ts`): pergunta até 500 caracteres, resposta até 1000 caracteres, máximo de 100 perguntas por sala e até 8 ações de Q&A por participante a cada 10 segundos (com deduplicação dos últimos 64 `requestId`, preservada em substituição de socket e reserva de reconexão).
+- **Limitação conhecida do modelo de confiança:** como o estado de compartilhamento (`update-sharing`) é anunciado pelo cliente no modelo atual sem contas ou papéis permanentes, a verificação de apresentador no servidor reflete o estado anunciado na sala e não constitui autenticação forte de apresentador.
+
+
+#### Enquetes rápidas
+
+O painel mantém as abas **Chat | Perguntas | Enquetes**, inclusive no Modo Cinema e em tela cheia. Um ponto discreto no acesso às interações indica uma enquete aberta; ela nunca é aberta automaticamente sobre o vídeo.
+
+- Qualquer apresentador com compartilhamento ativo (inclusive pausado, como no Q&A) pode criar ou encerrar uma enquete. Há uma única enquete aberta por sala. Parar a transmissão ou sair não encerra a votação.
+- Todos podem escolher uma alternativa e confirmar em **Votar**, alterando o voto enquanto a enquete estiver aberta. Resultados ao vivo ficam disponíveis após votar ou durante compartilhamento ativo. Enquetes encerradas mostram os resultados finais para todos, com quantidades, percentuais arredondados e indicação do próprio voto. O arredondamento independente pode produzir soma diferente de 100%.
+- O servidor guarda uma identidade privada de votação, independente do identificador público do participante, e a preserva em substituições autorizadas de socket e reservas de reconexão. Votos de quem saiu continuam nos totais. Uma saída voluntária ou uma nova sessão após expirar a reserva cria uma nova identidade; não há proteção absoluta contra uma pessoa criar novas identidades.
+- `create-poll`, `vote-poll` e `close-poll` têm validação estrita e identidade derivada do socket atual. Snapshots `polls-snapshot` são personalizados por destinatário e versionados por um relógio monotônico do servidor: contêm apenas o próprio voto e, quando autorizado, totais agregados, nunca a lista de votantes ou identidades privadas. A versão pode avançar sem mutação, por exemplo ao sincronizar ou alterar elegibilidade.
+- Limites em `POLL_LIMITS`: pergunta de 1 a 300 caracteres, 2 a 5 alternativas de 1 a 120 caracteres; espaços nas extremidades são removidos e caracteres de controle/bidirecionais são rejeitados. Até 8 ações de enquetes por identidade em 10 segundos, independentes do Q&A, com deduplicação dos últimos 64 pedidos. O orçamento é preservado durante reconexão válida.
+- A memória retém uma enquete aberta e até 3 encerradas (mais recentes primeiro), com até 10.000 identidades votantes por enquete, incluindo quem saiu; ao atingir esse teto, novos votantes são recusados, mas votos existentes podem ser alterados. Os totais derivam de escolhas individuais, sem incrementos duplicados. Os textos limitam cada criação a 900 caracteres de conteúdo; o limite de frame WebSocket existente permanece em 64 KiB.
+- Todos os dados ficam somente em memória e são descartados quando a sala é destruída, após encerrar eventuais reservas de recuperação. Não há exportação, banco de dados, host ou moderação permanente.
+- A interface aguarda confirmação por até 8 segundos, exibe erros ou desconexão e não reenvia operações automaticamente. A entrada tardia e a reconexão recebem o estado atual; rascunhos de criação sobrevivem a mudanças de modo dentro da mesma sala.
