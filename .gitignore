@@ -5,3 +5,9 @@ dist/
 .tanstack/
 playwright-report/
 test-results/
+
+# Generated visual evidence
+/screenshots/
+
+# Local logs
+*.log
