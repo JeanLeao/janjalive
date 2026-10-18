@@ -554,6 +554,7 @@ export function createSignalServer({
           } else {
             send(socket, qaSnap);
           }
+          send(socket, rooms.polls.snapshot(normalizedRoom, rooms.pollParticipant(normalizedRoom, normalizedPeer)));
           const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
           if (restoredSelection) {
             broadcast(
@@ -648,6 +649,26 @@ export function createSignalServer({
             return;
           }
           broadcast(meta.roomId, rooms.handsSnapshot(meta.roomId));
+          return;
+        }
+
+        if (message.type === 'create-poll' || message.type === 'vote-poll' || message.type === 'close-poll') {
+          const meta = socket.meta;
+          if (!meta) {
+            send(socket, { type: 'interaction-rejected', requestId: message.requestId, message: 'Entre na sala antes de usar enquetes.' });
+            return;
+          }
+          if (peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          const error = rooms.polls.apply(meta.roomId, rooms.pollParticipant(meta.roomId, meta.peerId), message);
+          if (error) {
+            send(socket, { type: 'interaction-rejected', requestId: message.requestId, message: error });
+            return;
+          }
+          send(socket, { type: 'poll-accepted', requestId: message.requestId, roomId: meta.roomId });
+          for (const peer of rooms.peers(meta.roomId)) {
+            const target = peerSocket(meta.roomId, peer);
+            if (target) send(target, rooms.polls.snapshot(meta.roomId, rooms.pollParticipant(meta.roomId, peer)));
+          }
           return;
         }
 
@@ -788,6 +809,7 @@ export function createSignalServer({
           if (peerSocket(roomId, peerId) !== socket) return;
           const { type, ...sharing } = message;
           const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
+          send(socket, rooms.polls.snapshot(roomId, rooms.pollParticipant(roomId, peerId)));
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           if (!effective.active) {
             for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {

@@ -162,3 +162,36 @@
 .qaMenu :global(.mantine-Menu-item:focus-visible) { outline: 2px solid #58a6ff; outline-offset: -2px; }
 @media (pointer: coarse) { .qaMenuTrigger { width: 44px; height: 44px; margin: -8px -6px -8px 0; } .qaMenu :global(.mantine-Menu-item) { min-height: 44px; } .qaActionBtn { min-height: 44px; } }
 @media (max-width: 600px) { .qaPanel { max-height: calc(100% - 84px); } .qaCard { flex-shrink: 0; padding: 12px; } }
+
+/* Enquetes compartilham a hierarquia e a rolagem do painel de interações. */
+.pollDot, .pollTabDot { display: inline-block; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: #86efac; }
+.pollDot { position: absolute; top: 2px; left: 2px; box-shadow: 0 0 0 2px #161b22; }
+.tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; }
+.tab { gap: 4px; padding-inline: 5px; }
+.pollForm { display: flex; flex-direction: column; gap: 10px; padding: 2px 2px 12px; }
+.pollHeading { margin: 0; font-size: 13px; font-weight: 600; color: #e6edf3; }
+.pollHeading span { color: #8c959f; font-weight: 400; }
+.pollForm label { display: flex; flex-direction: column; gap: 5px; color: #a9b4c2; font-size: 12px; }
+.pollForm input, .pollForm textarea { width: 100%; box-sizing: border-box; min-width: 0; border: 1px solid #30363d; border-radius: 8px; padding: 8px 10px; background: #161b22; color: #e6edf3; caret-color: #58a6ff; font: inherit; font-size: 14px; }
+.pollForm textarea { resize: vertical; min-height: 64px; max-height: 120px; }
+.pollForm input:focus-visible, .pollForm textarea:focus-visible, .pollOption:focus-within, .pollDetails summary:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.pollForm :disabled { opacity: .6; }
+.pollCard { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; min-width: 0; padding: 2px 2px 10px; }
+.pollQuestion { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pollOptions { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pollOption { display: block; padding: 10px; border: 1px solid #30363d; border-radius: 8px; background: #161b22; cursor: pointer; }
+.pollOption[data-selected] { border-color: #58a6ff; }
+.pollOptions:disabled .pollOption { cursor: default; }
+.pollOptionLine { display: flex; align-items: flex-start; gap: 8px; color: #e6edf3; font-size: 13px; line-height: 1.45; }
+.pollOptionLine > span:not(.pollNumbers) { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pollOptionLine input { flex-shrink: 0; margin: 3px 0 0; accent-color: #58a6ff; }
+.pollOptionLine small { display: block; color: #93c5fd; font-size: 11px; }
+.pollNumbers { white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; color: #a9b4c2; font-size: 12px; }
+.pollBar { display: block; height: 4px; margin-top: 8px; border-radius: 2px; overflow: hidden; background: #30363d; }
+.pollBar > span { display: block; height: 100%; background: #58a6ff; }
+.pollHint { margin: 8px 0; color: #a9b4c2; font-size: 12px; line-height: 1.5; }
+.pollHistory { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; border-top: 1px solid #30363d; padding-top: 14px; }
+.pollDetails { border-bottom: 1px solid rgba(255,255,255,.08); }
+.pollDetails summary { cursor: pointer; padding: 10px 2px; font-size: 13px; overflow-wrap: anywhere; line-height: 1.5; }
+@media (pointer: coarse) { .pollForm input, .pollForm textarea { font-size: 16px; } .pollOption { min-height: 44px; box-sizing: border-box; } .pollDetails summary { min-height: 44px; box-sizing: border-box; } }
+@media (max-width: 360px) { .panelHeader { padding-inline: 8px; gap: 4px; } .tab { font-size: 11px; gap: 3px; padding-inline: 2px; } .tabBadge { min-width: 14px; height: 15px; padding-inline: 3px; font-size: 9px; } }

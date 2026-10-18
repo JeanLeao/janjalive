@@ -126,6 +126,43 @@ export const QuestionAcceptedSchema = z.object({
 }).strict();
 export type QuestionAccepted = z.infer<typeof QuestionAcceptedSchema>;
 
+// F38 polls: personalized snapshots never expose the private voter identity.
+export const POLL_LIMITS = {
+  questionLength: 300, optionLength: 120, minOptions: 2, maxOptions: 5,
+  closedHistory: 3, votersPerPoll: 10_000, burst: 8, windowMs: 10_000,
+} as const;
+export const PollQuestionSchema = z.string().trim().min(1).max(POLL_LIMITS.questionLength).regex(QaControlRegex);
+export const PollOptionTextSchema = z.string().trim().min(1).max(POLL_LIMITS.optionLength).regex(QaControlRegex);
+export const CreatePollSchema = z.object({
+  type: z.literal('create-poll'), requestId: z.string().uuid(), question: PollQuestionSchema,
+  options: z.array(PollOptionTextSchema).min(POLL_LIMITS.minOptions).max(POLL_LIMITS.maxOptions),
+}).strict();
+export const VotePollSchema = z.object({
+  type: z.literal('vote-poll'), requestId: z.string().uuid(), pollId: z.string().uuid(),
+  option: z.number().int().min(0).max(POLL_LIMITS.maxOptions - 1),
+}).strict();
+export const ClosePollSchema = z.object({
+  type: z.literal('close-poll'), requestId: z.string().uuid(), pollId: z.string().uuid(),
+}).strict();
+export type PollOperation = z.infer<typeof CreatePollSchema> | z.infer<typeof VotePollSchema> | z.infer<typeof ClosePollSchema>;
+export const PollSchema = z.object({
+  id: z.string().uuid(), question: PollQuestionSchema,
+  options: z.array(PollOptionTextSchema).min(2).max(5),
+  createdAt: z.number().int().nonnegative(), closedAt: z.number().int().nonnegative().nullable(),
+  ownVote: z.number().int().min(0).max(4).nullable(),
+  counts: z.array(z.number().int().min(0).max(POLL_LIMITS.votersPerPoll)).min(2).max(5).nullable(),
+}).strict();
+export type Poll = z.infer<typeof PollSchema>;
+export const PollsSnapshotSchema = z.object({
+  type: z.literal('polls-snapshot'), roomId: z.string().min(1),
+  revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  polls: z.array(PollSchema).max(POLL_LIMITS.closedHistory + 1),
+}).strict();
+export type PollsSnapshot = z.infer<typeof PollsSnapshotSchema>;
+export const PollAcceptedSchema = z.object({
+  type: z.literal('poll-accepted'), requestId: z.string().uuid(), roomId: z.string().min(1),
+}).strict();
+
 // Participant presence info
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
@@ -281,6 +318,7 @@ export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
+  CreatePollSchema, VotePollSchema, ClosePollSchema,
   SetHandSchema,
   SubmitQuestionSchema,
   WithdrawQuestionSchema,
@@ -383,6 +421,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  PollsSnapshotSchema, PollAcceptedSchema,
   HandsSnapshotSchema,
   QuestionsSnapshotSchema,
   QuestionAcceptedSchema,
