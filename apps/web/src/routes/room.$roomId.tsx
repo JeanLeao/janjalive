@@ -1,6 +1,6 @@
 import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
 import { CapturePreview } from '../features/room/components/CapturePreview';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 import { Box, Alert } from '@mantine/core';
 import { useRoomSession } from '../features/room/hooks/useRoomSession';
@@ -11,6 +11,7 @@ import { ParticipantsDrawer } from '../features/room/components/ParticipantsDraw
 import { SettingsDrawer } from '../features/room/components/SettingsDrawer';
 
 import { canShareScreen } from '../features/room/media/display-media';
+import { getStoredShortcutsPreference, setStoredShortcutsPreference } from '../features/room/hooks/useRoomShortcuts';
 
 export const Route = createFileRoute('/room/$roomId')({
   component: RoomPage,
@@ -31,6 +32,12 @@ function RoomPage() {
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
+  const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(getStoredShortcutsPreference);
+
+  const handleToggleShortcuts = useCallback((enabled: boolean) => {
+    setShortcutsEnabled(enabled);
+    setStoredShortcutsPreference(enabled);
+  }, []);
 
   const [canShare, setCanShare] = useState<boolean | null>(null);
   const [demoStreams, setDemoStreams] = useState<any[] | null>(null);
@@ -181,10 +188,38 @@ function RoomPage() {
   const localParticipant = session.participants.find((p) => p.isLocal);
   const localPeerId = localParticipant?.peerId;
   const isLocalPresenter = Boolean(localParticipant?.isSharing || session.isSharing);
+  const [connectionAnnouncement, setConnectionAnnouncement] = useState<string>('');
   const interactionActions = (variant: 'header' | 'floating') => (
     <InteractionActions ui={interactionsUi} connected={connected} onSendReaction={session.sendReaction} variant={variant}
       handRaised={session.participants.some(p => p.isLocal && p.handOrder != null)} handReady={session.handReady} onToggleHand={session.toggleHand} />
   );
+  const prevConnectionStatusRef = useRef(session.connectionStatus);
+
+  useEffect(() => {
+    const prev = prevConnectionStatusRef.current;
+    const current = session.connectionStatus;
+    prevConnectionStatusRef.current = current;
+
+    if (prev === 'connected' && (current === 'disconnected' || current === 'error')) {
+      setConnectionAnnouncement('Conexão perdida. Tentando reconectar…');
+    } else if ((prev === 'disconnected' || prev === 'error') && current === 'connected') {
+      setConnectionAnnouncement('Conexão restabelecida.');
+    }
+  }, [session.connectionStatus]);
+
+  const handleOpenOrFocusInteractions = useCallback(() => {
+    if (!interactionsUi.opened) {
+      interactionsUi.openChat();
+    } else {
+      const panel = document.getElementById('room-chat-panel');
+      if (panel) {
+        const input = panel.querySelector<HTMLElement>(
+          'textarea:not([disabled]), input:not([disabled]), [role="tab"][aria-selected="true"]'
+        );
+        input?.focus();
+      }
+    }
+  }, [interactionsUi]);
 
   const handleLeave = () => {
     session.stopSharing();
@@ -217,9 +252,29 @@ function RoomPage() {
         position: 'relative',
       }}
     >
+      {/* Live status announcement for screen readers */}
+      <Box
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {connectionAnnouncement}
+      </Box>
+
       {/* Toast Notification */}
       {session.toastMessage && (
         <Box
+          aria-live="polite"
           style={{
             position: 'fixed',
             top: 68,
@@ -330,6 +385,7 @@ function RoomPage() {
           onUpdateQuestionStatus={session.updateQuestionStatus}
         />}
         interactionAccess={interactionActions('floating')}
+        onOpenOrFocusInteractions={handleOpenOrFocusInteractions}
         isCinema={isCinema}
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
@@ -347,6 +403,7 @@ function RoomPage() {
         onStartSharing={session.startSharing}
         onCopyInvite={handleCopyInvite}
         canShareScreen={canShare}
+        shortcutsEnabled={shortcutsEnabled}
       />
 
       {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
@@ -412,6 +469,8 @@ function RoomPage() {
         onToggleAudioMute={session.toggleAudioMute}
         isSharing={session.isSharing}
         initialTab={settingsTab}
+        shortcutsEnabled={shortcutsEnabled}
+        onToggleShortcuts={handleToggleShortcuts}
       />
     </Box>
   );

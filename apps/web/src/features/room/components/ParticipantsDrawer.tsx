@@ -54,6 +54,14 @@ export function ParticipantsDrawer({
   const [isEditingNick, setIsEditingNick] = useState(false);
   const [nickDraft, setNickDraft] = useState(currentNickname);
   const [copied, setCopied] = useState(false);
+  const editNickBtnRef = useRef<HTMLButtonElement>(null);
+  const wasEditingRef = useRef(false);
+  useEffect(() => {
+    if (wasEditingRef.current && !isEditingNick) {
+      editNickBtnRef.current?.focus();
+    }
+    wasEditingRef.current = isEditingNick;
+  }, [isEditingNick]);
   const followed = participants.find(p => p.peerId === followPresenterId);
   const lastFollowedName = useRef('apresentador');
   useEffect(() => {
@@ -92,9 +100,11 @@ export function ParticipantsDrawer({
     <Drawer
       opened={opened}
       onClose={onClose}
+      closeOnEscape={!isEditingNick}
       position="right"
       size="sm"
       withCloseButton={false}
+      aria-label="Participantes"
       styles={{
         content: {
           backgroundColor: '#0d1117',
@@ -122,9 +132,16 @@ export function ParticipantsDrawer({
         }}
       >
         <div>
-          <Text fw={700} size="md" c="#ffffff">
+          <Drawer.Title
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#ffffff',
+              margin: 0,
+            }}
+          >
             Participantes
-          </Text>
+          </Drawer.Title>
           <Text size="xs" c="#8c959f">
             {participants.length} {participants.length === 1 ? 'na sala' : 'na sala'}
           </Text>
@@ -206,6 +223,7 @@ export function ParticipantsDrawer({
                           value={nickDraft}
                           onChange={(e) => setNickDraft(e.currentTarget.value)}
                           placeholder="Seu nickname"
+                          aria-label="Seu nickname"
                           maxLength={32}
                           styles={{
                             input: {
@@ -217,7 +235,11 @@ export function ParticipantsDrawer({
                           autoFocus
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSaveNick();
-                            if (e.key === 'Escape') setIsEditingNick(false);
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              e.nativeEvent.stopImmediatePropagation();
+                              setIsEditingNick(false);
+                            }
                           }}
                         />
                         <ActionIcon
@@ -225,6 +247,7 @@ export function ParticipantsDrawer({
                           color="blue"
                           onClick={handleSaveNick}
                           title="Salvar"
+                          aria-label="Salvar nickname"
                         >
                           <IconCheck size={14} />
                         </ActionIcon>
@@ -246,6 +269,7 @@ export function ParticipantsDrawer({
                           </Text>
                           {part.isLocal && (
                             <UnstyledButton
+                              ref={editNickBtnRef}
                               onClick={() => {
                                 setNickDraft(part.nickname || '');
                                 setIsEditingNick(true);

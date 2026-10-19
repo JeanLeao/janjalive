@@ -113,12 +113,33 @@ export function useInteractionsUi({
   }, [newest, opened, tab, atBottom]);
   useEffect(() => { if (!connected) setPicker(false); }, [connected]);
 
+  const lastTriggerRef = useRef<HTMLElement | null>(null);
+
   const send = () => { if (onSendChat(draft)) setAtBottom(true); };
   const submitQa = () => { onSubmitQuestion?.(qaDraft); };
-  const openChat = useCallback(() => { setOpened(true); setPicker(false); setAtBottom(true); }, []);
+  const openChat = useCallback(() => {
+    lastTriggerRef.current = document.activeElement as HTMLElement | null;
+    setOpened(true);
+    setPicker(false);
+    setAtBottom(true);
+  }, []);
   const closeChat = useCallback(() => {
     setOpened(false);
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-chat-trigger]')?.focus());
+    requestAnimationFrame(() => {
+      const prev = lastTriggerRef.current;
+      if (prev && document.contains(prev) && typeof prev.focus === 'function' && prev !== document.body) {
+        prev.focus();
+        return;
+      }
+      const triggers = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-trigger]'));
+      const visibleTrigger = triggers.find(t => t.offsetParent !== null || t.offsetWidth > 0 || t.offsetHeight > 0) || triggers[0];
+      if (visibleTrigger) {
+        visibleTrigger.focus();
+        return;
+      }
+      const stage = document.querySelector<HTMLElement>('.stage-main-container, .stage-empty-container');
+      stage?.focus();
+    });
   }, []);
   const toggleChat = useCallback(() => { if (opened) closeChat(); else openChat(); }, [opened, openChat, closeChat]);
   const closePicker = useCallback(() => setPicker(false), []);
@@ -177,7 +198,7 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   return <div className={`${classes.actions} ${variant === 'floating' ? classes.floating : ''}`} role="group" aria-label="Interações da sala">
     <button type="button" className={classes.action} data-chat-trigger data-poll-open={ui.hasOpenPoll || undefined} data-qa-open={openQuestionsCount || undefined}
       aria-expanded={opened} aria-controls="room-chat-panel"
-      title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto)` : 'Chat e perguntas'}
+      title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas (I)' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto) (I)` : 'Chat e perguntas (I)'}
       aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />
@@ -515,6 +536,36 @@ function QaTabView({
   const field = useRef<HTMLTextAreaElement>(null);
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const lastReplyingIdRef = useRef<string | null>(null);
+  const wasReplyingRef = useRef(false);
+
+  const pendingFocusQuestionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (wasReplyingRef.current && !replyingId) {
+      pendingFocusQuestionIdRef.current = lastReplyingIdRef.current;
+    }
+    if (replyingId) {
+      lastReplyingIdRef.current = replyingId;
+    }
+    wasReplyingRef.current = Boolean(replyingId);
+  }, [replyingId]);
+
+  useEffect(() => {
+    const questionId = pendingFocusQuestionIdRef.current;
+    if (!questionId || replyingId || qaPending) return;
+
+    pendingFocusQuestionIdRef.current = null;
+    requestAnimationFrame(() => {
+      const btn = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"] [data-qa-reply-btn]`);
+      if (btn && !btn.hasAttribute('disabled')) {
+        btn.focus();
+      } else {
+        const card = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"]`);
+        card?.focus();
+      }
+    });
+  }, [replyingId, qaPending]);
 
   useLayoutEffect(() => {
     const node = field.current;
@@ -577,6 +628,8 @@ function QaTabView({
             <article
               key={item.id}
               data-testid="qa-question-card"
+              data-question-id={item.id}
+              tabIndex={-1}
               data-status={item.status}
               data-highlighted={isHighlighted || undefined}
               className={`${classes.qaCard} ${!isOpen ? classes.qaCardAnswered : ''} ${isHighlighted ? classes.qaCardHighlighted : ''}`}
@@ -678,7 +731,7 @@ function QaTabView({
               )}
 
               {isPresenter && !isReplying && <div className={classes.qaActions}>
-                <button type="button" className={`${classes.qaActionBtn} ${isOpen ? classes.qaActionPrimary : ''}`}
+                <button type="button" data-qa-reply-btn className={`${classes.qaActionBtn} ${isOpen ? classes.qaActionPrimary : ''}`}
                   disabled={!connected || qaPending}
                   onClick={() => { setReplyingId(item.id); setReplyText(item.answer?.text ?? ''); }}>
                   {item.answer?.text ? 'Editar resposta' : 'Responder'}
