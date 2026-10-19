@@ -25,6 +25,7 @@ import {
   IconCheck,
   IconLink,
 } from './Icons';
+import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface ParticipantsDrawerProps {
   opened: boolean;
@@ -82,17 +83,10 @@ export function ParticipantsDrawer({
   };
 
   const handleCopyLink = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.search = '';
-        cleanUrl.hash = '';
-        await navigator.clipboard.writeText(cleanUrl.toString());
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy link:', err);
-      }
+    const success = await copyRoomInviteUrl();
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
