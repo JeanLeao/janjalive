@@ -89,6 +89,7 @@ export function SettingsDrawer({
       position="right"
       size="md"
       withCloseButton={false}
+      aria-label="Configurações"
       styles={{
         content: {
           backgroundColor: '#0d1117',
@@ -116,9 +117,16 @@ export function SettingsDrawer({
         }}
       >
         <div>
-          <Text fw={700} size="md" c="#ffffff">
+          <Drawer.Title
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#ffffff',
+              margin: 0,
+            }}
+          >
             Configurações
-          </Text>
+          </Drawer.Title>
           <Text size="xs" c="#8c959f">
             Transmissão, áudio e diagnóstico
           </Text>
@@ -486,7 +494,38 @@ export function SettingsDrawer({
 
             <Box
               style={{
-                marginTop: '1rem',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+              }}
+            >
+              <Text fw={600} size="sm" c="#fff" mb="xs">
+                Atalhos de teclado
+              </Text>
+              <Stack gap="xs">
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Próxima transmissão</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + N</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Transmissão anterior</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + P</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Alternar tela cheia do palco</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + F</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Abrir ou focar interações</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + I</Code>
+                </Group>
+              </Stack>
+            </Box>
+
+            <Box
+              style={{
+                marginTop: '0.5rem',
                 padding: '10px 12px',
                 borderRadius: '8px',
                 backgroundColor: 'rgba(255, 255, 255, 0.03)',

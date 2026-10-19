@@ -1,6 +1,7 @@
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
-import React, { useRef, useState, useEffect, useId } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useId } from 'react';
+import { useRoomShortcuts } from '../hooks/useRoomShortcuts';
 import {
   Box,
   Text,
@@ -45,6 +46,7 @@ export interface RoomStageProps {
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
+  onOpenOrFocusInteractions?: () => void;
   isCinema?: boolean;
   onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
@@ -78,6 +80,7 @@ export function RoomStage({
   onClearCollaborativeDrawings,
   interactions,
   interactionAccess,
+  onOpenOrFocusInteractions,
   isCinema = false,
   onToggleCinema,
   remoteConnectionStates = {},
@@ -212,11 +215,69 @@ export function RoomStage({
     })),
   });
 
-  const selectPrimary = (id: string) => {
+  const [announceMessage, setAnnounceMessage] = useState<string>('');
+  const lastFocusedStreamIdRef = useRef<string | null>(null);
+  const wasFocusedOnPreviewRef = useRef(false);
+
+  const selectPrimary = useCallback((id: string) => {
+    const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+    if (activeEl && activeEl.closest(`[data-preview-id="${id}"]`)) {
+      wasFocusedOnPreviewRef.current = true;
+      lastFocusedStreamIdRef.current = id;
+    } else {
+      wasFocusedOnPreviewRef.current = false;
+      lastFocusedStreamIdRef.current = null;
+    }
     setAudioSuspended(false);
     if (!manualValid) setManualAudio(null);
     onSelectFeaturedStream(id);
-  };
+    const target = streamItems.find(s => s.id === id);
+    if (target) {
+      setAnnounceMessage(`Transmissão principal: ${target.displayName}`);
+    }
+  }, [manualValid, onSelectFeaturedStream, streamItems]);
+
+  useEffect(() => {
+    if (wasFocusedOnPreviewRef.current) {
+      wasFocusedOnPreviewRef.current = false;
+      requestAnimationFrame(() => {
+        const nextPreview = document.querySelector<HTMLElement>('.secondary-preview-btn');
+        if (nextPreview) {
+          nextPreview.focus();
+        } else {
+          stageContainerRef.current?.focus();
+        }
+      });
+    }
+  }, [activeStream?.id]);
+
+  const currentIndex = activeStream ? streamItems.findIndex(s => s.id === activeStream.id) : -1;
+  const canCycleStreams = streamItems.length > 1;
+
+  const handleNextStream = useCallback(() => {
+    if (streamItems.length <= 1 || currentIndex === -1) return;
+    const nextIdx = (currentIndex + 1) % streamItems.length;
+    const nextStream = streamItems[nextIdx];
+    selectPrimary(nextStream.id);
+  }, [currentIndex, streamItems, selectPrimary]);
+
+  const handlePrevStream = useCallback(() => {
+    if (streamItems.length <= 1 || currentIndex === -1) return;
+    const prevIdx = (currentIndex - 1 + streamItems.length) % streamItems.length;
+    const prevStream = streamItems[prevIdx];
+    selectPrimary(prevStream.id);
+  }, [currentIndex, streamItems, selectPrimary]);
+
+  useRoomShortcuts({
+    enabled: true,
+    onNextStream: handleNextStream,
+    onPrevStream: handlePrevStream,
+    canCycleStreams,
+    onToggleFullscreen: toggleFullscreen,
+    canFullscreen: true,
+    onOpenOrFocusInteractions,
+    canInteractions: Boolean(onOpenOrFocusInteractions),
+  });
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
@@ -226,6 +287,7 @@ export function RoomStage({
     return (
       <Box
         ref={stageContainerRef}
+        tabIndex={-1}
         className="stage-empty-container"
         style={{
           flex: 1,
@@ -238,6 +300,24 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        <Box
+          data-stage-live-region
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          {announceMessage}
+        </Box>
         <style>{`
           .stage-empty-container { --stage-control-size: 36px; }
           .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
@@ -336,6 +416,7 @@ export function RoomStage({
   return (
     <Box
       ref={stageContainerRef}
+      tabIndex={-1}
       className={`stage-main-container${comparing ? ' stage-comparing' : ''}`}
       style={{
         flex: 1,
@@ -347,6 +428,24 @@ export function RoomStage({
         minHeight: 0,
       }}
     >
+      <Box
+        data-stage-live-region
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {announceMessage}
+      </Box>
       {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
@@ -1014,7 +1113,7 @@ function SpotlightVideoPlayer({
         </Tooltip>)}
         <Menu key={`${annotationPeerId}:${annotationStreamId}:${isFullscreen}`} position="left-start" offset={8}
           middlewares={{ flip: true, shift: { padding: 12, crossAxis: true } }}
-          width={280} closeOnItemClick={false}
+          width={280} closeOnItemClick={false} returnFocus
           portalProps={{ target: isFullscreen ? controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined : undefined }}>
           <Menu.Target>
             <Button variant="subtle" color="gray" aria-label="Anotações" title="Anotações">
@@ -1259,7 +1358,7 @@ function SpotlightVideoPlayer({
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={14} aria-hidden /></Button>
       </Box>
-      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} events={{ hover: true, focus: true, touch: false }} withArrow>
+      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia (Alt+Shift+F)' : 'Tela cheia (Alt+Shift+F)'} events={{ hover: true, focus: true, touch: false }} withArrow>
         <Button
           variant="subtle" color="gray" onClick={onToggleFullscreen}
           aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
@@ -1346,6 +1445,7 @@ function PreviewCard({
   return (
     <UnstyledButton
       onClick={onClick}
+      data-preview-id={streamItem.id}
       className="secondary-preview-btn"
       aria-label={`Destacar transmissão de ${streamItem.displayName}`}
       style={{
