@@ -2600,3 +2600,121 @@ test('F24 explicit mute survives blocked autoplay, source replacement and reconn
     expect(await viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).volume)).toBe(0.95);
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
+
+for (const width of [1280, 390]) {
+  test(`F34 conservative global recovery preserves preference and manual cancellation ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 500 });
+    const host = await context.newPage(), viewer = await context.newPage();
+    try {
+      await syntheticCapture(host); await syntheticCapture(viewer);
+      await host.addInitScript(() => {
+        const nativeNow = performance.now.bind(performance);
+        (window as any).qualityTime = 0;
+        Object.defineProperty(performance, 'now', { value: () => nativeNow() + (window as any).qualityTime });
+        const interval = window.setInterval.bind(window);
+        window.setInterval = ((handler: TimerHandler, ms?: number, ...args: any[]) => {
+          if (ms === 3000) { (window as any).qualityCollect = handler; return interval(() => {}, ms); }
+          return interval(handler, ms, ...args);
+        }) as typeof window.setInterval;
+      });
+      await Promise.all([host.goto(`/room/f34-${width}`), viewer.goto(`/room/f34-${width}`)]);
+      await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await startLive(host); await frames(viewer);
+      const trigger = host.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
+      await trigger.focus(); await host.keyboard.press('Enter');
+      await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await expect.poll(() => host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState === 'connected')
+        .flatMap((pc: RTCPeerConnection) => pc.getSenders().filter(s => s.track?.kind === 'video').map(s => s.getParameters().encodings[0]?.maxBitrate)))).toEqual([6000000]);
+      await host.evaluate(() => {
+        (window as any).qualityLoss = 6;
+        for (const pc of (window as any).testPeers as RTCPeerConnection[]) {
+          let received = 0, lost = 0;
+          pc.getStats = async () => {
+            const loss = (window as any).qualityLoss;
+            received += 100 - loss; lost += loss;
+            const timestamp = performance.now();
+            return new Map([
+              ['out', { id: 'out', type: 'outbound-rtp', kind: 'video', timestamp, packetsSent: received + lost }],
+              ['remote', { id: 'remote', type: 'remote-inbound-rtp', kind: 'video', localId: 'out', timestamp, packetsReceived: received, packetsLost: lost }],
+            ]) as unknown as RTCStatsReport;
+          };
+        }
+      });
+      const tick = async (count = 1) => {
+        for (let i = 0; i < count; i++) {
+          await host.evaluate(() => { (window as any).qualityTime += 3000; (window as any).qualityCollect(); });
+          await host.waitForTimeout(30);
+        }
+      };
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f34-normal-${width}.png`) });
+      await tick(2);
+      await expect(host.getByText(/Perfil temporário solicitado: Equilibrado/)).toBeVisible();
+      await tick(7);
+      await expect(host.getByText(/Perfil temporário solicitado: Econômico/)).toBeVisible();
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('ultra');
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f34-reduced-${width}.png`) });
+      await host.evaluate(() => { (window as any).qualityLoss = 0; });
+      await tick(20);
+      await expect(host.getByText(/Perfil temporário solicitado: Econômico/)).toBeVisible();
+      await tick(1);
+      await expect(host.getByText(/Perfil temporário solicitado: Equilibrado/)).toBeVisible();
+      await tick(21);
+      await expect(host.getByText(/Perfil temporário solicitado:/)).toHaveCount(0);
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('ultra');
+      await expect(host.getByText(/Limites aplicados verificados|Aplicação dos limites incompleta/)).toBeVisible();
+      await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f34-recovered-${width}.png`) });
+      await host.getByLabel('Nível de qualidade').focus();
+      expect(await host.getByLabel('Nível de qualidade').evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+      expect(await host.getByRole('dialog').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      if (width < 500) await host.getByText('Fluidez', { exact: true }).tap();
+      else await host.getByText('Fluidez', { exact: true }).click();
+      await host.getByLabel('Nível de qualidade').selectOption('economy');
+      await tick(25);
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('economy');
+      await expect(host.getByText(/Perfil temporário solicitado:/)).toHaveCount(0);
+      // An old recovery blocked inside applyConstraints must not replace a manual choice.
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await host.evaluate(() => { (window as any).qualityLoss = 6; });
+      await tick(9);
+      await expect(host.getByText(/Perfil temporário solicitado: Econômico/)).toBeVisible();
+      await host.evaluate(() => { (window as any).qualityLoss = 0; });
+      await tick(20);
+      await host.evaluate(() => { (window as any).testDelayConstraints = true; (window as any).resolveConstraints = null; });
+      await tick();
+      await expect.poll(() => host.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
+      await host.getByLabel('Nível de qualidade').selectOption('economy');
+      await host.evaluate(() => (window as any).resolveConstraints());
+      await expect(host.getByText(/Verificando limites solicitados/)).toHaveCount(0);
+      await expect(host.getByLabel('Nível de qualidade')).toHaveValue('economy');
+      await expect(host.getByText(/Perfil temporário solicitado:/)).toHaveCount(0);
+      await expect.poll(() => host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState === 'connected')
+        .flatMap((pc: RTCPeerConnection) => pc.getSenders().filter(s => s.track?.kind === 'video').map(s => s.getParameters().encodings[0]?.maxBitrate)))).toEqual([2000000]);
+      // Pause cancels a pending recovery and keeps all senders detached after it settles.
+      await host.getByLabel('Nível de qualidade').selectOption('ultra');
+      await host.evaluate(() => { (window as any).qualityLoss = 6; });
+      await tick(9);
+      await expect(host.getByText(/Perfil temporário solicitado: Econômico/)).toBeVisible();
+      await host.evaluate(() => { (window as any).qualityLoss = 0; });
+      await tick(20);
+      await host.evaluate(() => { (window as any).testDelayConstraints = true; (window as any).resolveConstraints = null; });
+      await tick();
+      await expect.poll(() => host.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
+      await host.getByRole('button', { name: 'Fechar configurações', exact: true }).click();
+      await host.getByRole('button', { name: 'Pausar transmissão', exact: true }).click();
+      await host.evaluate(() => (window as any).resolveConstraints());
+      await expect(host.getByRole('button', { name: 'Retomar transmissão', exact: true })).toBeVisible();
+      await tick(25);
+      expect(await host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState !== 'closed')
+        .every((pc: RTCPeerConnection) => pc.getSenders().every(sender => !sender.track)))).toBe(true);
+      await trigger.click();
+      await host.getByRole('menuitem', { name: 'Configurações e diagnósticos', exact: true }).click();
+      await expect(host.getByText(/Perfil temporário solicitado: Econômico/)).toBeVisible();
+      await host.getByRole('button', { name: 'Fechar configurações', exact: true }).click();
+      await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+      await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
+      await expect(host.getByRole('dialog')).toContainText('Fluidez · Ultra · 30 FPS');
+      expect(await host.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
+    } finally { await context.close(); }
+  });
+}

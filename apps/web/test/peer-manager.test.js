@@ -633,3 +633,26 @@ test('quality completion cannot send an answer from a retired peer', async () =>
     assert.equal(signals.filter(signal => signal.type === 'answer').length, 0);
   } finally { manager.dispose(); }
 });
+
+test('recovery reports partial constraints or sender failures without interrupting video/audio', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal() {}, onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  try {
+    const video = new MockMediaStreamTrack('video'), audio = new MockMediaStreamTrack('audio');
+    video.contentHint = '';
+    video.getSettings = () => ({ width: 640, height: 360, frameRate: 30 });
+    video.applyConstraints = async () => {};
+    audio.enabled = false;
+    const peer = manager.getOrCreatePeer('viewer');
+    await manager.attachLocalStream(new MockMediaStream([video, audio]));
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'economy', fps: 30 }), true);
+    video.applyConstraints = async () => { throw new Error('constraints unavailable'); };
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'balanced', fps: 60 }), false);
+    video.applyConstraints = async () => {};
+    peer.videoSender.setParameters = async () => { throw new Error('parameters unavailable'); };
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'ultra', fps: 60 }), false);
+    assert.equal(peer.videoSender.track, video);
+    assert.equal(peer.audioSender.track, audio);
+    assert.equal(video.readyState, 'live');
+    assert.equal(audio.enabled, false);
+  } finally { manager.dispose(); }
+});

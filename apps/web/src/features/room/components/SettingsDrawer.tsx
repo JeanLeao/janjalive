@@ -11,7 +11,7 @@ import {
   Tabs,
   Switch,
 } from '@mantine/core';
-import type { QualitySelection } from '@screen-room/protocol';
+import { QUALITY_PROFILES, type QualitySelection } from '@screen-room/protocol';
 import { QualityControls } from './QualityControls';
 import type {
   ConnectionState,
@@ -33,6 +33,8 @@ export interface SettingsDrawerProps {
   opened: boolean;
   onClose: () => void;
   quality: QualitySelection;
+  requestedQuality?: QualitySelection;
+  qualityVerification?: 'pending' | 'verified' | 'partial' | null;
   onChangeQuality: (newQuality: QualitySelection) => void;
   networkStats: NetworkMetrics | null;
   connectionStatus: ConnectionState;
@@ -50,6 +52,8 @@ export function SettingsDrawer({
   opened,
   onClose,
   quality,
+  requestedQuality = quality,
+  qualityVerification,
   onChangeQuality,
   networkStats,
   connectionStatus,
@@ -197,6 +201,14 @@ export function SettingsDrawer({
         <Tabs.Panel value="quality">
           <Stack gap="md">
             <QualityControls quality={quality} onChange={onChangeQuality} />
+            <Text size="xs" c="dimmed">
+              Preferência: {QUALITY_PROFILES[quality.profile].label} · {quality.fps} FPS.
+              {' '}Proteção e recuperação automática gradual de qualidade.
+              {requestedQuality.profile !== quality.profile && ` Perfil temporário solicitado: ${QUALITY_PROFILES[requestedQuality.profile].label} · ${requestedQuality.fps} FPS.`}
+              {qualityVerification === 'pending' && ' Verificando limites solicitados…'}
+              {qualityVerification === 'verified' && ' Limites aplicados verificados; a qualidade transmitida pode variar.'}
+              {qualityVerification === 'partial' && ' Aplicação dos limites incompleta ou não verificada. Consulte o diagnóstico.'}
+            </Text>
 
             <Box
               style={{
