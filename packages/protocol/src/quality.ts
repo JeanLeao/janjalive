@@ -53,3 +53,11 @@ export function resolveQuality(selection: QualitySelection) {
 export function downgradeQuality(selection: QualitySelection): QualitySelection {
   return normalizeQuality({ ...selection, profile: selection.profile === 'ultra' ? 'balanced' : 'economy' });
 }
+
+// Rebuild FPS from the explicit preference, not the normalized reduced profile.
+export function recoverQuality(current: QualitySelection, preference: QualitySelection): QualitySelection {
+  const profiles: QualityProfileKey[] = ['economy', 'balanced', 'ultra'];
+  const ceiling = normalizeQuality(preference);
+  const index = Math.min(profiles.indexOf(current.profile) + 1, profiles.indexOf(ceiling.profile));
+  return normalizeQuality({ ...ceiling, profile: profiles[index] });
+}

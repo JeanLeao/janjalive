@@ -463,6 +463,8 @@ function RoomPage() {
         opened={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         quality={session.quality}
+        requestedQuality={session.requestedQuality}
+        qualityVerification={session.qualityVerification}
         onChangeQuality={session.changeQuality}
         networkStats={session.networkStats}
         connectionStatus={session.connectionStatus}

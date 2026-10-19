@@ -33,3 +33,19 @@ test('transitions preserve valid choices and clamp invalid FPS; downgrade preser
   assert.equal(normalizeQuality({ ...DEFAULT_QUALITY, profile: 'ultra' }).fps, 30);
   assert.equal(normalizeQuality({ priority: 'sharpness', profile: 'ultra', fps: 20 }).fps, 20);
 });
+
+test('automatic recovery respects each manual ceiling and restores the original normalized FPS', async () => {
+  const { recoverQuality } = await import('../dist/index.js');
+  for (const priority of ['sharpness', 'motion']) for (const profile of ['economy', 'balanced', 'ultra']) {
+    for (const fps of validFrameRates(priority, profile)) {
+      const preference = { priority, profile, fps };
+      let current = downgradeQuality(downgradeQuality(preference));
+      assert.equal(current.profile, 'economy');
+      current = recoverQuality(current, preference);
+      assert.equal(current.profile, profile === 'economy' ? 'economy' : 'balanced');
+      current = recoverQuality(current, preference);
+      assert.deepEqual(current, preference);
+      assert.deepEqual(recoverQuality(current, preference), preference);
+    }
+  }
+});

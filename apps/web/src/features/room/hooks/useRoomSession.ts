@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'r
 import { canSendStageSelection, followReducer, followDisplayStatus, followTarget, initialFollowState } from './follow-presenter';
 import {
   type QualitySelection,
-  DEFAULT_QUALITY, normalizeQuality, resolveQuality, downgradeQuality,
+  DEFAULT_QUALITY, normalizeQuality, resolveQuality, downgradeQuality, recoverQuality,
 } from '@screen-room/protocol';
 import type {
   ConnectionState,
@@ -72,9 +72,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [remoteConnectionStates, setRemoteConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({});
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [quality, setQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
+  const preferenceRef = useRef<QualitySelection>(DEFAULT_QUALITY);
+  const [requestedQuality, setRequestedQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
+  const [qualityVerification, setQualityVerification] = useState<'pending' | 'verified' | 'partial' | null>(null);
   const [qualityPending, setQualityPending] = useState(false);
   const [qualityNotice, setQualityNotice] = useState<string | null>(null);
-  const qualityOperationRef = useRef<object | null>(null);
+  const qualityOperationRef = useRef<{ automatic?: true; restoreQuality?: QualitySelection } | null>(null);
   const [networkStats, setNetworkStats] = useState<NetworkMetrics | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticEntry[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -101,10 +104,32 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const endedHandlerRef = useRef<{ track: MediaStreamTrack; handler: () => void } | null>(null);
   const [captureState, setCaptureState] = useState<CaptureState>('idle');
   const captureStateRef = useRef<CaptureState>('idle');
+  const cancelPendingRecovery = useCallback(() => {
+    const previous = qualityOperationRef.current?.restoreQuality;
+    if (!previous) return;
+    qualityOperationRef.current = null;
+    qualityRef.current = previous;
+    setRequestedQuality(previous);
+    setQualityPending(false);
+    setQualityVerification(null);
+    // Supersede queued recovery through the existing application barrier.
+    void peerManagerRef.current?.applyQuality(previous);
+  }, []);
   const transition = useCallback((state: CaptureState) => {
+    cancelPendingRecovery();
+    statsCollectorRef.current?.resetAdaptation();
+    qualityOperationRef.current = null;
+    setQualityPending(false);
+    setQualityVerification(null);
+    if (state === 'idle' || state === 'stopping') {
+      qualityRef.current = preferenceRef.current;
+      setRequestedQuality(preferenceRef.current);
+      setQualityVerification(null);
+      void peerManagerRef.current?.applyQuality(preferenceRef.current);
+    }
     captureStateRef.current = state;
     setCaptureState(state);
-  }, []);
+  }, [cancelPendingRecovery]);
   const captureGenerationRef = useRef(0);
   const switchRef = useRef<CaptureSwitch | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
@@ -185,7 +210,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onSendSignal: (target, data) => {
         return signalingRef.current?.relaySignal(target, data) ?? false;
       },
-      onPeerState: (id, state) => { if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state })); },
+      onPeerState: (id, state) => { cancelPendingRecovery(); statsCollectorRef.current?.resetAdaptation(); if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state })); },
       onRemoteStreamAdd: (remotePeerId, stream) => {
         setRemoteStreams((prev) => {
           const filtered = prev.filter((item) => item.peerId !== remotePeerId);
@@ -216,23 +241,39 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
     peerManagerRef.current = peerManager;
 
-    // Create StatsCollector with auto-downgrade handler
+    const adaptQuality = async (recover: boolean, loss?: number) => {
+      const track = localStreamRef.current?.getVideoTracks()[0];
+      if (isDisposed || captureStateRef.current !== 'sharing' || !sharingIdRef.current || !track || track.readyState !== 'live' || !track.enabled || (qualityOperationRef.current && (recover || !('automatic' in qualityOperationRef.current)))) return;
+      const current = qualityRef.current;
+      const next = recover ? recoverQuality(current, preferenceRef.current) : downgradeQuality(current);
+      if (next.profile === current.profile) return;
+      const operation = { automatic: true as const, restoreQuality: recover ? current : undefined };
+      qualityOperationRef.current = operation;
+      qualityRef.current = next;
+      setRequestedQuality(next);
+      setQualityVerification('pending');
+      setQualityPending(true);
+      logger.log(recover ? 'quality-recovery-attempt' : 'quality-downgrade', { from: JSON.stringify(current), to: JSON.stringify(next), loss });
+      const verified = await peerManager.applyQuality(next).catch(() => false);
+      if (isDisposed || qualityOperationRef.current !== operation || captureStateRef.current !== 'sharing' || qualityRef.current !== next) {
+        logger.log('quality-adaptation-obsolete', { profile: next.profile });
+        return;
+      }
+      qualityOperationRef.current = null;
+      setQualityPending(false);
+      setQualityVerification(verified ? 'verified' : 'partial');
+      logger.log('quality-adaptation-result', { profile: next.profile, verified });
+      setQualityNotice(verified ? null : 'O navegador não aplicou todos os limites solicitados. Consulte o diagnóstico.');
+    };
     const statsCollector = new StatsCollector({
       peerManager,
-      onStats: (metrics) => {
-        if (!isDisposed) setNetworkStats(metrics);
-      },
-      onDegradation: (lossPercent) => {
-        if (!localStreamRef.current) return;
-        const curQuality = qualityRef.current;
-        if (curQuality.profile === 'economy') return;
-        const nextQuality = downgradeQuality(curQuality);
-        qualityRef.current = nextQuality;
-        logger.log('quality-downgrade', { from: JSON.stringify(curQuality), to: JSON.stringify(nextQuality), loss: lossPercent });
-        setQuality(nextQuality);
-        peerManager.applyQuality(nextQuality);
-        showToast('Rede instável: qualidade de transmissão reduzida automaticamente.');
-      },
+      isPublishing: () => !isDisposed && captureStateRef.current === 'sharing' && Boolean(sharingIdRef.current)
+        && !qualityOperationRef.current && signalingRef.current?.getState() === 'connected'
+        && participantsRef.current.filter(p => !p.isLocal).every(p => peerManager.getPeers().get(p.peerId)?.pc.connectionState === 'connected')
+        && Boolean(localStreamRef.current?.getVideoTracks().some(track => track.readyState === 'live' && track.enabled)),
+      onStats: (metrics) => { if (!isDisposed) setNetworkStats(metrics); },
+      onDegradation: loss => { void adaptQuality(false, loss); },
+      onRecovery: () => { void adaptQuality(true); },
       logger,
     });
     statsCollectorRef.current = statsCollector;
@@ -306,6 +347,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
           }
+          cancelPendingRecovery();
+          statsCollector.resetAdaptation();
           peerManager.setParticipants((message.participants?.map((p) => p.peerId) || message.peers).filter((id) => id !== peerId));
           for (const p of message.participants || []) if (p.peerId !== peerId && p.sharing) peerManager.setRemoteSharing(p.peerId, p.sharing.active);
           signaling.updateSharing({ active: Boolean(sharingIdRef.current), paused: Boolean(sharingIdRef.current) && captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: Boolean(sharingIdRef.current) ? pointingEnabledRef.current : undefined, drawingEnabled: Boolean(sharingIdRef.current) ? drawingEnabledRef.current : undefined, hasAudio: Boolean(localStreamRef.current?.getAudioTracks().length), audioMuted: switchRef.current?.muted ?? (localStreamRef.current?.getAudioTracks().some((track) => !track.enabled) || false) });
@@ -351,6 +394,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           dispatchFollow({ type: 'selection', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
         } else if (message.type === 'peer-joined') {
           presenterBack(message.peerId);
+          cancelPendingRecovery();
+          statsCollector.resetAdaptation();
           peerManager.addParticipant(message.peerId);
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
@@ -390,6 +435,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             }
             return prev.filter((p) => p.peerId !== message.peerId);
           });
+          cancelPendingRecovery();
+          statsCollector.resetAdaptation();
           peerManager.removePeer(message.peerId);
         } else if (message.type === 'peer-updated') {
           setParticipants((prev) => {
@@ -487,7 +534,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       peerManager.dispose();
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher]);
+  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery]);
 
   const stopSharing = useCallback(() => {
     stageSelectionPublisher.cancel();
@@ -935,7 +982,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       qualityOperationRef.current = operation;
       setQualityPending(true);
       setQualityNotice(null);
+      statsCollectorRef.current?.resetAdaptation();
       const newQuality = normalizeQuality(selection);
+      preferenceRef.current = newQuality;
+      setRequestedQuality(newQuality);
+      setQualityVerification('pending');
       qualityRef.current = newQuality;
       setQuality(newQuality);
       const streams = new Set([localStreamRef.current, switchRef.current?.pending]);
@@ -947,6 +998,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       qualityOperationRef.current = null;
       setQualityPending(false);
       if (generation !== captureGenerationRef.current || qualityRef.current !== newQuality) return;
+      setQualityVerification([...streams].some(stream => stream?.getVideoTracks().some(track => track.readyState === 'live'))
+        ? (verified !== false && results.every(Boolean) ? 'verified' : 'partial') : null);
       const profile = resolveQuality(newQuality);
       loggerRef.current?.log('quality-selection', { ...newQuality, verified: verified && results.every(Boolean), captures: JSON.stringify([...streams].filter(Boolean).map(stream => stream!.getVideoTracks()[0]?.getSettings?.() ?? {})) });
       setQualityNotice(verified !== false && results.every(Boolean) ? null : 'O navegador não aplicou todos os limites. Confira a captura observada; você pode continuar ou escolher outro perfil.');
@@ -1079,6 +1132,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     updateNickname,
     currentNickname,
     quality,
+    requestedQuality,
+    qualityVerification,
     qualityPending,
     qualityNotice,
     networkStats,
