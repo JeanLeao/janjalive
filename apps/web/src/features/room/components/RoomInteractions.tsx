@@ -539,26 +539,33 @@ function QaTabView({
   const lastReplyingIdRef = useRef<string | null>(null);
   const wasReplyingRef = useRef(false);
 
+  const pendingFocusQuestionIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (wasReplyingRef.current && !replyingId) {
-      const questionId = lastReplyingIdRef.current;
-      if (questionId) {
-        requestAnimationFrame(() => {
-          const btn = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"] [data-qa-reply-btn]`);
-          if (btn) {
-            btn.focus();
-          } else {
-            const card = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"]`);
-            card?.focus();
-          }
-        });
-      }
+      pendingFocusQuestionIdRef.current = lastReplyingIdRef.current;
     }
     if (replyingId) {
       lastReplyingIdRef.current = replyingId;
     }
     wasReplyingRef.current = Boolean(replyingId);
   }, [replyingId]);
+
+  useEffect(() => {
+    const questionId = pendingFocusQuestionIdRef.current;
+    if (!questionId || replyingId || qaPending) return;
+
+    pendingFocusQuestionIdRef.current = null;
+    requestAnimationFrame(() => {
+      const btn = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"] [data-qa-reply-btn]`);
+      if (btn && !btn.hasAttribute('disabled')) {
+        btn.focus();
+      } else {
+        const card = document.querySelector<HTMLElement>(`[data-question-id="${questionId}"]`);
+        card?.focus();
+      }
+    });
+  }, [replyingId, qaPending]);
 
   useLayoutEffect(() => {
     const node = field.current;

@@ -44,11 +44,11 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     expect(activeTagName).not.toBe('BODY');
   });
 
-  test('Atalhos não disparam durante digitação em campos de texto', async ({ page }) => {
+  test('Atalhos não disparam durante digitação em campos de texto e contextos de navegação', async ({ page }) => {
     await page.goto('/room/e2e-f31-typing?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
-    // Open chat
+    // 1. Chat textarea
     await page.keyboard.press('Alt+Shift+KeyI');
     const panel = page.locator('#room-chat-panel');
     await expect(panel).toBeVisible();
@@ -67,6 +67,45 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
 
     // Primary stream remains Firminha (not switched)
     await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // 2. Q&A textbox
+    const qaTab = page.getByRole('tab', { name: /^Perguntas/ });
+    await qaTab.click();
+    const qInput = page.getByRole('textbox', { name: 'Pergunta' });
+    await qInput.focus();
+    await expect(qInput).toBeFocused();
+    await page.keyboard.press('Alt+Shift+KeyN');
+    await page.keyboard.press('Alt+Shift+KeyF');
+    // Neither stream switched nor fullscreen entered
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+    expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+
+    // Close panel with Escape
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+
+    // 3. Participants nickname input
+    const participantsBtn = page.getByRole('banner').getByRole('button', { name: /ver participantes/i });
+    await participantsBtn.click();
+    const participantsDrawer = page.getByRole('dialog', { name: 'Participantes' });
+    await expect(participantsDrawer).toBeVisible();
+
+    const editNickBtn = participantsDrawer.getByRole('button', { name: 'Alterar seu nickname' });
+    await editNickBtn.click();
+    const nickInput = participantsDrawer.getByRole('textbox', { name: 'Seu nickname' });
+    await expect(nickInput).toBeVisible();
+    await nickInput.focus();
+    await page.keyboard.press('Alt+Shift+KeyN');
+    await page.keyboard.press('Alt+Shift+KeyP');
+    // Stream not switched
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // Cancel nickname edit
+    await nickInput.press('Escape');
+    await expect(nickInput).toBeHidden();
+    const closeParticipantsBtn = participantsDrawer.getByRole('button', { name: /fechar lista de participantes/i });
+    await closeParticipantsBtn.click();
+    await expect(participantsDrawer).toBeHidden();
   });
 
   test('Alt+Shift+N e Alt+Shift+P navegam circularmente entre transmissões e anunciam via live region', async ({ page }) => {
@@ -227,6 +266,25 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await expect(replyTextarea).toBeHidden();
     await expect(replyBtn).toBeVisible();
     await expect(replyBtn).toBeFocused();
+
+    // Click reply once more, fill answer and click Publicar resposta
+    await replyBtn.click();
+    await expect(replyTextarea).toBeVisible();
+    await replyTextarea.fill('O cronograma prevê entrega até o fim do mês.');
+    const publishBtn = qCard.getByRole('button', { name: 'Publicar resposta' });
+    await publishBtn.click();
+
+    // Verify reply textarea closed
+    await expect(replyTextarea).toBeHidden();
+
+    // Verify answer is published and visible on card
+    const answerEl = qCard.locator('[data-testid="qa-question-answer"]');
+    await expect(answerEl).toBeVisible();
+    await expect(answerEl).toContainText('O cronograma prevê entrega até o fim do mês.');
+
+    // Verify focus is restored to reply button (now labeled "Editar resposta")
+    await expect(replyBtn).toBeVisible();
+    await expect(replyBtn).toBeFocused();
   });
 
   test('Drawers de Participantes e Configurações possuem nomes acessíveis e referência de atalhos', async ({ page }) => {
@@ -279,4 +337,74 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await closeParticipantsBtn.click();
     await expect(participantsDrawer).toBeHidden();
   });
+
+  test('Alternância da transmissão com foco nos controles do player principal preserva o foco', async ({ page }) => {
+    await page.goto('/room/e2e-f31-ctrl-focus?demo=multi');
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // 1. Focus zoom-in control in player
+    const zoomInBtn = page.locator('[data-control-id="zoom-in"]').first();
+    await expect(zoomInBtn).toBeVisible();
+    await zoomInBtn.focus();
+    await expect(zoomInBtn).toBeFocused();
+
+    // Switch primary stream via Alt+Shift+N
+    await page.keyboard.press('Alt+Shift+KeyN');
+
+    // Primary stream is now Ana
+    await expect(page.locator('.stage-main-container').getByText(/Ana/).first()).toBeVisible();
+
+    // Verify focus is preserved on zoom-in button on the new player instance
+    await page.waitForTimeout(60);
+    const activeIsBody = await page.evaluate(() => document.activeElement === document.body);
+    expect(activeIsBody).toBe(false);
+
+    const activeControlId = await page.evaluate(() => document.activeElement?.getAttribute('data-control-id'));
+    expect(activeControlId).toBe('zoom-in');
+
+    // 2. Focus fullscreen toggle control in player
+    const fsBtn = page.locator('[data-control-id="fullscreen-toggle"]').first();
+    await expect(fsBtn).toBeVisible();
+    await fsBtn.focus();
+    await expect(fsBtn).toBeFocused();
+
+    // Switch primary stream again via Alt+Shift+N (swaps back to Firminha)
+    await page.keyboard.press('Alt+Shift+KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // Verify focus is preserved on fullscreen toggle button on the new player instance
+    await page.waitForTimeout(60);
+    const activeAfterSecondSwitch = await page.evaluate(() => document.activeElement?.getAttribute('data-control-id'));
+    expect(activeAfterSecondSwitch).toBe('fullscreen-toggle');
+  });
+
+  test('Entrada e saída de fullscreen pelo atalho Alt+Shift+F preserva Fullscreen API e continuidade de foco', async ({ page }) => {
+    await page.goto('/room/e2e-f31-fullscreen?demo=single');
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // Focus fullscreen button initially
+    const fsBtn = page.locator('[data-control-id="fullscreen-toggle"]').first();
+    await expect(fsBtn).toBeVisible();
+    await fsBtn.focus();
+    await expect(fsBtn).toBeFocused();
+
+    // Trigger fullscreen via shortcut
+    await page.keyboard.press('Alt+Shift+KeyF');
+    await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+
+    // Verify focus is not lost to document.body
+    await page.waitForTimeout(50);
+    const activeIsBodyInFs = await page.evaluate(() => document.activeElement === document.body);
+    expect(activeIsBodyInFs).toBe(false);
+
+    // Exit fullscreen via shortcut
+    await page.keyboard.press('Alt+Shift+KeyF');
+    await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+
+    // Verify focus remains within stage controls, not on body
+    await page.waitForTimeout(50);
+    const activeIsBodyAfterFs = await page.evaluate(() => document.activeElement === document.body);
+    expect(activeIsBodyAfterFs).toBe(false);
+  });
 });
+
