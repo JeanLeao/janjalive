@@ -18,7 +18,9 @@ import {
   IconDots,
   IconExit,
   IconLink,
+  IconQrCode,
 } from './Icons';
+import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface RoomHeaderProps {
   roomId: string;
@@ -30,6 +32,7 @@ export interface RoomHeaderProps {
   onLeave: () => void;
   /** Acesso social (chat e reações), posicionado junto aos participantes. */
   interactions?: React.ReactNode;
+  onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
 }
 
 export function RoomHeader({
@@ -41,23 +44,18 @@ export function RoomHeader({
   onOpenSettings,
   onLeave,
   interactions,
+  onOpenQrCode,
 }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false);
+  const moreMenuBtnRef = React.useRef<HTMLButtonElement>(null);
 
   const shortRoomId = roomId.length > 12 ? roomId.slice(0, 8) : roomId;
 
   const handleCopyLink = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.search = '';
-        cleanUrl.hash = '';
-        await navigator.clipboard.writeText(cleanUrl.toString());
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy link:', err);
-      }
+    const success = await copyRoomInviteUrl();
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -295,6 +293,7 @@ export function RoomHeader({
         <Menu shadow="md" width={180} position="bottom-end">
           <Menu.Target>
             <UnstyledButton
+              ref={moreMenuBtnRef}
               aria-label="Mais opções da sala"
               style={{
                 width: 36,
@@ -326,6 +325,15 @@ export function RoomHeader({
             >
               Copiar link
             </Menu.Item>
+            {onOpenQrCode && (
+              <Menu.Item
+                leftSection={<IconQrCode size={14} />}
+                onClick={() => onOpenQrCode(moreMenuBtnRef.current)}
+                style={{ fontSize: '0.82rem' }}
+              >
+                Mostrar QR Code
+              </Menu.Item>
+            )}
             <Menu.Item
               leftSection={<IconGear size={14} />}
               onClick={onOpenSettings}

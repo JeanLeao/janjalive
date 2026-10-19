@@ -9,6 +9,8 @@ import { RoomStage } from '../features/room/components/RoomStage';
 import { FloatingControlDock } from '../features/room/components/FloatingControlDock';
 import { ParticipantsDrawer } from '../features/room/components/ParticipantsDrawer';
 import { SettingsDrawer } from '../features/room/components/SettingsDrawer';
+import { InviteQrModal } from '../features/room/components/InviteQrModal';
+import { copyRoomInviteUrl } from '../features/room/utils/invite-url';
 
 import { canShareScreen } from '../features/room/media/display-media';
 import { getStoredShortcutsPreference, setStoredShortcutsPreference } from '../features/room/hooks/useRoomShortcuts';
@@ -33,6 +35,13 @@ function RoomPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
   const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(getStoredShortcutsPreference);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrTriggerElement, setQrTriggerElement] = useState<HTMLElement | null>(null);
+
+  const handleOpenQrCode = useCallback((triggerEl?: HTMLElement | null) => {
+    setQrTriggerElement(triggerEl || (typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null));
+    setIsQrModalOpen(true);
+  }, []);
 
   const handleToggleShortcuts = useCallback((enabled: boolean) => {
     setShortcutsEnabled(enabled);
@@ -227,16 +236,7 @@ function RoomPage() {
   };
 
   const handleCopyInvite = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.search = '';
-        cleanUrl.hash = '';
-        await navigator.clipboard.writeText(cleanUrl.toString());
-      } catch (err) {
-        console.error('Failed to copy link:', err);
-      }
-    }
+    await copyRoomInviteUrl();
   };
 
   return (
@@ -354,6 +354,7 @@ function RoomPage() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onLeave={handleLeave}
           interactions={isFullscreen ? null : interactionActions('header')}
+          onOpenQrCode={handleOpenQrCode}
         />
       )}
 
@@ -404,6 +405,7 @@ function RoomPage() {
         onCopyInvite={handleCopyInvite}
         canShareScreen={canShare}
         shortcutsEnabled={shortcutsEnabled}
+        onOpenQrCode={handleOpenQrCode}
       />
 
       {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
@@ -439,6 +441,7 @@ function RoomPage() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onLeave={handleLeave}
         canShareScreen={canShare}
+        onOpenQrCode={handleOpenQrCode}
       />
 
       {/* Right Drawer: Participants */}
@@ -471,6 +474,14 @@ function RoomPage() {
         initialTab={settingsTab}
         shortcutsEnabled={shortcutsEnabled}
         onToggleShortcuts={handleToggleShortcuts}
+      />
+
+      {/* QR Code Invite Modal */}
+      <InviteQrModal
+        opened={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        roomId={roomId}
+        triggerElement={qrTriggerElement}
       />
     </Box>
   );

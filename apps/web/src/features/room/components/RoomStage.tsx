@@ -34,6 +34,7 @@ import {
   IconMinimize,
   IconSignal,
   IconLink,
+  IconQrCode,
 } from './Icons';
 
 export interface RoomStageProps {
@@ -61,6 +62,7 @@ export interface RoomStageProps {
   onCopyInvite: () => void;
   canShareScreen?: boolean | null;
   shortcutsEnabled?: boolean;
+  onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
 }
 
 interface StreamItem {
@@ -96,6 +98,7 @@ export function RoomStage({
   onCopyInvite,
   canShareScreen,
   shortcutsEnabled = false,
+  onOpenQrCode,
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
@@ -107,6 +110,7 @@ export function RoomStage({
   const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const primaryPlayerContainerRef = useRef<HTMLDivElement | null>(null);
+  const qrBtnRef = useRef<HTMLButtonElement | null>(null);
   const wasInFullscreenRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -476,7 +480,7 @@ export function RoomStage({
               gap: '10px',
               justifyContent: 'center',
               width: '100%',
-              maxWidth: '400px',
+              maxWidth: '440px',
             }}
           >
             {canShareScreen === true && (
@@ -510,6 +514,25 @@ export function RoomStage({
             >
               Copiar convite
             </Button>
+
+            {onOpenQrCode && (
+              <Button
+                ref={qrBtnRef}
+                variant="default"
+                leftSection={<IconQrCode size={16} />}
+                onClick={() => onOpenQrCode(qrBtnRef.current)}
+                style={{
+                  backgroundColor: '#161b22',
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  color: '#e6edf3',
+                  height: '42px',
+                  padding: '0 1.25rem',
+                  flex: '1 1 160px',
+                }}
+              >
+                Mostrar QR Code
+              </Button>
+            )}
           </Box>
         </Box>
       </Box>

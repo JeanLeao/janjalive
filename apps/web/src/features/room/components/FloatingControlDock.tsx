@@ -18,7 +18,9 @@ import {
   IconGear,
   IconExit,
   IconUsers,
+  IconQrCode,
 } from './Icons';
+import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
   onSwitchCapture?: () => void;
@@ -40,6 +42,7 @@ export interface FloatingControlDockProps {
   onOpenSettings: () => void;
   onLeave: () => void;
   canShareScreen?: boolean | null;
+  onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
 }
 
 export function FloatingControlDock({
@@ -62,21 +65,16 @@ export function FloatingControlDock({
   onOpenSettings,
   onLeave,
   canShareScreen,
+  onOpenQrCode,
 }: FloatingControlDockProps) {
   const [copied, setCopied] = useState(false);
+  const settingsBtnRef = React.useRef<HTMLButtonElement>(null);
 
   const handleCopyLink = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.search = '';
-        cleanUrl.hash = '';
-        await navigator.clipboard.writeText(cleanUrl.toString());
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy link:', err);
-      }
+    const success = await copyRoomInviteUrl();
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -272,6 +270,7 @@ export function FloatingControlDock({
           <Menu.Target>
             <Tooltip label="Configurações e convite" events={{ hover: true, focus: true, touch: false }} withArrow>
               <UnstyledButton
+                ref={settingsBtnRef}
                 aria-label="Configurações e convite"
                 className="floating-dock-btn"
                 style={{
@@ -296,6 +295,14 @@ export function FloatingControlDock({
           <Menu.Dropdown>
             <Menu.Item onClick={onOpenSettings}>Configurações e diagnósticos</Menu.Item>
             <Menu.Item onClick={handleCopyLink}>{copied ? 'Link copiado!' : 'Copiar link de convite'}</Menu.Item>
+            {onOpenQrCode && (
+              <Menu.Item
+                onClick={() => onOpenQrCode(settingsBtnRef.current)}
+                leftSection={<IconQrCode size={14} />}
+              >
+                Mostrar QR Code
+              </Menu.Item>
+            )}
           </Menu.Dropdown>
         </Menu>
 
