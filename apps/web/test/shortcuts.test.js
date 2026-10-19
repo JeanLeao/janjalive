@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isEditableElement, isWithinNavigationContext } from '../src/features/room/hooks/useRoomShortcuts.ts';
+import {
+  isEditableElement,
+  isWithinNavigationContext,
+  getStoredShortcutsPreference,
+  setStoredShortcutsPreference,
+  SHORTCUTS_STORAGE_KEY,
+} from '../src/features/room/hooks/useRoomShortcuts.ts';
 
 // Mock minimal DOM element for node test environment
 class MockElement {
@@ -25,7 +31,7 @@ if (typeof globalThis.HTMLElement === 'undefined') {
   globalThis.HTMLElement = MockElement;
 }
 
-test('isEditableElement detects inputs, textareas, selects and contenteditable elements', () => {
+test('isEditableElement detects inputs, textareas, selects, contenteditable elements, and editable roles', () => {
   assert.equal(isEditableElement(null), false);
   assert.equal(isEditableElement(new MockElement('div')), false);
   assert.equal(isEditableElement(new MockElement('button')), false);
@@ -34,9 +40,12 @@ test('isEditableElement detects inputs, textareas, selects and contenteditable e
   assert.equal(isEditableElement(new MockElement('select')), true);
   assert.equal(isEditableElement(new MockElement('div', { isContentEditable: true })), true);
   assert.equal(isEditableElement(new MockElement('p', { closest: { '[contenteditable="true"]': true } })), true);
+  assert.equal(isEditableElement(new MockElement('p', { closest: { '[contenteditable=""]': true } })), true);
+  assert.equal(isEditableElement(new MockElement('div', { closest: { '[role="textbox"]': true } })), true);
+  assert.equal(isEditableElement(new MockElement('div', { closest: { '[role="searchbox"]': true } })), true);
 });
 
-test('isWithinNavigationContext detects menus, popovers, drawers and modals', () => {
+test('isWithinNavigationContext detects menus, popovers, drawers, modals, and dialogs', () => {
   assert.equal(isWithinNavigationContext(null), false);
   assert.equal(isWithinNavigationContext(new MockElement('div')), false);
   assert.equal(isWithinNavigationContext(new MockElement('button')), false);
@@ -45,6 +54,53 @@ test('isWithinNavigationContext detects menus, popovers, drawers and modals', ()
   assert.equal(isWithinNavigationContext(new MockElement('div', { closest: { '.mantine-Popover-dropdown': true } })), true);
   assert.equal(isWithinNavigationContext(new MockElement('input', { closest: { '.mantine-Drawer-content': true } })), true);
   assert.equal(isWithinNavigationContext(new MockElement('button', { closest: { '.mantine-Modal-content': true } })), true);
+  assert.equal(isWithinNavigationContext(new MockElement('button', { closest: { '[role="dialog"]': true } })), true);
+  assert.equal(isWithinNavigationContext(new MockElement('button', { closest: { '[role="alertdialog"]': true } })), true);
+});
+
+test('getStoredShortcutsPreference and setStoredShortcutsPreference handle localStorage and fallbacks safely', () => {
+  const originalWindow = globalThis.window;
+  const store = {};
+
+  // Mock window and localStorage
+  globalThis.window = {
+    localStorage: {
+      getItem(key) {
+        return store[key] ?? null;
+      },
+      setItem(key, val) {
+        store[key] = String(val);
+      },
+    },
+  };
+
+  try {
+    // Default when key does not exist
+    delete store[SHORTCUTS_STORAGE_KEY];
+    assert.equal(getStoredShortcutsPreference(), false);
+
+    // Enabled
+    setStoredShortcutsPreference(true);
+    assert.equal(store[SHORTCUTS_STORAGE_KEY], 'true');
+    assert.equal(getStoredShortcutsPreference(), true);
+
+    // Disabled
+    setStoredShortcutsPreference(false);
+    assert.equal(store[SHORTCUTS_STORAGE_KEY], 'false');
+    assert.equal(getStoredShortcutsPreference(), false);
+
+    // Fallback when localStorage throws
+    globalThis.window.localStorage.getItem = () => {
+      throw new Error('SecurityError: Local storage denied');
+    };
+    globalThis.window.localStorage.setItem = () => {
+      throw new Error('QuotaExceededError');
+    };
+    assert.equal(getStoredShortcutsPreference(), false);
+    assert.doesNotThrow(() => setStoredShortcutsPreference(true));
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
 
 test('circular stream indexing correctly navigates streams forwards and backwards', () => {

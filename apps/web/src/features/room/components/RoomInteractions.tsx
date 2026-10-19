@@ -198,7 +198,7 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   return <div className={`${classes.actions} ${variant === 'floating' ? classes.floating : ''}`} role="group" aria-label="Interações da sala">
     <button type="button" className={classes.action} data-chat-trigger data-poll-open={ui.hasOpenPoll || undefined} data-qa-open={openQuestionsCount || undefined}
       aria-expanded={opened} aria-controls="room-chat-panel"
-      title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas (Alt+Shift+I)' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto) (Alt+Shift+I)` : 'Chat e perguntas (Alt+Shift+I)'}
+      title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas (I)' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto) (I)` : 'Chat e perguntas (I)'}
       aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />

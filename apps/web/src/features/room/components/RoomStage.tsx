@@ -60,6 +60,7 @@ export interface RoomStageProps {
   onStartSharing: () => void;
   onCopyInvite: () => void;
   canShareScreen?: boolean | null;
+  shortcutsEnabled?: boolean;
 }
 
 interface StreamItem {
@@ -94,6 +95,7 @@ export function RoomStage({
   onStartSharing,
   onCopyInvite,
   canShareScreen,
+  shortcutsEnabled = false,
 }: RoomStageProps) {
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
@@ -250,7 +252,7 @@ export function RoomStage({
         const ariaLabel = target.getAttribute('aria-label') ?? undefined;
         const wasInControls = Boolean(target.closest('.stage-view-controls'));
         lastFocusedControlRef.current = { controlId, ariaLabel, wasInControls };
-      } else if (stageContainerRef.current && !stageContainerRef.current.contains(target)) {
+      } else {
         wasFocusedOnPreviewRef.current = false;
         lastFocusedControlRef.current = null;
       }
@@ -265,7 +267,11 @@ export function RoomStage({
   const captureFocusedElement = useCallback(() => {
     if (typeof document === 'undefined') return;
     const activeEl = document.activeElement as HTMLElement | null;
-    if (!activeEl || activeEl === document.body) return;
+    if (!activeEl || activeEl === document.body) {
+      wasFocusedOnPreviewRef.current = false;
+      lastFocusedControlRef.current = null;
+      return;
+    }
 
     if (activeEl.closest('.secondary-preview-btn')) {
       wasFocusedOnPreviewRef.current = true;
@@ -276,6 +282,9 @@ export function RoomStage({
       const ariaLabel = activeEl.getAttribute('aria-label') ?? undefined;
       const wasInControls = Boolean(activeEl.closest('.stage-view-controls'));
       lastFocusedControlRef.current = { controlId, ariaLabel, wasInControls };
+    } else {
+      wasFocusedOnPreviewRef.current = false;
+      lastFocusedControlRef.current = null;
     }
   }, []);
 
@@ -313,6 +322,17 @@ export function RoomStage({
       const saved = lastFocusedControlRef.current;
       lastFocusedControlRef.current = null;
       requestAnimationFrame(() => {
+        const currentActive = document.activeElement as HTMLElement | null;
+        if (
+          currentActive &&
+          currentActive !== document.body &&
+          currentActive !== stageContainerRef.current &&
+          currentActive.isConnected &&
+          !primaryPlayerContainerRef.current?.contains(currentActive)
+        ) {
+          return;
+        }
+
         const container = primaryPlayerContainerRef.current;
         if (!container) return;
 
@@ -353,7 +373,7 @@ export function RoomStage({
   }, [currentIndex, streamItems, selectPrimary]);
 
   useRoomShortcuts({
-    enabled: true,
+    enabled: Boolean(shortcutsEnabled),
     onNextStream: handleNextStream,
     onPrevStream: handlePrevStream,
     canCycleStreams,
@@ -1453,7 +1473,7 @@ function SpotlightVideoPlayer({
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={14} aria-hidden /></Button>
       </Box>
-      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia (Alt+Shift+F)' : 'Tela cheia (Alt+Shift+F)'} events={{ hover: true, focus: true, touch: false }} withArrow>
+      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'} events={{ hover: true, focus: true, touch: false }} withArrow>
         <Button
           variant="subtle" color="gray" onClick={onToggleFullscreen}
           data-control-id="fullscreen-toggle"

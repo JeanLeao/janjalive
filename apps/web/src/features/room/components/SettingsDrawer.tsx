@@ -9,6 +9,7 @@ import {
   Button,
   Code,
   Tabs,
+  Switch,
 } from '@mantine/core';
 import type { QualitySelection } from '@screen-room/protocol';
 import { QualityControls } from './QualityControls';
@@ -41,6 +42,8 @@ export interface SettingsDrawerProps {
   onToggleAudioMute: () => void;
   isSharing: boolean;
   initialTab?: string;
+  shortcutsEnabled?: boolean;
+  onToggleShortcuts?: (enabled: boolean) => void;
 }
 
 export function SettingsDrawer({
@@ -56,6 +59,8 @@ export function SettingsDrawer({
   onToggleAudioMute,
   isSharing,
   initialTab = 'quality',
+  shortcutsEnabled = false,
+  onToggleShortcuts,
 }: SettingsDrawerProps) {
   const measurementLabel = { unavailable: 'Estatísticas indisponíveis', 'no-report': 'Sem amostra', unsupported: 'Campo não fornecido pelo navegador', pending: 'Medição ainda não estabelecida', measured: 'Medido' };
   const [copiedLogs, setCopiedLogs] = useState(false);
@@ -500,25 +505,46 @@ export function SettingsDrawer({
                 border: '1px solid rgba(255, 255, 255, 0.06)',
               }}
             >
-              <Text fw={600} size="sm" c="#fff" mb="xs">
-                Atalhos de teclado
+              <Group justify="space-between" align="center" mb="xs">
+                <div>
+                  <Text fw={600} size="sm" c="#fff">
+                    Atalhos de uma tecla
+                  </Text>
+                  <Text size="xs" c="#8c959f">
+                    {shortcutsEnabled ? 'Ativados' : 'Desativados por padrão (WCAG 2.1.4)'}
+                  </Text>
+                </div>
+                <Switch
+                  checked={shortcutsEnabled}
+                  onChange={(event) => onToggleShortcuts?.(event.currentTarget.checked)}
+                  aria-label="Ativar atalhos de teclado de uma tecla"
+                  size="sm"
+                  color="blue"
+                />
+              </Group>
+
+              <Text size="xs" c="#8c959f" mb="sm" style={{ lineHeight: 1.45 }}>
+                {shortcutsEnabled
+                  ? 'Atalhos ativos. Pressione as teclas abaixo quando não estiver digitando.'
+                  : 'Recurso desativado. Ative para navegar rapidamente com teclas únicas.'}
               </Text>
+
               <Stack gap="xs">
                 <Group justify="space-between" wrap="nowrap">
-                  <Text size="xs" c="#d0d7de">Próxima transmissão</Text>
-                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + N</Code>
+                  <Text size="xs" c="#d0d7de">Próxima transmissão principal</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>N</Code>
                 </Group>
                 <Group justify="space-between" wrap="nowrap">
-                  <Text size="xs" c="#d0d7de">Transmissão anterior</Text>
-                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + P</Code>
+                  <Text size="xs" c="#d0d7de">Transmissão principal anterior</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>P</Code>
                 </Group>
                 <Group justify="space-between" wrap="nowrap">
-                  <Text size="xs" c="#d0d7de">Alternar tela cheia do palco</Text>
-                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + F</Code>
+                  <Text size="xs" c="#d0d7de">Alternar fullscreen do palco</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>F</Code>
                 </Group>
                 <Group justify="space-between" wrap="nowrap">
-                  <Text size="xs" c="#d0d7de">Abrir ou focar interações</Text>
-                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)' }}>Alt + Shift + I</Code>
+                  <Text size="xs" c="#d0d7de">Abrir ou focar o painel de interações</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>I</Code>
                 </Group>
               </Stack>
             </Box>

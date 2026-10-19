@@ -11,6 +11,7 @@ import { ParticipantsDrawer } from '../features/room/components/ParticipantsDraw
 import { SettingsDrawer } from '../features/room/components/SettingsDrawer';
 
 import { canShareScreen } from '../features/room/media/display-media';
+import { getStoredShortcutsPreference, setStoredShortcutsPreference } from '../features/room/hooks/useRoomShortcuts';
 
 export const Route = createFileRoute('/room/$roomId')({
   component: RoomPage,
@@ -31,6 +32,12 @@ function RoomPage() {
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
+  const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(getStoredShortcutsPreference);
+
+  const handleToggleShortcuts = useCallback((enabled: boolean) => {
+    setShortcutsEnabled(enabled);
+    setStoredShortcutsPreference(enabled);
+  }, []);
 
   const [canShare, setCanShare] = useState<boolean | null>(null);
   const [demoStreams, setDemoStreams] = useState<any[] | null>(null);
@@ -396,6 +403,7 @@ function RoomPage() {
         onStartSharing={session.startSharing}
         onCopyInvite={handleCopyInvite}
         canShareScreen={canShare}
+        shortcutsEnabled={shortcutsEnabled}
       />
 
       {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
@@ -461,6 +469,8 @@ function RoomPage() {
         onToggleAudioMute={session.toggleAudioMute}
         isSharing={session.isSharing}
         initialTab={settingsTab}
+        shortcutsEnabled={shortcutsEnabled}
+        onToggleShortcuts={handleToggleShortcuts}
       />
     </Box>
   );

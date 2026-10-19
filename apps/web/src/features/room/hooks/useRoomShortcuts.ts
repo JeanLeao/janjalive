@@ -1,5 +1,25 @@
 import { useEffect } from 'react';
 
+export const SHORTCUTS_STORAGE_KEY = 'screen_room_shortcuts_enabled';
+
+export function getStoredShortcutsPreference(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(SHORTCUTS_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setStoredShortcutsPreference(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // ignore local storage errors
+  }
+}
+
 export interface UseRoomShortcutsOptions {
   enabled?: boolean;
   onNextStream?: () => void;
@@ -16,7 +36,7 @@ export function isEditableElement(target: EventTarget | null): boolean {
   const tagName = target.tagName;
   if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
   if (target.isContentEditable) return true;
-  if (target.closest('[contenteditable="true"]')) return true;
+  if (target.closest('[contenteditable="true"], [contenteditable=""], [role="textbox"], [role="searchbox"]')) return true;
   return false;
 }
 
@@ -24,7 +44,7 @@ export function isWithinNavigationContext(target: EventTarget | null): boolean {
   if (!target || !(target instanceof HTMLElement)) return false;
   if (
     target.closest(
-      '[role="menu"], [role="menuitem"], [role="menuitemcheckbox"], .mantine-Menu-dropdown, .mantine-Popover-dropdown, .mantine-Drawer-content, .mantine-Modal-content'
+      '[role="menu"], [role="menuitem"], [role="menuitemcheckbox"], [role="dialog"], [role="alertdialog"], .mantine-Menu-dropdown, .mantine-Popover-dropdown, .mantine-Drawer-content, .mantine-Modal-content'
     )
   ) {
     return true;
@@ -33,7 +53,7 @@ export function isWithinNavigationContext(target: EventTarget | null): boolean {
 }
 
 export function useRoomShortcuts({
-  enabled = true,
+  enabled = false,
   onNextStream,
   onPrevStream,
   canCycleStreams = false,
@@ -49,12 +69,14 @@ export function useRoomShortcuts({
       // Avoid repeated execution on continuous keydown
       if (event.repeat) return;
 
+      // Ignore already-handled events
+      if (event.defaultPrevented) return;
+
       // Ignore IME composition
       if (event.isComposing || event.keyCode === 229) return;
 
-      // Check modifier keys: Alt + Shift (without Ctrl or Meta/Cmd)
-      // On macOS, Alt is Option.
-      if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) {
+      // Single-character shortcuts: ignore any modified keys (Alt, Ctrl, Meta, Shift)
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
         return;
       }
 
@@ -63,16 +85,30 @@ export function useRoomShortcuts({
         return;
       }
 
-      // Ignore if inside a menu, popover, or modal/drawer with its own navigation
-      if (isWithinNavigationContext(event.target) || isWithinNavigationContext(document.activeElement)) {
+      const key = event.key.toLowerCase();
+
+      // Check navigation context (menus, popovers, drawers, modals, dialogs)
+      const inNavContext =
+        isWithinNavigationContext(event.target) ||
+        isWithinNavigationContext(document.activeElement);
+
+      if (inNavContext) {
+        // Special case: if inside #room-chat-panel and key is 'i', focus the chat input rather than closing
+        const isChatPanel =
+          (event.target instanceof HTMLElement && Boolean(event.target.closest('#room-chat-panel'))) ||
+          (document.activeElement instanceof HTMLElement && Boolean(document.activeElement.closest('#room-chat-panel')));
+
+        if (key === 'i' && isChatPanel) {
+          if (canInteractions && onOpenOrFocusInteractions) {
+            event.preventDefault();
+            onOpenOrFocusInteractions();
+          }
+        }
         return;
       }
 
-      const key = event.key.toLowerCase();
-      const code = event.code;
-
-      // Alt+Shift+N: Next primary stream
-      if (code === 'KeyN' || key === 'n') {
+      // N: Next primary stream
+      if (key === 'n') {
         if (canCycleStreams && onNextStream) {
           event.preventDefault();
           onNextStream();
@@ -80,8 +116,8 @@ export function useRoomShortcuts({
         return;
       }
 
-      // Alt+Shift+P: Previous primary stream
-      if (code === 'KeyP' || key === 'p') {
+      // P: Previous primary stream
+      if (key === 'p') {
         if (canCycleStreams && onPrevStream) {
           event.preventDefault();
           onPrevStream();
@@ -89,8 +125,8 @@ export function useRoomShortcuts({
         return;
       }
 
-      // Alt+Shift+F: Toggle stage fullscreen
-      if (code === 'KeyF' || key === 'f') {
+      // F: Toggle stage fullscreen
+      if (key === 'f') {
         if (canFullscreen && onToggleFullscreen) {
           event.preventDefault();
           onToggleFullscreen();
@@ -98,8 +134,8 @@ export function useRoomShortcuts({
         return;
       }
 
-      // Alt+Shift+I: Open or focus interactions panel
-      if (code === 'KeyI' || key === 'i') {
+      // I: Open or focus interactions panel
+      if (key === 'i') {
         if (canInteractions && onOpenOrFocusInteractions) {
           event.preventDefault();
           onOpenOrFocusInteractions();

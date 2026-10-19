@@ -1,7 +1,99 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
+
+async function enableShortcuts(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('screen_room_shortcuts_enabled', 'true');
+  });
+}
 
 test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
-  test('Alt+Shift+I abre e foca o painel de interações sem fechá-lo inesperadamente, e Escape restaura o foco', async ({ page }) => {
+  test('Atalhos de uma tecla começam desativados por padrão e não realizam ações antes da ativação explícita', async ({ page }) => {
+    await page.goto('/room/e2e-f31-disabled?demo=multi');
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // Initially Firminha is featured
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // Press N -> should not switch stream
+    await page.keyboard.press('KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // Press P -> should not switch stream
+    await page.keyboard.press('KeyP');
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // Press F -> should not trigger fullscreen
+    await page.keyboard.press('KeyF');
+    expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+
+    // Press I -> should not open chat panel
+    await page.keyboard.press('KeyI');
+    await expect(page.locator('#room-chat-panel')).toBeHidden();
+  });
+
+  test('Ativação nas Configurações habilita atalhos N/P/F/I, com persistência local e efeito imediato ao desativar', async ({ page }) => {
+    await page.goto('/room/e2e-f31-activation?demo=multi');
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // 1. Open Settings and verify switch is off by default
+    const settingsBtn = page.getByRole('button', { name: 'Abrir configurações e diagnósticos' });
+    await settingsBtn.click();
+    const settingsDrawer = page.getByRole('dialog', { name: 'Configurações' });
+    await expect(settingsDrawer).toBeVisible();
+
+    const aboutTab = settingsDrawer.getByRole('tab', { name: 'Sobre' });
+    await aboutTab.click();
+
+    const switchControl = settingsDrawer.getByRole('switch', { name: 'Ativar atalhos de teclado de uma tecla' });
+    await expect(switchControl).not.toBeChecked();
+
+    // 2. Turn switch ON
+    await switchControl.click({ force: true });
+    await expect(switchControl).toBeChecked();
+
+    // Close Settings
+    const closeSettingsBtn = settingsDrawer.getByRole('button', { name: /fechar configurações/i });
+    await closeSettingsBtn.click();
+    await expect(settingsDrawer).toBeHidden();
+
+    // Verify shortcuts now work: N switches to Ana
+    await page.keyboard.press('KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Ana/).first()).toBeVisible();
+
+    // Verify I opens chat panel
+    await page.keyboard.press('KeyI');
+    const chatPanel = page.locator('#room-chat-panel');
+    await expect(chatPanel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(chatPanel).toBeHidden();
+
+    // 3. Reload page and verify preference persisted
+    await page.reload();
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // N switches stream after reload
+    await page.keyboard.press('KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Ana/).first()).toBeVisible();
+
+    // Verify switch is still checked in Settings
+    await settingsBtn.click();
+    await expect(settingsDrawer).toBeVisible();
+    await aboutTab.click();
+    await expect(switchControl).toBeChecked();
+
+    // 4. Turn switch OFF -> immediate deactivation
+    await switchControl.click({ force: true });
+    await expect(switchControl).not.toBeChecked();
+    await closeSettingsBtn.click();
+    await expect(settingsDrawer).toBeHidden();
+
+    // Currently showing Ana, pressing N must NOT switch back to Firminha
+    await page.keyboard.press('KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Ana/).first()).toBeVisible();
+  });
+
+  test('Tecla I abre e foca o painel de interações sem fechá-lo indevidamente, e Escape restaura o foco', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-interactions?demo=single');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -15,8 +107,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
       await inviteBtn.focus();
     }
 
-    // Press Alt+Shift+I to open interactions panel
-    await page.keyboard.press('Alt+Shift+KeyI');
+    // Press I to open interactions panel
+    await page.keyboard.press('KeyI');
     await expect(panel).toBeVisible();
 
     // Verify focus is inside the panel (panel itself or chat textarea)
@@ -26,8 +118,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     });
     expect(isFocusInPanel).toBe(true);
 
-    // Pressing Alt+Shift+I again when already open MUST NOT close it, but keep/direct focus inside
-    await page.keyboard.press('Alt+Shift+KeyI');
+    // Pressing I again when already open MUST NOT close it, but keep/direct focus inside
+    await page.keyboard.press('KeyI');
     await expect(panel).toBeVisible();
     const isStillFocusedInPanel = await page.evaluate(() => {
       const p = document.getElementById('room-chat-panel');
@@ -44,12 +136,13 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     expect(activeTagName).not.toBe('BODY');
   });
 
-  test('Atalhos não disparam durante digitação em campos de texto e contextos de navegação', async ({ page }) => {
+  test('Campos editáveis, contextos protegidos e teclas modificadas não acionam atalhos', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-typing?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
     // 1. Chat textarea
-    await page.keyboard.press('Alt+Shift+KeyI');
+    await page.keyboard.press('KeyI');
     const panel = page.locator('#room-chat-panel');
     await expect(panel).toBeVisible();
 
@@ -57,12 +150,11 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await textarea.focus();
     await expect(textarea).toBeFocused();
 
-    // Press Alt+Shift+N while typing in textarea - should NOT switch streams or close panel
-    await page.keyboard.press('Alt+Shift+KeyN');
-    await textarea.type('Mensagem de teste');
+    // Typing 'n', 'p', 'f', 'i' inside textarea should type characters normally and NOT trigger stage shortcuts
+    await textarea.type('Mensagem de teste com n, p, f, i');
 
     // Ensure chat panel is still open and textarea has content
-    await expect(textarea).toHaveValue('Mensagem de teste');
+    await expect(textarea).toHaveValue('Mensagem de teste com n, p, f, i');
     await expect(panel).toBeVisible();
 
     // Primary stream remains Firminha (not switched)
@@ -74,8 +166,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const qInput = page.getByRole('textbox', { name: 'Pergunta' });
     await qInput.focus();
     await expect(qInput).toBeFocused();
-    await page.keyboard.press('Alt+Shift+KeyN');
-    await page.keyboard.press('Alt+Shift+KeyF');
+    await page.keyboard.press('KeyN');
+    await page.keyboard.press('KeyF');
     // Neither stream switched nor fullscreen entered
     await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
     expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
@@ -84,7 +176,13 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
 
-    // 3. Participants nickname input
+    // 3. Test modified keys (Alt+N, Ctrl+N, Shift+N) are ignored
+    await page.keyboard.press('Alt+KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+    await page.keyboard.press('Shift+KeyN');
+    await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
+
+    // 4. Participants nickname input
     const participantsBtn = page.getByRole('banner').getByRole('button', { name: /ver participantes/i });
     await participantsBtn.click();
     const participantsDrawer = page.getByRole('dialog', { name: 'Participantes' });
@@ -95,8 +193,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const nickInput = participantsDrawer.getByRole('textbox', { name: 'Seu nickname' });
     await expect(nickInput).toBeVisible();
     await nickInput.focus();
-    await page.keyboard.press('Alt+Shift+KeyN');
-    await page.keyboard.press('Alt+Shift+KeyP');
+    await page.keyboard.press('KeyN');
+    await page.keyboard.press('KeyP');
     // Stream not switched
     await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
 
@@ -108,7 +206,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await expect(participantsDrawer).toBeHidden();
   });
 
-  test('Alt+Shift+N e Alt+Shift+P navegam circularmente entre transmissões e anunciam via live region', async ({ page }) => {
+  test('N e P navegam circularmente entre transmissões e anunciam via live region', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-cycle?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -120,24 +219,25 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const badge = page.locator('.stage-main-container').getByText(/Firminha/);
     await expect(badge.first()).toBeVisible();
 
-    // Press Alt+Shift+N to go to next stream (Ana)
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Press N to go to next stream (Ana)
+    await page.keyboard.press('KeyN');
     const anaBadge = page.locator('.stage-main-container').getByText(/Ana/);
     await expect(anaBadge.first()).toBeVisible();
     await expect(liveRegion).toContainText('Transmissão principal: Ana');
 
-    // Press Alt+Shift+N again (circular back to Firminha)
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Press N again (circular back to Firminha)
+    await page.keyboard.press('KeyN');
     await expect(badge.first()).toBeVisible();
     await expect(liveRegion).toContainText('Transmissão principal: Firminha');
 
-    // Press Alt+Shift+P (circular back to Ana)
-    await page.keyboard.press('Alt+Shift+KeyP');
+    // Press P (circular back to Ana)
+    await page.keyboard.press('KeyP');
     await expect(anaBadge.first()).toBeVisible();
     await expect(liveRegion).toContainText('Transmissão principal: Ana');
   });
 
   test('Navegação entre transmissões com fonte única é no-op', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-single?demo=single');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -145,16 +245,17 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const badge = page.locator('.stage-main-container').getByText(/Firminha/);
     await expect(badge.first()).toBeVisible();
 
-    // Press Alt+Shift+N - should not crash or change stream
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Press N - should not crash or change stream
+    await page.keyboard.press('KeyN');
     await expect(badge.first()).toBeVisible();
 
-    // Press Alt+Shift+P - should not crash or change stream
-    await page.keyboard.press('Alt+Shift+KeyP');
+    // Press P - should not crash or change stream
+    await page.keyboard.press('KeyP');
     await expect(badge.first()).toBeVisible();
   });
 
   test('Modo Comparar: atalhos alteram apenas transmissão principal e preservam secundária', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-compare?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -172,14 +273,53 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await expect(primarySelector).toHaveValue('peer_firminha');
     await expect(secondarySelector).toHaveValue('peer_ana');
 
-    // Press Alt+Shift+N: swaps primary to peer_ana
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Press N: swaps primary to peer_ana
+    await page.keyboard.press('KeyN');
     await expect(primarySelector).toHaveValue('peer_ana');
     // Secondary becomes peer_firminha
     await expect(secondarySelector).toHaveValue('peer_firminha');
   });
 
+  test('Alterar a transmissão pelo seletor do modo Comparar não restaura indevidamente o foco a um controle antigo', async ({ page }) => {
+    await enableShortcuts(page);
+    await page.goto('/room/e2e-f31-compare-focus?demo=multi');
+    await expect(page.locator('.stage-main-container')).toBeVisible();
+
+    // Enter compare mode
+    const compareBtn = page.getByRole('button', { name: 'Comparar' });
+    await compareBtn.click();
+
+    // 1. Focus a control inside primary player container (e.g. zoom-in button)
+    const zoomInBtn = page.locator('[data-control-id="zoom-in"]').first();
+    await expect(zoomInBtn).toBeVisible();
+    await zoomInBtn.focus();
+    await expect(zoomInBtn).toBeFocused();
+
+    // 2. Intentionally move focus to the primary stream selector in compare header
+    const primarySelector = page.locator('select[aria-label="Transmissão principal"]');
+    await expect(primarySelector).toBeVisible();
+    await primarySelector.focus();
+    await expect(primarySelector).toBeFocused();
+
+    // 3. Change primary stream via the selector
+    await primarySelector.selectOption('peer_ana');
+
+    // Wait a brief moment for any RAF / DOM updates
+    await page.waitForTimeout(100);
+
+    // 4. Verify focus is STILL on the selector, NOT stolen back to the old zoom-in button
+    const activeIsSelector = await page.evaluate(() => {
+      const active = document.activeElement;
+      return active?.getAttribute('aria-label') === 'Transmissão principal';
+    });
+    expect(activeIsSelector).toBe(true);
+
+    const activeControlId = await page.evaluate(() => document.activeElement?.getAttribute('data-control-id'));
+    expect(activeControlId).toBeNull();
+  });
+
   test('Troca de transmissão por clique em miniatura restaura foco adequadamente', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-focus-stream?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -203,6 +343,7 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
   });
 
   test('Q&A inline: cancelar, publicar ou encerrar edição restaura o foco previsivelmente', async ({ page }) => {
+    await enableShortcuts(page);
     await page.addInitScript(() => {
       sessionStorage.setItem('screen_room_display_name', 'Apresentador');
       Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
@@ -230,7 +371,7 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
     // Open chat and switch to Perguntas
-    await page.keyboard.press('Alt+Shift+KeyI');
+    await page.keyboard.press('KeyI');
     const qaTab = page.getByRole('tab', { name: /^Perguntas/ });
     await qaTab.click();
 
@@ -287,7 +428,7 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await expect(replyBtn).toBeFocused();
   });
 
-  test('Drawers de Participantes e Configurações possuem nomes acessíveis e referência de atalhos', async ({ page }) => {
+  test('Drawers de Participantes e Configurações possuem nomes acessíveis e referência de atalhos N/P/F/I', async ({ page }) => {
     await page.goto('/room/e2e-f31-drawers?demo=single');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -303,12 +444,14 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const aboutTab = settingsDrawer.getByRole('tab', { name: 'Sobre' });
     await aboutTab.click();
 
-    // Verify keyboard shortcuts reference card
-    await expect(settingsDrawer.getByText('Atalhos de teclado')).toBeVisible();
-    await expect(settingsDrawer.getByText('Alt + Shift + N')).toBeVisible();
-    await expect(settingsDrawer.getByText('Alt + Shift + P')).toBeVisible();
-    await expect(settingsDrawer.getByText('Alt + Shift + F')).toBeVisible();
-    await expect(settingsDrawer.getByText('Alt + Shift + I')).toBeVisible();
+    // Verify keyboard shortcuts reference card and switch
+    await expect(settingsDrawer.getByText('Atalhos de uma tecla')).toBeVisible();
+    await expect(settingsDrawer.getByText('Desativados por padrão (WCAG 2.1.4)')).toBeVisible();
+    await expect(settingsDrawer.getByRole('switch', { name: 'Ativar atalhos de teclado de uma tecla' })).toBeVisible();
+    await expect(settingsDrawer.getByText('Próxima transmissão principal')).toBeVisible();
+    await expect(settingsDrawer.getByText('Transmissão principal anterior')).toBeVisible();
+    await expect(settingsDrawer.getByText('Alternar fullscreen do palco')).toBeVisible();
+    await expect(settingsDrawer.getByText('Abrir ou focar o painel de interações')).toBeVisible();
 
     // Close Settings Drawer with close button
     const closeSettingsBtn = settingsDrawer.getByRole('button', { name: /fechar configurações/i });
@@ -339,6 +482,7 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
   });
 
   test('Alternância da transmissão com foco nos controles do player principal preserva o foco', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-ctrl-focus?demo=multi');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -348,8 +492,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await zoomInBtn.focus();
     await expect(zoomInBtn).toBeFocused();
 
-    // Switch primary stream via Alt+Shift+N
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Switch primary stream via N
+    await page.keyboard.press('KeyN');
 
     // Primary stream is now Ana
     await expect(page.locator('.stage-main-container').getByText(/Ana/).first()).toBeVisible();
@@ -368,8 +512,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await fsBtn.focus();
     await expect(fsBtn).toBeFocused();
 
-    // Switch primary stream again via Alt+Shift+N (swaps back to Firminha)
-    await page.keyboard.press('Alt+Shift+KeyN');
+    // Switch primary stream again via N (swaps back to Firminha)
+    await page.keyboard.press('KeyN');
     await expect(page.locator('.stage-main-container').getByText(/Firminha/).first()).toBeVisible();
 
     // Verify focus is preserved on fullscreen toggle button on the new player instance
@@ -378,7 +522,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     expect(activeAfterSecondSwitch).toBe('fullscreen-toggle');
   });
 
-  test('Entrada e saída de fullscreen pelo atalho Alt+Shift+F preserva Fullscreen API e continuidade de foco', async ({ page }) => {
+  test('Entrada e saída de fullscreen pelo atalho F preserva Fullscreen API e continuidade de foco', async ({ page }) => {
+    await enableShortcuts(page);
     await page.goto('/room/e2e-f31-fullscreen?demo=single');
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
@@ -388,8 +533,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     await fsBtn.focus();
     await expect(fsBtn).toBeFocused();
 
-    // Trigger fullscreen via shortcut
-    await page.keyboard.press('Alt+Shift+KeyF');
+    // Trigger fullscreen via shortcut F
+    await page.keyboard.press('KeyF');
     await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
 
     // Verify focus is not lost to document.body
@@ -397,8 +542,8 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     const activeIsBodyInFs = await page.evaluate(() => document.activeElement === document.body);
     expect(activeIsBodyInFs).toBe(false);
 
-    // Exit fullscreen via shortcut
-    await page.keyboard.press('Alt+Shift+KeyF');
+    // Exit fullscreen via shortcut F
+    await page.keyboard.press('KeyF');
     await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
 
     // Verify focus remains within stage controls, not on body
@@ -407,4 +552,3 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
     expect(activeIsBodyAfterFs).toBe(false);
   });
 });
-
