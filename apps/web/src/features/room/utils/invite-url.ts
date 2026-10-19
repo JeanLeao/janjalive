@@ -10,6 +10,11 @@ export function getRoomInviteUrl(rawUrl?: string, baseOrigin?: string): string {
     if (!raw) return '';
     const base = baseOrigin || (typeof window !== 'undefined' ? window.location.origin : undefined);
     const cleanUrl = new URL(raw, base);
+    if (cleanUrl.protocol !== 'http:' && cleanUrl.protocol !== 'https:') {
+      return '';
+    }
+    cleanUrl.username = '';
+    cleanUrl.password = '';
     cleanUrl.search = '';
     cleanUrl.hash = '';
     return cleanUrl.toString();
@@ -22,6 +27,9 @@ export function isLocalAddress(urlString: string): boolean {
   if (!urlString) return false;
   try {
     const parsed = new URL(urlString);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
     const host = parsed.hostname.toLowerCase();
     return (
       host === 'localhost' ||

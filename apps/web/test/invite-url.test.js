@@ -23,6 +23,35 @@ test('getRoomInviteUrl returns empty string for invalid URLs or empty strings', 
   assert.equal(getRoomInviteUrl('not a url'), '');
 });
 
+test('getRoomInviteUrl strips username and password credentials from URLs', () => {
+  assert.equal(
+    getRoomInviteUrl('https://user:secret123@screenroom.live/room/abc-123'),
+    'https://screenroom.live/room/abc-123'
+  );
+  assert.equal(
+    getRoomInviteUrl('http://admin:pass@192.168.1.50:3000/room/team-alpha?token=secret#stage'),
+    'http://192.168.1.50:3000/room/team-alpha'
+  );
+  assert.equal(
+    getRoomInviteUrl('https://username_only@screenroom.live/room/test'),
+    'https://screenroom.live/room/test'
+  );
+  assert.equal(
+    getRoomInviteUrl('https://:password_only@screenroom.live/room/test'),
+    'https://screenroom.live/room/test'
+  );
+});
+
+test('getRoomInviteUrl rejects non-HTTP and non-HTTPS schemes', () => {
+  assert.equal(getRoomInviteUrl('javascript:alert(1)'), '');
+  assert.equal(getRoomInviteUrl('file:///etc/passwd'), '');
+  assert.equal(getRoomInviteUrl('data:text/html,<script>alert(1)</script>'), '');
+  assert.equal(getRoomInviteUrl('ftp://user:pass@ftp.screenroom.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('ws://screenroom.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('wss://screenroom.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('mailto:user@screenroom.live'), '');
+});
+
 test('getRoomInviteUrl uses window.location.href when in browser environment', () => {
   const originalWindow = globalThis.window;
   try {
@@ -51,11 +80,13 @@ test('isLocalAddress returns false for public domains and invalid URLs', () => {
   assert.equal(isLocalAddress('https://screenroom.live/room/abc'), false);
   assert.equal(isLocalAddress('https://example.com/room/abc'), false);
   assert.equal(isLocalAddress('https://meet.google.com/xyz'), false);
+  assert.equal(isLocalAddress('ftp://localhost:21/room/abc'), false);
+  assert.equal(isLocalAddress('ws://localhost:3000/room/abc'), false);
   assert.equal(isLocalAddress(''), false);
   assert.equal(isLocalAddress('invalid'), false);
 });
 
-test('copyRoomInviteUrl copies cleaned URL to navigator.clipboard and handles errors', async () => {
+test('copyRoomInviteUrl copies cleaned URL to navigator.clipboard, strips credentials and handles errors', async () => {
   const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis.navigator, 'clipboard');
   let copiedText = '';
 
@@ -70,9 +101,15 @@ test('copyRoomInviteUrl copies cleaned URL to navigator.clipboard and handles er
       writable: true,
     });
 
-    const success = await copyRoomInviteUrl('https://screenroom.live/room/f10-room?query=123#hash');
+    const success = await copyRoomInviteUrl('https://user:secret@screenroom.live/room/f10-room?query=123#hash');
     assert.equal(success, true);
     assert.equal(copiedText, 'https://screenroom.live/room/f10-room');
+
+    // Test rejection of non-http/https schemes
+    copiedText = '';
+    const schemeSuccess = await copyRoomInviteUrl('javascript:alert(1)');
+    assert.equal(schemeSuccess, false);
+    assert.equal(copiedText, '');
 
     // Test clipboard failure
     Object.defineProperty(globalThis.navigator, 'clipboard', {
