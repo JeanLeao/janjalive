@@ -42,7 +42,8 @@ async function syntheticCapture(page: Page, representative: boolean | 'browser' 
         const ctx = canvas.getContext('2d')!;
         let frame = 0;
         const timer = setInterval(() => {
-          ctx.fillStyle = frame++ % 2 ? '#ff0000' : '#0000ff';
+          ctx.fillStyle = (window as any).testClipColor || (frame % 2 ? '#ff0000' : '#0000ff');
+          frame++;
           ctx.fillRect(0, 0, 640, 360);
           ctx.fillStyle = '#ffffff'; ctx.fillRect(frame % 600, 40, 40, 40);
           if (representative) {
@@ -2885,5 +2886,78 @@ test('F16 original source in Compare, Cinema, fullscreen, source switch and sign
     await expect.poll(() => host.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(count);
     await expect(host.getByRole('button', { name: /● Gravando/ })).toHaveCount(0);
     expect(await host.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+for (const width of [1280, 390]) test(`F16 recording source A stays identified and exported after selecting B at ${width}px`, async ({ browser }) => {
+  const contexts = await Promise.all([
+    browser.newContext(), browser.newContext(),
+    browser.newContext({ viewport: { width, height: 844 }, hasTouch: width === 390 }),
+  ]);
+  try {
+    const a = await contexts[0].newPage(), b = await contexts[1].newPage(), viewer = await contexts[2].newPage();
+    await Promise.all([syntheticCapture(a), syntheticCapture(b), syntheticCapture(viewer)]);
+    for (const [page, name, color] of [[a, 'Fonte A', '#00ff00'], [b, 'Fonte B', '#ff00ff']] as const) {
+      await page.addInitScript(({ name, color }) => {
+        sessionStorage.setItem('screen_room_display_name', name);
+        (window as any).testClipColor = color;
+      }, { name, color });
+    }
+    const room = `/room/f16-source-identity-${width}`;
+    await Promise.all([gotoRoom(a, room), gotoRoom(b, room), gotoRoom(viewer, room)]);
+    await startLive(a); await startLive(b); await frames(viewer);
+    // Compare exposes the existing primary selector; the recording still uses one original source.
+    await viewer.getByRole('button', { name: 'Comparar', exact: true }).click();
+    const primary = viewer.getByRole('combobox', { name: 'Transmissão principal', exact: true });
+    await primary.selectOption({ label: 'Fonte A' });
+    await viewer.getByRole('button', { name: /^Clipes/ }).click();
+    await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).toBeChecked();
+    await viewer.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    await viewer.keyboard.press('Escape');
+    await primary.selectOption({ label: 'Fonte B' });
+    await viewer.getByRole('button', { name: /● Gravando/ }).click();
+    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true }).first()).toBeVisible();
+    await expect(viewer.getByText('Fonte do clipe: Fonte B', { exact: true })).toHaveCount(0);
+    await expect(viewer.getByText('O apresentador ainda não permitiu gravar esta transmissão.')).toHaveCount(0);
+    await expect(viewer.getByText('Gravação ativa: 2 de 60 segundos.', { exact: true })).toBeVisible();
+    // Revocation must still follow A even though B is now selected (and has no consent).
+    await a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
+    await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true }).first()).toBeVisible();
+    const downloadPromise = viewer.waitForEvent('download');
+    await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).click();
+    const download = await downloadPromise;
+    const encoded = fs.readFileSync((await download.path())!).toString('base64');
+    // Decode the actual downloaded file and sample after the stage switch, not a live element.
+    const pixel = await viewer.evaluate(async ({ encoded, mp4 }) => {
+      const data = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([data], { type: mp4 ? 'video/mp4' : 'video/webm' }));
+      const video = document.createElement('video'); video.muted = true; video.playsInline = true;
+      try {
+        return await new Promise<number[]>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Export playback timed out')), 8000);
+          const sample = () => {
+            const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(video, 320, 300, 1, 1, 0, 0, 1, 1);
+            clearTimeout(timer); resolve(Array.from(ctx.getImageData(0, 0, 1, 1).data));
+          };
+          video.ontimeupdate = () => { if (video.currentTime >= 1) sample(); };
+          video.onerror = () => { clearTimeout(timer); reject(new Error('Invalid export')); };
+          video.src = url; video.play().catch(error => { clearTimeout(timer); reject(error); });
+        });
+      } finally { video.pause(); video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url); }
+    }, { encoded, mp4: download.suggestedFilename().endsWith('.mp4') });
+    expect(pixel[1]).toBeGreaterThan(180); expect(pixel[0]).toBeLessThan(70); expect(pixel[2]).toBeLessThan(70);
+    expect(await viewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await viewer.screenshot({ path: test.info().outputPath(`f16-fixed-source-${width}.png`) });
+    await viewer.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await expect(viewer.getByText('Transmissão selecionada: Fonte B', { exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });

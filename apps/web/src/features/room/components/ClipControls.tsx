@@ -28,11 +28,11 @@ export function ClipControls({ clips, participants, localStream, remoteStreams, 
         <Text size="xs">Somente a transmissão original selecionada. O consentimento vale para o gravador do Screen Room; ferramentas externas não são controladas.</Text>
         {own?.isSharing && <Checkbox styles={{ body: { minHeight: 44, alignItems: 'center' }, label: { minHeight: 44, display: 'flex', alignItems: 'center' } }} label="Permitir que outros gravem minha transmissão" checked={ownPermission?.allowed ?? false}
           disabled={!ownPermission} onChange={e => clips.permission(own.peerId, e.currentTarget.checked)} />}
-        <Text size="sm">Transmissão: {target ? name(target.peerId) : 'nenhuma'}</Text>
+        <Text size="sm">{clips.source ? `Fonte do clipe: ${clips.source.displayName}` : `Transmissão selecionada: ${target ? name(target.peerId) : 'nenhuma'}`}</Text>
         <Checkbox styles={{ body: { minHeight: 44, alignItems: 'center' }, label: { minHeight: 44, display: 'flex', alignItems: 'center' } }} label="Incluir áudio da transmissão" checked={audio} disabled={busy} onChange={e => setAudio(e.currentTarget.checked)} />
         <Text size="xs">Áudio opcional da aba/sistema, independente do volume ou mudo do seu reprodutor. Sem microfone ou câmera.</Text>
         {!clips.supported && <Text size="sm">Gravação indisponível neste navegador.</Text>}
-        {target && !target.isLocal && !permission?.allowed && <Text size="sm">O apresentador ainda não permitiu gravar esta transmissão.</Text>}
+        {!busy && !clips.file && target && !target.isLocal && !permission?.allowed && <Text size="sm">O apresentador ainda não permitiu gravar esta transmissão.</Text>}
         {busy ? <Button style={{ minHeight: 44 }} color="red" disabled={clips.status === 'finishing'} onClick={() => clips.stop()}>{clips.status === 'pending' ? 'Cancelar solicitação' : clips.status === 'finishing' ? 'Finalizando…' : 'Parar gravação'}</Button>
           : <Button style={{ minHeight: 44 }} disabled={!clips.supported || !stream || !target?.isSharing || target.isPaused || !permission || (!target.isLocal && !permission.allowed) || !!clips.file}
             onClick={() => target && stream && clips.start(target, stream, audio)}>Iniciar gravação</Button>}
@@ -47,6 +47,7 @@ export function ClipControls({ clips, participants, localStream, remoteStreams, 
     </Popover.Dropdown>
   </Popover>
     <Text size="xs" role="status" aria-live="polite" style={{ background: '#0d1117', borderRadius: 6, maxHeight: 72, overflowY: 'auto' }}>
+      {clips.source && <span style={{ display: 'block' }}>Fonte do clipe: {clips.source.displayName}</span>}
       {clips.status === 'recording' ? `● Gravação local ativa · ${clips.elapsed}s` : clips.notice}
       {clips.snapshot?.recordings.map(r => <span key={r.recordingId} style={{ display: 'block' }}>● {name(r.recorderId)} gravando {name(r.presenterId)}</span>)}
     </Text>

@@ -162,3 +162,51 @@ test('clip session: server denial is explicit and no local recorder starts', t =
   hook.current.receive({ type: 'clip-result', recordingId: sent[0].recordingId, ok: false, message: 'Sem permissão.' }, client);
   assert.equal(hook.current.notice, 'Sem permissão.'); assert.equal(hook.current.status, 'idle');
 });
+
+test('clip session: source A stays identifiable through request, recording, finalization and preview after selecting B', t => {
+  const { hook, sent, client, target, source } = setup(t);
+  class Track extends EventTarget {
+    kind = 'video'; readyState = 'live'; enabled = true; muted = false; sourceId = 'A';
+    clone() { return new Track(); }
+    stop() { this.readyState = 'ended'; }
+  }
+  class Stream extends EventTarget {
+    constructor(tracks) { super(); this.tracks = tracks; }
+    getVideoTracks() { return this.tracks; }
+    getAudioTracks() { return []; }
+  }
+  let encoder;
+  globalThis.MediaStream = Stream;
+  globalThis.MediaRecorder = class {
+    static isTypeSupported(type) { return type.startsWith('video/webm'); }
+    state = 'inactive'; mimeType = 'video/webm';
+    constructor(stream) { this.stream = stream; encoder = this; }
+    start() { this.state = 'recording'; this.onstart(); }
+    stop() { this.state = 'inactive'; } // Encoder flush is asynchronous.
+  };
+  t.after(() => { delete globalThis.MediaStream; delete globalThis.MediaRecorder; });
+  const streamA = new Stream([new Track()]);
+  const a = { ...target, nickname: 'Transmissão A' };
+  const b = { peerId: 'b', streamId: 'capture-b', isSharing: true, isLocal: false, nickname: 'Transmissão B' };
+  hook.current.start(a, streamA, false);
+  const expected = { presenterId: 'p', streamId: 'capture', displayName: 'Transmissão A' };
+  assert.deepEqual(hook.current.source, expected);
+  // Selecting B cannot replace a pending or active recording of A.
+  hook.current.start(b, source, false);
+  assert.equal(sent.filter(message => message.action === 'request').length, 1);
+  hook.current.receive({ type: 'clip-result', recordingId: sent[0].recordingId, ok: true, message: 'ok' }, client);
+  assert.equal(hook.current.status, 'recording');
+  hook.current.validate([a, b], null, [{ peerId: 'p', stream: streamA }, { peerId: 'b', stream: source }], 'idle', { p: 'connected', b: 'connected' });
+  assert.deepEqual(hook.current.source, expected);
+  assert.equal(encoder.stream.getVideoTracks()[0].sourceId, 'A');
+  hook.current.stop();
+  assert.equal(hook.current.status, 'finishing');
+  assert.deepEqual(hook.current.source, expected);
+  encoder.ondataavailable({ data: new Blob(['source A'], { type: 'video/webm' }) });
+  encoder.onstop();
+  assert.equal(hook.current.status, 'idle');
+  assert.deepEqual(hook.current.source, expected);
+  assert.ok(hook.current.file);
+  hook.current.discard();
+  assert.equal(hook.current.source, null);
+});

@@ -4,12 +4,14 @@ import { LocalClip, clipMimeType, type ClipFile } from '../media/local-clip.ts';
 import type { SignalingClient } from '../signaling/signaling-client';
 import type { RoomParticipant, RemoteStreamEntry } from '../types';
 
+type ClipSource = { presenterId: string; streamId: string; displayName: string };
 type Target = { presenterId: string; streamId: string; stream: MediaStream; version: number };
 type Pending = Target & { own: boolean; id: string; audio: boolean; phase: 'request' | 'starting' | 'active'; timer: ReturnType<typeof setTimeout> };
 export function useLocalClips(roomId: string) {
   const [snapshot, setSnapshot] = useState<ClipsSnapshot | null>(null);
   const snapshotRef = useRef<ClipsSnapshot | null>(null);
   const [status, setStatus] = useState<'idle' | 'pending' | 'recording' | 'finishing'>('idle');
+  const [source, setSource] = useState<ClipSource | null>(null);
   const [notice, setNotice] = useState('');
   const [file, setFile] = useState<ClipFile | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function useLocalClips(roomId: string) {
     send('stop', p, p.id);
     setNotice(message);
     if (recorder.current) { setStatus('finishing'); recorder.current.stop(); }
-    else setStatus('idle');
+    else { setSource(null); setStatus('idle'); }
   };
   const reset = () => {
     stop('Gravação interrompida pela desconexão da sala.');
@@ -75,7 +77,9 @@ export function useLocalClips(roomId: string) {
         finished: (result, error) => {
           if (!mounted.current) return;
           if (pending.current === p) stop();
-          recorder.current = null; setFile(result); setStatus('idle');
+          recorder.current = null; setFile(result);
+          if (!result) setSource(null);
+          setStatus('idle');
           if (error) setNotice(error);
         },
       });
@@ -84,7 +88,7 @@ export function useLocalClips(roomId: string) {
   };
   useEffect(() => {
     mounted.current = true;
-    setFile(null); setSnapshot(null); setStatus('idle'); setNotice('');
+    setSource(null); setFile(null); setSnapshot(null); setStatus('idle'); setNotice('');
     return () => {
       mounted.current = false;
       const p = pending.current;
@@ -96,11 +100,11 @@ export function useLocalClips(roomId: string) {
   useEffect(() => {
     if (!file) { setUrl(null); return; }
     try { const next = URL.createObjectURL(file.blob); setUrl(next); return () => URL.revokeObjectURL(next); }
-    catch { setNotice('Falha ao criar a prévia local.'); setFile(null); }
+    catch { setNotice('Falha ao criar a prévia local.'); setFile(null); setSource(null); }
   }, [file]);
   useEffect(() => { if (status !== 'recording') return; const timer = setInterval(() => setElapsed(recorder.current?.elapsed() ?? 0), 250); return () => clearInterval(timer); }, [status]);
   return {
-    snapshot, status, notice, file, url, elapsed,
+    snapshot, status, source, notice, file, url, elapsed,
     supported: clipMimeType() !== null, receive, reset, stop,
     syncTracks: () => recorder.current?.syncTracks(),
     validate(participants: RoomParticipant[], local: MediaStream | null, remotes: RemoteStreamEntry[], localState: string, connections: Record<string, RTCPeerConnectionState>) {
@@ -124,10 +128,11 @@ export function useLocalClips(roomId: string) {
       if (!p || !ready.current || target.isPaused || (!target.isLocal && !p.allowed)) { setNotice('O apresentador não autorizou a gravação desta transmissão.'); return; }
       const operation: Pending = { presenterId: target.peerId, streamId: p.streamId, version: p.version, stream,
         own: target.isLocal, id: crypto.randomUUID(), audio, phase: 'request', timer: setTimeout(() => { if (pending.current === operation) stop('A autorização não foi confirmada.'); }, 5000) };
+      setSource({ presenterId: target.peerId, streamId: p.streamId, displayName: target.nickname || target.peerId.slice(0, 8) });
       pending.current = operation; setElapsed(0); setStatus('pending'); setNotice('Solicitando autorização…');
       if (!send('request', operation, operation.id)) stop('Sem conexão com a sala.');
     },
-    discard() { setFile(null); },
+    discard() { setFile(null); setSource(null); },
     save() {
       if (!file || !url) return;
       try { const a = document.createElement('a'); a.href = url; a.download = `screen-room-${Date.now()}.${file.extension}`; document.body.append(a); a.click(); a.remove(); setNotice('Download solicitado. Confira os arquivos salvos pelo navegador.'); }
