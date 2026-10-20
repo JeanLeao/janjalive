@@ -951,7 +951,10 @@ test('F27 detach barrier, duplicate clicks, late join, reconnect and independent
     await expect(host.getByRole('dialog')).toBeVisible();
     await expect.poll(() => senderTrackIds(host)).toEqual([]);
     // Reconnect while the unconfirmed source exists; rebuilt peers must remain streamless.
-    await host.evaluate(() => (window as any).testSockets.at(-1).close());
+    // Code 1005 is a voluntary departure; use an involuntary signaling interruption.
+    const beforeReconnect = await host.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'peers').length);
+    await host.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === WebSocket.OPEN && s.url.includes('/signal')).forEach((s: WebSocket) => s.close(4001, 'test')));
+    await expect.poll(() => host.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(beforeReconnect);
     await expect(host.getByText('Conectado', { exact: true })).toBeVisible();
     await expect(host.getByRole('button', { name: 'Ver participantes (3)', exact: true }).first()).toBeVisible();
     await expect.poll(() => senderTrackIds(host)).toEqual([]);
@@ -2754,5 +2757,133 @@ test('F28 output preference survives remote screen replacement and signaling rec
     await frames(viewer);
     await expect.poll(sink).toBe('test-output');
     expect(await viewer.evaluate(() => [localStorage, sessionStorage].some(storage => Object.values(storage).some(value => String(value).includes('test-output'))))).toBe(false);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+for (const audio of [false, true]) test(`F16 own local clip exports playable media (audio=${audio})`, async ({ page }) => {
+  await syntheticCapture(page);
+  await gotoRoom(page, `/room/e2e-f16-own-${audio}`);
+  if (audio) await page.evaluate(() => { (window as any).testAudio = true; });
+  await startLive(page);
+  await page.getByRole('button', { name: /^Clipes/ }).click();
+  if (audio) await page.getByRole('checkbox', { name: 'Incluir áudio da transmissão' }).check();
+  await page.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+  await expect(page.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+  await expect(page.getByText('Gravação ativa: 1 de 60 segundos.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+  const preview = page.getByLabel('Prévia local do clipe');
+  await expect(preview).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath(`f16-desktop-preview-${audio}.png`) });
+  await expect.poll(() => preview.evaluate(v => (v as HTMLVideoElement).videoWidth)).toBeGreaterThan(0);
+  await preview.evaluate(v => (v as HTMLVideoElement).play());
+  await expect.poll(() => preview.evaluate(v => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Salvar clipe', exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.(webm|mp4)$/);
+  const data = fs.readFileSync((await download.path())!);
+  expect(data.length).toBeGreaterThan(100);
+  if (download.suggestedFilename().endsWith('.webm')) {
+    expect(data.subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+    expect(data.includes(Buffer.from('A_OPUS'))).toBe(audio);
+  }
+  // A clip is independent of the live source and player state.
+  expect(await page.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
+  await page.getByRole('button', { name: /^Clipes/ }).click();
+  await expect(page.getByLabel('Prévia local do clipe')).toBeVisible();
+  await page.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).testCapture?.getVideoTracks()[0]?.readyState)).toBe('ended');
+});
+
+test('F16 viewer consent, late join, revocation, pause and mobile keyboard controls', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer); await syntheticCapture(late);
+    await Promise.all([gotoRoom(host, '/room/e2e-f16-consent'), gotoRoom(viewer, '/room/e2e-f16-consent')]);
+    await startLive(host); await frames(viewer);
+    await viewer.getByRole('button', { name: /^Clipes/ }).tap();
+    await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).toBeChecked();
+    await viewer.getByRole('button', { name: 'Iniciar gravação', exact: true }).tap();
+    await expect(viewer.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    await gotoRoom(late, '/room/e2e-f16-consent');
+    await expect(late.getByRole('button', { name: 'Clipes (1)', exact: true })).toBeVisible();
+    await expect(late.getByText(/gravando/, { exact: false })).toBeVisible();
+    await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
+    await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
+    await viewer.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).toBeChecked();
+    await viewer.getByRole('button', { name: 'Iniciar gravação', exact: true }).tap();
+    await expect(viewer.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    await host.keyboard.press('Escape');
+    await host.getByRole('button', { name: /Pausar transmissão/ }).click();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
+    await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
+    await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).focus();
+    await viewer.keyboard.press('Escape');
+    await expect(viewer.getByRole('button', { name: /^Clipes/ })).toBeFocused();
+    await viewer.getByRole('button', { name: /^Clipes/ }).press('Enter');
+    const button = viewer.getByRole('button', { name: 'Salvar clipe', exact: true });
+    const bounds = await button.boundingBox(); expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    expect(await viewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await viewer.screenshot({ path: test.info().outputPath('f16-mobile-preview.png') });
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+test('F16 original source in Compare, Cinema, fullscreen, source switch and signaling loss', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), peer = await contexts[1].newPage();
+    await syntheticCapture(host); await syntheticCapture(peer);
+    await Promise.all([gotoRoom(host, '/room/f16-modes'), gotoRoom(peer, '/room/f16-modes')]);
+    await startLive(host); await startLive(peer); await frames(host);
+    await host.getByRole('button', { name: 'Comparar', exact: true }).click();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await host.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(host.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    await expect(host.getByText('Gravação ativa: 1 de 60 segundos.', { exact: true })).toBeVisible();
+    await host.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+    const preview = host.getByLabel('Prévia local do clipe');
+    await expect.poll(() => preview.evaluate(v => [(v as HTMLVideoElement).videoWidth, (v as HTMLVideoElement).videoHeight])).toEqual([640, 360]);
+    await host.keyboard.press('Escape');
+    await host.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    await host.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await expect(preview).toBeVisible();
+    expect(await preview.evaluate(v => document.fullscreenElement?.contains(v))).toBe(true);
+    await host.screenshot({ path: test.info().outputPath('f16-compare-fullscreen.png') });
+    await host.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await host.keyboard.press('Escape');
+    await host.evaluate(async () => { if (document.fullscreenElement) await document.exitFullscreen(); });
+    await host.getByRole('button', { name: 'Sair do Modo Cinema', exact: true }).click();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await host.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(host.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    await host.keyboard.press('Escape');
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await host.getByRole('button', { name: /^Clipes/ }).click();
+    await expect(host.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await host.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await host.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(host.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+    const count = await host.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'peers').length);
+    await host.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === WebSocket.OPEN && s.url.includes('/signal')).forEach((s: WebSocket) => s.close(4001, 'test')));
+    await expect(host.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect.poll(() => host.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(count);
+    await expect(host.getByRole('button', { name: /● Gravando/ })).toHaveCount(0);
+    expect(await host.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });

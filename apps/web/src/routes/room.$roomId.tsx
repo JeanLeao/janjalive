@@ -1,3 +1,4 @@
+import { ClipControls } from '../features/room/components/ClipControls';
 import { AudioOutputProvider } from '../features/room/hooks/AudioOutput';
 import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
 import { CapturePreview } from '../features/room/components/CapturePreview';
@@ -376,6 +377,7 @@ function RoomPageContent() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        clipControls={<ClipControls clips={session.clips} participants={session.participants} localStream={session.localStream} remoteStreams={session.remoteStreams} featuredStreamId={session.featuredStreamId} />}
         onVideoPresented={session.onVideoPresented}
         annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
         onTogglePointingPermission={session.togglePointingPermission}

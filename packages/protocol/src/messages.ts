@@ -287,6 +287,33 @@ export const CollaborationEventSchema = z.object({
 });
 export type CollaborationEvent = z.infer<typeof CollaborationEventSchema>;
 
+// F16: ephemeral consent and two-phase local recording. No media crosses signaling.
+export const CLIP_LIMITS = { durationMs: 60_000, bytes: 64 * 1024 * 1024, pendingMs: 5000 } as const;
+export const ClipOperationSchema = z.object({
+  type: z.literal('clip-operation'),
+  seq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  action: z.enum(['permission', 'request', 'started', 'stop']),
+  presenterId: z.string().min(1).max(128), streamId: z.string().min(1).max(128),
+  recordingId: z.string().uuid(),
+  version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  allowed: z.boolean().optional(),
+}).strict();
+export type ClipOperation = z.infer<typeof ClipOperationSchema>;
+export const ClipPermissionSchema = z.object({
+  presenterId: z.string(), streamId: z.string(), allowed: z.boolean(), version: z.number().int().nonnegative(),
+});
+export const ClipActiveSchema = z.object({
+  recordingId: z.string().uuid(), recorderId: z.string(), presenterId: z.string(), streamId: z.string(), startedAt: z.number(),
+});
+export const ClipsSnapshotSchema = z.object({
+  type: z.literal('clips-snapshot'), roomId: z.string(), revision: z.number().int().nonnegative(),
+  permissions: z.array(ClipPermissionSchema).max(1000), recordings: z.array(ClipActiveSchema).max(1000),
+});
+export type ClipsSnapshot = z.infer<typeof ClipsSnapshotSchema>;
+export const ClipResultSchema = z.object({
+  type: z.literal('clip-result'), recordingId: z.string().uuid(), ok: z.boolean(), message: z.string(),
+});
+
 // Client -> Server
 export const JoinMessageSchema = z.object({
   type: z.literal('join'),
@@ -348,6 +375,7 @@ export const ModerationResultSchema = z.object({
 }).strict();
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  ClipOperationSchema,
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
   CreatePollSchema, VotePollSchema, ClosePollSchema,
@@ -465,6 +493,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  ClipsSnapshotSchema, ClipResultSchema,
   RoomCreatedSchema, RoomStateMessageSchema, ModerationResultSchema,
   PollsSnapshotSchema, PollAcceptedSchema,
   HandsSnapshotSchema,

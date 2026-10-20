@@ -1,3 +1,4 @@
+import { Clips } from './clips.js';
 import { KeyRateLimiter } from './key-rate-limiter.js';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -38,6 +39,8 @@ export type SignalWebSocket = WebSocket & {
   meta?: SignalSocketMeta | null;
   isAlive?: boolean;
   moderationRequests?: string[];
+  clipSeq?: number;
+  clipWindow?: { start: number; count: number };
   messageCount?: number;
   lastMessageReset?: number;
 };
@@ -308,6 +311,8 @@ export function createSignalServer({
     }
   }
 
+  const clips = new Clips(snapshot => broadcast(snapshot.roomId, snapshot));
+
   rooms.onRoomStateChanged = (roomId) => broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
 
   function depart(socket: SignalWebSocket, isVoluntary = false) {
@@ -318,10 +323,12 @@ export function createSignalServer({
 
     // Deterministic check: only remove if THIS socket is the active one (BUG-01)
     if (clients.get(key) === socket) {
+      clips.depart(roomId, peerId);
       clients.delete(key);
       const clearedSelections = rooms.clearSelections(roomId, peerId, effectiveVoluntary);
       rooms.leave(roomId, peerId, effectiveVoluntary, recoveryGraceMs);
       const count = rooms.peers(roomId).length;
+      if (!count) clips.delete(roomId);
       signalLog('leave', { roomId, peerId, count, isVoluntary: effectiveVoluntary });
       broadcast(roomId, {
         type: 'peer-left', peerId, count,
@@ -656,6 +663,7 @@ export function createSignalServer({
             // Disassociate previous socket so its close event will not clean up the new session (BUG-01)
             existingSocket.meta = null;
             try {
+              clips.depart(normalizedRoom, normalizedPeer);
               existingSocket.close(WS_CLOSE_CODES.SUPERSEDED, 'Superseded by new connection');
             } catch {
               existingSocket.terminate();
@@ -711,6 +719,7 @@ export function createSignalServer({
             send(socket, qaSnap);
           }
           send(socket, rooms.polls.snapshot(normalizedRoom, rooms.pollParticipant(normalizedRoom, normalizedPeer)));
+          send(socket, clips.snapshot(normalizedRoom));
           const restoredSelection = rooms.getSelection(normalizedRoom, normalizedPeer);
           if (restoredSelection) {
             broadcast(
@@ -956,6 +965,21 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'clip-operation') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
+          const now = Date.now();
+          if (!socket.clipWindow || now - socket.clipWindow.start > 10_000) socket.clipWindow = { start: now, count: 0 };
+          const overLimit = ++socket.clipWindow.count > 30;
+          const limited = overLimit && message.action !== 'stop' && !(message.action === 'permission' && message.allowed === false);
+          const stale = message.seq <= (socket.clipSeq ?? 0);
+          socket.clipSeq = Math.max(socket.clipSeq ?? 0, message.seq);
+          const sharing = rooms.getParticipants(meta.roomId).find(p => p.peerId === message.presenterId)?.sharing;
+          const error = limited || stale ? 'Solicitação repetida ou limite de frequência atingido.' : clips.apply(meta.roomId, meta.peerId, message, sharing);
+          send(socket, { type: 'clip-result', recordingId: message.recordingId, ok: !error, message: error ?? 'Confirmado.' });
+          return;
+        }
+
         if (message.type === 'update-sharing') {
           if (!socket.meta) {
             send(socket, { type: 'error', message: 'Envie join primeiro.' });
@@ -966,6 +990,7 @@ export function createSignalServer({
           const { type, ...sharing } = message;
           const effective = rooms.updateSharing(roomId, peerId, sharing) ?? sharing;
           send(socket, rooms.polls.snapshot(roomId, rooms.pollParticipant(roomId, peerId)));
+          clips.sharing(roomId, peerId, effective);
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           if (!effective.active) {
             for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {
@@ -1052,6 +1077,7 @@ export function createSignalServer({
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(heartbeatTimer);
+        clips.dispose();
         rooms.clearAllRecovery();
         for (const socket of wss.clients) socket.terminate();
         wss.close(() => httpServer.close(() => resolve()));
