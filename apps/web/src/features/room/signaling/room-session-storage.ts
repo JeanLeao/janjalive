@@ -1,5 +1,10 @@
 // Credentials stay in this tab, isolated by room; invitations contain only roomId.
-export interface StoredRoomSession { hostCredential?: string; peerId?: string; reconnectToken?: string }
+export interface StoredRoomSession {
+  hostCredential?: string;
+  peerId?: string;
+  reconnectToken?: string;
+  roomKey?: string;
+}
 const key = (roomId: string) => `screen_room_session:${roomId}`;
 export function readRoomSession(roomId: string): StoredRoomSession {
   try { return JSON.parse(sessionStorage.getItem(key(roomId)) || '{}'); } catch { return {}; }

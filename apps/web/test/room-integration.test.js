@@ -191,3 +191,62 @@ test('room-integration: full negotiation flow between host and viewers with scre
 
   assert.equal(hostPeerManager.getPeer('viewer-1'), undefined, 'Host should have cleaned up viewer-1 on leave');
 });
+
+test('room-integration: F12 protected room entry and rejection handling with SignalingClient', async (t) => {
+  const server = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await server.ready;
+  t.after(() => server.close());
+
+  const serverUrl = `ws://127.0.0.1:${server.port}/signal`;
+
+  // Create protected room via raw WS
+  const creatorWs = new WsClient(serverUrl);
+  await new Promise((resolve) => creatorWs.once('open', resolve));
+  t.after(() => creatorWs.close());
+
+  creatorWs.send(JSON.stringify({ type: 'create-room', isProtected: true }));
+  const created = await new Promise((resolve) => {
+    creatorWs.once('message', (raw) => resolve(JSON.parse(raw.toString())));
+  });
+  assert.equal(created.type, 'room-created');
+  assert.ok(created.roomKey);
+
+  // Visitor 1 tries to join without key
+  const errors1 = [];
+  const client1 = new SignalingClient({
+    url: serverUrl,
+    autoReconnect: false,
+    onStateChange: () => {},
+    onMessage: (msg) => {
+      if (msg.type === 'error') errors1.push(msg);
+    },
+  });
+  t.after(() => client1.disconnect());
+  client1.connect();
+  await new Promise((r) => setTimeout(r, 50));
+
+  client1.join(created.roomId, 'guest-1');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(errors1.length, 1);
+  assert.equal(errors1[0].code, 'KEY_REQUIRED');
+
+  // Visitor 2 joins with valid key
+  const received2 = [];
+  const client2 = new SignalingClient({
+    url: serverUrl,
+    autoReconnect: false,
+    onStateChange: () => {},
+    onMessage: (msg) => {
+      received2.push(msg);
+    },
+  });
+  t.after(() => client2.disconnect());
+  client2.connect();
+  await new Promise((r) => setTimeout(r, 50));
+
+  client2.join(created.roomId, 'guest-2', undefined, undefined, undefined, created.roomKey);
+  await new Promise((r) => setTimeout(r, 50));
+  const peersMsg = received2.find((m) => m.type === 'peers');
+  assert.ok(peersMsg);
+  assert.equal(peersMsg.roomState.isProtected, true);
+});

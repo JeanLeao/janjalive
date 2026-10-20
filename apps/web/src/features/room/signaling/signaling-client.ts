@@ -182,7 +182,7 @@ export class SignalingClient {
     }
   }
 
-  join(roomId: string, peerId: string, nickname?: string, reconnectToken?: string, hostCredential?: string): boolean {
+  join(roomId: string, peerId: string, nickname?: string, reconnectToken?: string, hostCredential?: string, roomKey?: string): boolean {
     const token = reconnectToken ?? this.reconnectToken;
     return this.send({
       type: 'join',
@@ -191,6 +191,7 @@ export class SignalingClient {
       ...(nickname ? { nickname } : {}),
       ...(token ? { reconnectToken: token } : {}),
       ...(hostCredential ? { hostCredential } : {}),
+      ...(roomKey ? { roomKey } : {}),
     });
   }
 

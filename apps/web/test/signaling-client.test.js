@@ -202,3 +202,34 @@ test('collaboration drops backpressure without queues and bypasses per-event Rea
   assert.ok(client.send({ type: 'send-chat', requestId: crypto.randomUUID(), text: 'chat still usable' }));
   assert.equal(socket.sent.length, 2); assert.equal(logs.length, 1);
 });
+
+test('signaling-client: sends roomKey in join message when provided', async () => {
+  let createdSocket = null;
+  const originalWs = globalThis.WebSocket;
+  globalThis.WebSocket = class extends MockWebSocket {
+    constructor(url) {
+      super(url);
+      createdSocket = this;
+    }
+  };
+
+  const client = new SignalingClient({
+    url: 'ws://mock-server/signal',
+    onStateChange: () => {},
+    onMessage: () => {},
+  });
+
+  client.connect();
+  await new Promise((r) => setTimeout(r, 20));
+
+  client.join('room-prot', 'peer-test', undefined, undefined, undefined, 'access-key-123');
+  assert.deepEqual(createdSocket.sent[0], {
+    type: 'join',
+    roomId: 'room-prot',
+    peerId: 'peer-test',
+    roomKey: 'access-key-123',
+  });
+
+  client.disconnect();
+  globalThis.WebSocket = originalWs;
+});

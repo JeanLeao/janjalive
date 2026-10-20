@@ -2,7 +2,7 @@ import { InteractionActions, InteractionLayer, useInteractionsUi } from '../feat
 import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
-import { Box, Alert, Button } from '@mantine/core';
+import { Box, Alert, Button, Modal, TextInput, Stack, Group, Text, Tooltip, ActionIcon } from '@mantine/core';
 import { useRoomSession } from '../features/room/hooks/useRoomSession';
 import { RoomHeader } from '../features/room/components/RoomHeader';
 import { RoomStage } from '../features/room/components/RoomStage';
@@ -11,6 +11,7 @@ import { ParticipantsDrawer } from '../features/room/components/ParticipantsDraw
 import { SettingsDrawer } from '../features/room/components/SettingsDrawer';
 import { InviteQrModal } from '../features/room/components/InviteQrModal';
 import { copyRoomInviteUrl } from '../features/room/utils/invite-url';
+import { IconShield, IconCopy, IconCheck } from '../features/room/components/Icons';
 
 import { canShareScreen } from '../features/room/media/display-media';
 import { getStoredShortcutsPreference, setStoredShortcutsPreference } from '../features/room/hooks/useRoomShortcuts';
@@ -51,6 +52,9 @@ function RoomPage() {
   const [canShare, setCanShare] = useState<boolean | null>(null);
   const [demoStreams, setDemoStreams] = useState<any[] | null>(null);
   const [demoParticipants, setDemoParticipants] = useState<any[] | null>(null);
+  const [inputKey, setInputKey] = useState('');
+  const [showCreatorKeyModal, setShowCreatorKeyModal] = useState(() => (typeof window !== 'undefined' ? !sessionStorage.getItem(`seen_key:${roomId}`) : false));
+  const [creatorCopied, setCreatorCopied] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !isDev) return;
@@ -351,6 +355,7 @@ function RoomPage() {
       {!isCinema && (
         <RoomHeader
           locked={session.roomState.locked}
+          isProtected={session.roomState.isProtected}
           roomId={roomId}
           raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
           participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
@@ -494,7 +499,229 @@ function RoomPage() {
         onClose={() => setIsQrModalOpen(false)}
         roomId={roomId}
         triggerElement={qrTriggerElement}
+        isProtected={session.roomState.isProtected}
+        roomKey={session.storedRoomKey}
       />
+
+      {/* Creator Initial Key Announcement Modal */}
+      {Boolean(session.storedRoomKey && showCreatorKeyModal) && (
+        <Modal
+          opened={true}
+          onClose={() => {
+            if (typeof window !== 'undefined') sessionStorage.setItem(`seen_key:${roomId}`, '1');
+            setShowCreatorKeyModal(false);
+          }}
+          title="Sala protegida criada"
+          centered
+          size={460}
+          styles={{
+            content: {
+              backgroundColor: '#161b22',
+              color: '#e6edf3',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: '16px',
+              boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7)',
+            },
+            header: {
+              backgroundColor: '#161b22',
+              color: '#ffffff',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '16px 20px',
+            },
+            title: {
+              fontWeight: 700,
+              fontSize: '1.1rem',
+            },
+            body: {
+              padding: '20px',
+            },
+          }}
+        >
+          <Stack gap="md">
+            <Text size="sm" c="#8c959f" style={{ lineHeight: 1.5 }}>
+              Sua sala está protegida por chave efêmera. Os convidados precisarão desta chave para o primeiro acesso.
+            </Text>
+
+            <Box style={{ width: '100%' }}>
+              <TextInput
+                label="Chave de acesso da sala"
+                value={session.storedRoomKey}
+                readOnly
+                aria-label="Chave de acesso da sala"
+                onClick={(e) => e.currentTarget.select()}
+                rightSection={
+                  <Tooltip label={creatorCopied ? 'Chave copiada!' : 'Copiar chave'} withArrow>
+                    <ActionIcon
+                      variant="subtle"
+                      color={creatorCopied ? 'teal' : 'gray'}
+                      onClick={async () => {
+                        if (session.storedRoomKey) {
+                          await navigator.clipboard.writeText(session.storedRoomKey);
+                          setCreatorCopied(true);
+                          setTimeout(() => setCreatorCopied(false), 2000);
+                        }
+                      }}
+                      aria-label="Copiar chave de acesso"
+                    >
+                      {creatorCopied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                    </ActionIcon>
+                  </Tooltip>
+                }
+                styles={{
+                  label: {
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    color: '#8c959f',
+                    marginBottom: '4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  },
+                  input: {
+                    backgroundColor: '#0d1117',
+                    borderColor: 'rgba(255, 255, 255, 0.12)',
+                    color: '#e6edf3',
+                    fontFamily: 'monospace',
+                    fontSize: '0.9rem',
+                    height: '42px',
+                  },
+                }}
+              />
+            </Box>
+
+            <Alert
+              color="blue"
+              variant="light"
+              styles={{
+                root: {
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  borderColor: 'rgba(37, 99, 235, 0.25)',
+                  color: '#93c5fd',
+                  borderRadius: 8,
+                },
+              }}
+            >
+              Envie a chave aos participantes separadamente do link (por chat privado, e-mail ou mensagem direta).
+            </Alert>
+
+            <Group justify="flex-end" mt="xs">
+              <Button
+                onClick={() => {
+                  if (typeof window !== 'undefined') sessionStorage.setItem(`seen_key:${roomId}`, '1');
+                  setShowCreatorKeyModal(false);
+                }}
+                style={{ backgroundColor: '#2563eb', fontWeight: 600 }}
+              >
+                Entendido
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      )}
+
+      {/* Key Prompt Modal for Protected Rooms */}
+      <Modal
+        opened={Boolean(session.keyStatus?.required)}
+        onClose={() => {}}
+        withCloseButton={false}
+        closeOnClickOutside={false}
+        closeOnEscape={false}
+        centered
+        size={440}
+        title="Sala protegida por chave"
+        styles={{
+          content: {
+            backgroundColor: '#161b22',
+            color: '#e6edf3',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '16px',
+            boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7)',
+          },
+          header: {
+            backgroundColor: '#161b22',
+            color: '#ffffff',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '16px 20px',
+          },
+          title: {
+            fontWeight: 700,
+            fontSize: '1.1rem',
+          },
+          body: {
+            padding: '20px',
+          },
+        }}
+      >
+        <Stack gap="md">
+          <Text size="sm" c="#8c959f" style={{ lineHeight: 1.5 }}>
+            Esta sala requer uma chave de acesso para entrar. Solicite a chave ao criador da sala.
+          </Text>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (inputKey.trim() && !session.keyStatus?.rateLimited) {
+                session.submitRoomKey(inputKey);
+              }
+            }}
+          >
+            <Stack gap="md">
+              <TextInput
+                data-testid="room-key-input"
+                label="Chave de acesso"
+                placeholder="Cole ou digite a chave de acesso"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.currentTarget.value)}
+                autoFocus
+                disabled={session.keyStatus?.submitting || session.keyStatus?.rateLimited}
+                error={session.keyStatus?.error}
+                styles={{
+                  label: { color: '#8c959f', fontSize: '0.82rem', marginBottom: '4px' },
+                  input: {
+                    backgroundColor: '#0d1117',
+                    borderColor: session.keyStatus?.error ? '#ef4444' : 'rgba(255, 255, 255, 0.14)',
+                    color: '#fff',
+                    fontFamily: 'monospace',
+                    height: '42px',
+                  },
+                  error: {
+                    color: '#f87171',
+                    fontSize: '0.8rem',
+                    marginTop: '6px',
+                  },
+                }}
+              />
+
+              <Text size="sm" role="status" aria-live="polite">
+                {session.keyStatus?.retryAt
+                  ? `Tente novamente após ${new Date(session.keyStatus.retryAt).toLocaleTimeString()}.`
+                  : session.keyStatus?.error === 'Você já pode tentar novamente.' ? session.keyStatus.error : ''}
+              </Text>
+              <Group justify="space-between" mt="xs">
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => navigate({ to: '/' })}
+                  style={{ color: '#8c959f' }}
+                >
+                  Voltar ao início
+                </Button>
+                <Button
+                  type="submit"
+                  data-testid="submit-room-key-btn"
+                  loading={session.keyStatus?.submitting}
+                  disabled={!inputKey.trim() || session.keyStatus?.rateLimited}
+                  style={{
+                    backgroundColor: '#2563eb',
+                    fontWeight: 600,
+                  }}
+                >
+                  Entrar na sala
+                </Button>
+              </Group>
+            </Stack>
+          </form>
+        </Stack>
+      </Modal>
     </Box>
   );
 }

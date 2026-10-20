@@ -92,16 +92,34 @@ export class UnauthorizedReconnectError extends Error {
 }
 
 export class RoomAdmissionError extends Error {
-  constructor(readonly code: 'ROOM_NOT_FOUND' | 'ROOM_LOCKED' | 'UNAUTHORIZED_HOST') {
-    super(code === 'ROOM_NOT_FOUND' ? 'Sala inexistente ou encerrada. Crie uma nova sala na página inicial.' : code === 'ROOM_LOCKED' ? 'Sala bloqueada pelo host. Novas entradas estão desativadas.' : 'Credencial administrativa inválida ou revogada.');
+  constructor(readonly code: 'ROOM_NOT_FOUND' | 'ROOM_LOCKED' | 'UNAUTHORIZED_HOST' | 'KEY_REQUIRED' | 'KEY_INVALID') {
+    super(
+      code === 'ROOM_NOT_FOUND'
+        ? 'Sala inexistente ou encerrada. Crie uma nova sala na página inicial.'
+        : code === 'ROOM_LOCKED'
+        ? 'Sala bloqueada pelo host. Novas entradas estão desativadas.'
+        : code === 'UNAUTHORIZED_HOST'
+        ? 'Credencial administrativa inválida ou revogada.'
+        : code === 'KEY_REQUIRED'
+        ? 'Esta sala é protegida por chave. Informe a chave de acesso para entrar.'
+        : 'Chave de acesso incorreta. Verifique a chave e tente novamente.'
+    );
+    this.name = 'RoomAdmissionError';
   }
 }
+
+export interface RoomProtection {
+  keySalt: string;
+  keyVerifier: Buffer;
+}
+
 interface Administration {
   credential?: string;
   hostPeerId: string | null;
   locked: boolean;
   revision: number;
   timer?: NodeJS.Timeout;
+  protection?: RoomProtection;
 }
 
 export class RoomRegistry {
@@ -109,11 +127,23 @@ export class RoomRegistry {
   readonly polls = new RoomPolls();
   #administration = new Map<string, Administration>();
   onRoomStateChanged?: (roomId: string) => void;
-  createRoom(roomId = crypto.randomBytes(16).toString('hex'), ttlMs = 60000): { roomId: string; hostCredential: string } {
+  createRoom(
+    roomId = crypto.randomBytes(16).toString('hex'),
+    ttlMs = 60000,
+    isProtected = false
+  ): { roomId: string; hostCredential: string; roomKey?: string } {
     roomId = normalizeRoom(roomId);
     if (this.#rooms.has(roomId)) throw new Error('Sala já existe.');
     const hostCredential = crypto.randomBytes(32).toString('base64url');
-    const admin: Administration = { credential: hostCredential, hostPeerId: null, locked: false, revision: 0 };
+    let protection: RoomProtection | undefined;
+    let roomKey: string | undefined;
+    if (isProtected) {
+      roomKey = crypto.randomBytes(16).toString('base64url');
+      const keySalt = crypto.randomBytes(16).toString('hex');
+      const keyVerifier = crypto.createHmac('sha256', keySalt).update(roomKey).digest();
+      protection = { keySalt, keyVerifier };
+    }
+    const admin: Administration = { credential: hostCredential, hostPeerId: null, locked: false, revision: 0, protection };
     this.#rooms.set(roomId, new Map());
     this.#administration.set(roomId, admin);
     admin.timer = setTimeout(() => {
@@ -124,11 +154,69 @@ export class RoomRegistry {
       }
     }, ttlMs);
     admin.timer.unref();
-    return { roomId, hostCredential };
+    return { roomId, hostCredential, ...(roomKey ? { roomKey } : {}) };
   }
   roomState(roomId: string): RoomState {
     const admin = this.#administration.get(roomId);
-    return { hostPeerId: admin?.hostPeerId ?? null, hostConnected: Boolean(admin?.hostPeerId && this.hasPeer(roomId, admin.hostPeerId)), locked: admin?.locked ?? false, revision: admin?.revision ?? 0 };
+    return {
+      hostPeerId: admin?.hostPeerId ?? null,
+      hostConnected: Boolean(admin?.hostPeerId && this.hasPeer(roomId, admin.hostPeerId)),
+      locked: admin?.locked ?? false,
+      revision: admin?.revision ?? 0,
+      isProtected: Boolean(admin?.protection),
+    };
+  }
+  isProtected(roomId: unknown): boolean {
+    try {
+      const room = normalizeRoom(roomId);
+      return Boolean(this.#administration.get(room)?.protection);
+    } catch {
+      return false;
+    }
+  }
+  isLocked(roomId: unknown): boolean {
+    try {
+      const room = normalizeRoom(roomId);
+      return Boolean(this.#administration.get(room)?.locked);
+    } catch {
+      return false;
+    }
+  }
+  hasRoom(roomId: unknown): boolean {
+    try {
+      const room = normalizeRoom(roomId);
+      return this.#rooms.has(room);
+    } catch {
+      return false;
+    }
+  }
+  verifyRoomKey(roomId: unknown, candidateKey: unknown): boolean {
+    try {
+      const room = normalizeRoom(roomId);
+      const admin = this.#administration.get(room);
+      if (!admin?.protection) return false;
+      if (typeof candidateKey !== 'string') return false;
+      const trimmed = candidateKey.trim();
+      if (!trimmed) return false;
+      const candidateVerifier = crypto.createHmac('sha256', admin.protection.keySalt).update(trimmed).digest();
+      return crypto.timingSafeEqual(admin.protection.keyVerifier, candidateVerifier);
+    } catch {
+      return false;
+    }
+  }
+  canAuthorizeHost(room: unknown, peer: unknown, credential: unknown): boolean {
+    try {
+      const normalizedRoom = normalizeRoom(room);
+      const normalizedPeer = normalizePeer(peer);
+      const admin = this.#administration.get(normalizedRoom);
+      return Boolean(
+        admin?.credential &&
+        credential === admin.credential &&
+        (admin.hostPeerId === null || admin.hostPeerId === normalizedPeer)
+      );
+    } catch {
+      return false;
+    }
   }
   authorizeHost(room: string, peer: string, credential: unknown): boolean {
     const admin = this.#administration.get(room);
@@ -175,15 +263,30 @@ export class RoomRegistry {
     this.maxParticipants = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
   }
 
-  join(roomId: unknown, peerId: unknown, nickname?: unknown, reconnectToken?: unknown, hostCredential?: unknown): string[] {
+  join(
+    roomId: unknown,
+    peerId: unknown,
+    nickname?: unknown,
+    reconnectToken?: unknown,
+    hostCredential?: unknown,
+    roomKey?: unknown
+  ): string[] {
     const room = normalizeRoom(roomId);
     const peer = normalizePeer(peerId);
     this.getReservedPeers(room);
     const participants = this.#rooms.get(room);
     if (!participants) throw new RoomAdmissionError('ROOM_NOT_FOUND');
     const admin = this.#administration.get(room)!;
-    if (hostCredential !== undefined && (!admin.credential || hostCredential !== admin.credential || (admin.hostPeerId !== null && admin.hostPeerId !== peer))) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
-    if (admin.hostPeerId === peer && hostCredential !== admin.credential) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
+
+    const isHostAttempt = hostCredential !== undefined;
+    const isHostValid = Boolean(
+      admin.credential &&
+      hostCredential === admin.credential &&
+      (admin.hostPeerId === null || admin.hostPeerId === peer)
+    );
+
+    if (isHostAttempt && !isHostValid) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
+    if (admin.hostPeerId === peer && (!admin.credential || hostCredential !== admin.credential)) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
 
     const existingMeta = participants.get(peer);
     const reservation = this.getRecoveryReservation(room, peer);
@@ -205,6 +308,16 @@ export class RoomRegistry {
       this.clearRecovery(room, peer);
     } else {
       if (reconnectToken !== undefined) throw new UnauthorizedReconnectError('Sessão anterior expirada ou removida. Entre novamente pela página inicial.');
+
+      if (admin.protection && !isHostValid) {
+        if (roomKey === undefined || roomKey === null || (typeof roomKey === 'string' && !roomKey.trim())) {
+          throw new RoomAdmissionError('KEY_REQUIRED');
+        }
+        if (!this.verifyRoomKey(room, roomKey)) {
+          throw new RoomAdmissionError('KEY_INVALID');
+        }
+      }
+
       if (admin.locked) throw new RoomAdmissionError('ROOM_LOCKED');
       if (this.occupiedSlots(room) >= this.maxParticipants) {
         throw new RoomCapacityError(this.maxParticipants);

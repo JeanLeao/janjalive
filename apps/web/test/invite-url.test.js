@@ -12,6 +12,11 @@ test('getRoomInviteUrl sanitizes query parameters and fragments', () => {
   assert.equal(clean, 'https://screenroom.live/room/abc-123');
 });
 
+test('F12: getRoomInviteUrl guarantees room key and access tokens are omitted from copied invite URLs', () => {
+  const urlWithKey = 'https://screenroom.live/room/protected-123?key=abc123xyz&accessKey=secret&roomKey=token#dialog';
+  assert.equal(getRoomInviteUrl(urlWithKey), 'https://screenroom.live/room/protected-123');
+});
+
 test('getRoomInviteUrl preserves origin, port, and room path without private tokens', () => {
   const localUrl = 'http://192.168.1.50:3000/room/team-alpha?drawer=settings&token=private-token';
   const clean = getRoomInviteUrl(localUrl);
