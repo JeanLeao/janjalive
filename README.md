@@ -365,3 +365,27 @@ O painel mantém as abas **Chat | Perguntas | Enquetes**, inclusive no Modo Cine
 - A memória retém uma enquete aberta e até 3 encerradas (mais recentes primeiro), com até 10.000 identidades votantes por enquete, incluindo quem saiu; ao atingir esse teto, novos votantes são recusados, mas votos existentes podem ser alterados. Os totais derivam de escolhas individuais, sem incrementos duplicados. Os textos limitam cada criação a 900 caracteres de conteúdo; o limite de frame WebSocket existente permanece em 64 KiB.
 - Todos os dados ficam somente em memória e são descartados quando a sala é destruída, após encerrar eventuais reservas de recuperação. Não há exportação, banco de dados, host ou moderação permanente.
 - A interface aguarda confirmação por até 8 segundos, exibe erros ou desconexão e não reenvia operações automaticamente. A entrada tardia e a reconexão recebem o estado atual; rascunhos de criação sobrevivem a mudanças de modo dentro da mesma sala.
+
+### Saída de áudio recebida (F28)
+
+Em **Configurações → Áudio → Saída de áudio**, escolha uma saída para todas as
+transmissões recebidas. A preferência existe somente na memória da página da sala;
+volume, mudo e seleção da transmissão audível continuam independentes. O dispositivo
+padrão do sistema é uma escolha explícita e acompanha a rota padrão do navegador.
+
+A seleção depende de contexto seguro, `setSinkId()` e da política
+`speaker-selection`. Firefox desktop oferece o seletor nativo `selectAudioOutput()`;
+Chromium desktop e Safari com `setSinkId()` permitem escolher saídas já expostas pelo
+navegador, que podem se limitar ao padrão. A aplicação não pede microfone ou câmera
+para ampliar essa lista. Sem suporte, utilize a configuração de áudio do sistema.
+O suporte varia por versão e plataforma, especialmente em dispositivos móveis:
+[compatibilidade de setSinkId](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/setSinkId#browser_compatibility)
+e [selectAudioOutput](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/selectAudioOutput#browser_compatibility).
+
+Durante a troca, os elementos permanecem silenciosos até aplicar a saída. Falha de
+roteamento, remoção ou perda de exposição da saída selecionada suspende o áudio até
+uma nova escolha, inclusive o retorno explícito ao padrão. Alterações de dispositivos
+são verificadas com o áudio temporariamente suspenso. O navegador ou sistema pode
+mudar a rota física antes de notificar a página; não há garantia absoluta contra
+redirecionamentos externos. Cancelamento ou rejeição do seletor nativo mantém a
+preferência anterior. A seleção não remove as restrições de autoplay do navegador.

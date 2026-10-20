@@ -293,7 +293,7 @@ export function FloatingControlDock({
 
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Item onClick={onOpenSettings}>Configurações e diagnósticos</Menu.Item>
+            <Menu.Item onClick={() => { settingsBtnRef.current?.focus(); onOpenSettings(); }}>Configurações e diagnósticos</Menu.Item>
             <Menu.Item onClick={handleCopyLink}>{copied ? 'Link copiado!' : 'Copiar link de convite'}</Menu.Item>
             {onOpenQrCode && (
               <Menu.Item

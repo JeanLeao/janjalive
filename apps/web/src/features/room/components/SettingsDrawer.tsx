@@ -1,3 +1,4 @@
+import { AudioOutputSettings } from '../hooks/AudioOutput';
 import React, { useState } from 'react';
 import {
   Drawer,
@@ -231,6 +232,7 @@ export function SettingsDrawer({
         {/* Tab 2: Áudio */}
         <Tabs.Panel value="audio">
           <Stack gap="md">
+            <AudioOutputSettings />
             <div>
               <Text fw={600} size="sm" c="#fff" mb={4}>
                 Áudio da tela

@@ -2720,3 +2720,39 @@ for (const width of [1280, 390]) {
     } finally { await context.close(); }
   });
 }
+
+test('F28 output preference survives remote screen replacement and signaling reconnect', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
+    await syntheticCapture(host); await syntheticCapture(viewer);
+    await viewer.addInitScript(() => {
+      navigator.mediaDevices.enumerateDevices = () => Promise.resolve([
+        { kind: 'audiooutput', deviceId: 'test-output', label: 'Saída de teste' } as MediaDeviceInfo,
+      ]);
+      HTMLMediaElement.prototype.setSinkId = function (id: string) {
+        Object.defineProperty(this, 'sinkId', { configurable: true, value: id });
+        return Promise.resolve();
+      };
+    });
+    await gotoRoom(host, '/room/f28-reconnect'); await gotoRoom(viewer, '/room/f28-reconnect');
+    await host.evaluate(() => { (window as any).testAudio = true; });
+    await startLive(host); await frames(viewer);
+    await viewer.getByRole('button', { name: 'Abrir configurações e diagnósticos' }).click();
+    await viewer.getByRole('tab', { name: 'Áudio', exact: true }).click();
+    await viewer.getByLabel('Dispositivo de saída', { exact: true }).selectOption('test-output');
+    await viewer.keyboard.press('Escape');
+    const sink = () => viewer.locator('.comparison-canvas video').evaluate(video => (video as HTMLVideoElement).sinkId);
+    await expect.poll(sink).toBe('test-output');
+    await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
+    await host.getByRole('button', { name: 'Confirmar troca', exact: true }).click();
+    await frames(viewer);
+    await expect.poll(sink).toBe('test-output');
+    const joins = await viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length);
+    await viewer.evaluate(() => (window as any).testSockets.filter((socket: WebSocket) => socket.readyState === WebSocket.OPEN && socket.url.includes('/signal')).forEach((socket: WebSocket) => socket.close(4001, 'test')));
+    await expect.poll(() => viewer.evaluate(() => (window as any).testMessages.filter((message: any) => message.type === 'peers').length), { timeout: 15000 }).toBeGreaterThan(joins);
+    await frames(viewer);
+    await expect.poll(sink).toBe('test-output');
+    expect(await viewer.evaluate(() => [localStorage, sessionStorage].some(storage => Object.values(storage).some(value => String(value).includes('test-output'))))).toBe(false);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
