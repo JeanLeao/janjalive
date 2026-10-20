@@ -14,6 +14,7 @@ function useOutput() {
   const [choosing, setChoosing] = useState(false);
   const operation = useRef(0);
   const enumeration = useRef(0);
+  const deviceCheck = useRef<{ revision: number; restore: boolean } | null>(null);
   const media = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices as OutputDevices | undefined;
   const policy = typeof document === 'undefined' ? undefined : (document as Document & { permissionsPolicy?: { allowsFeature: (name: string) => boolean }; featurePolicy?: { allowsFeature: (name: string) => boolean } });
   const blocked = (policy?.permissionsPolicy ?? policy?.featurePolicy)?.allowsFeature('speaker-selection') === false;
@@ -34,6 +35,9 @@ function useOutput() {
       if (!alive.current || generation !== enumeration.current || revision !== operation.current) return;
       setError('Não foi possível consultar as saídas autorizadas.');
       if (check && router.desired) router.suspend();
+    } finally {
+      // Only the latest valid check ends the sequence, including on failure.
+      if (check && generation === enumeration.current && revision === operation.current) deviceCheck.current = null;
     }
   };
   useEffect(() => {
@@ -41,17 +45,22 @@ function useOutput() {
     void refresh();
     const change = () => {
       // Silence immediately while checking: enumeration itself is asynchronous.
-      const restore = !router.unavailable;
+      // Keep the pre-sequence intent: a second event sees our temporary suspension.
+      if (deviceCheck.current?.revision !== operation.current) {
+        deviceCheck.current = { revision: operation.current, restore: !router.unavailable };
+      }
+      const { restore } = deviceCheck.current;
       if (router.desired) router.suspend();
       void refresh(true, restore);
     };
     media?.addEventListener('devicechange', change);
-    return () => { alive.current = false; operation.current++; enumeration.current++; media?.removeEventListener('devicechange', change); };
+    return () => { alive.current = false; operation.current++; enumeration.current++; deviceCheck.current = null; media?.removeEventListener('devicechange', change); };
   }, [media]);
-  const select = (id: string) => { operation.current++; setChoosing(false); setError(''); router.select(id); };
+  const select = (id: string) => { operation.current++; deviceCheck.current = null; setChoosing(false); setError(''); router.select(id); };
   const choose = () => {
     if (!media?.selectAudioOutput) return;
     const generation = ++operation.current;
+    deviceCheck.current = null;
     setChoosing(true); setError('');
     // Invoke before any await to preserve the click's transient activation.
     let result: Promise<MediaDeviceInfo>;
@@ -59,6 +68,9 @@ function useOutput() {
     catch { setChoosing(false); setError('Seleção indisponível ou bloqueada pelo navegador.'); return; }
     void result.then(device => {
       if (!alive.current || generation !== operation.current) return;
+      // The accepted choice also supersedes checks started while the picker was open.
+      enumeration.current++;
+      deviceCheck.current = null;
       if (device.deviceId && device.deviceId !== 'default') {
         setDevices(previous => [...previous.filter(item => item.deviceId !== device.deviceId), device]);
       }

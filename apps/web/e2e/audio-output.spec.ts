@@ -19,7 +19,10 @@ async function fixture(page: Page, supported = true) {
     state.nativeDenied = false;
     state.inputRequests = 0;
     navigator.mediaDevices.getUserMedia = () => { state.inputRequests++; return Promise.reject(); };
-    navigator.mediaDevices.enumerateDevices = () => Promise.resolve(state.outputs);
+    state.pendingEnumerations = [];
+    navigator.mediaDevices.enumerateDevices = () => state.delayEnumeration
+      ? new Promise((resolve, reject) => state.pendingEnumerations.push({ resolve, reject }))
+      : Promise.resolve(state.outputs);
     (navigator.mediaDevices as any).selectAudioOutput = () => state.nativeDenied
       ? Promise.reject(new DOMException('', 'NotAllowedError')) : state.delayNative ? new Promise(resolve => { state.finishNative = resolve; }) : Promise.resolve(state.outputs[0]);
     Object.defineProperty(HTMLMediaElement.prototype, 'setSinkId', { configurable: true, value: supported ? function (this: HTMLMediaElement, id: string) {
@@ -145,5 +148,63 @@ for (const width of [1280, 390]) {
     await expect(drawer).not.toBeVisible();
     await expect(trigger).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
+
+for (const scenario of ['present', 'removed', 'previously-unavailable', 'manual-default', 'manual-native', 'manual-native-pending'] as const) {
+  test(`F28 consecutive devicechange checks preserve restoration intent: ${scenario}`, async ({ page }) => {
+    await fixture(page);
+    await output(page).selectOption('test-headset');
+    await expect.poll(() => video(page).evaluate(v => (v as HTMLMediaElement).muted)).toBe(false);
+    if (scenario === 'previously-unavailable') {
+      await page.evaluate(() => {
+        (window as any).outputs = [];
+        navigator.mediaDevices.dispatchEvent(new Event('devicechange'));
+      });
+      await expect(page.getByRole('status').filter({ hasText: 'Áudio suspenso' })).toBeVisible();
+    }
+    if (scenario === 'manual-native-pending') {
+      await page.evaluate(() => { (window as any).delayNative = true; });
+      await page.getByRole('button', { name: 'Escolher saída no navegador' }).click();
+    }
+    await page.evaluate(() => {
+      (window as any).delayEnumeration = true;
+      for (let index = 0; index < 3; index++) navigator.mediaDevices.dispatchEvent(new Event('devicechange'));
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).pendingEnumerations.length)).toBe(3);
+    await expect.poll(() => video(page).evaluate(v => (v as HTMLMediaElement).muted)).toBe(true);
+    if (scenario === 'manual-default') await output(page).selectOption('');
+    if (scenario === 'manual-native') {
+      await page.evaluate(() => {
+        (window as any).outputs = [{ kind: 'audiooutput', deviceId: 'test-other', label: 'Outra saída de teste' }];
+      });
+      await page.getByRole('button', { name: 'Escolher saída no navegador' }).click();
+      await expect(output(page)).toHaveValue('test-other');
+    }
+    if (scenario === 'manual-native-pending') {
+      await page.evaluate(() => (window as any).finishNative({ kind: 'audiooutput', deviceId: 'test-other', label: 'Outra saída de teste' }));
+      await expect(output(page)).toHaveValue('test-other');
+    }
+    // Resolve the latest check first; old checks deliberately disagree and must be ignored.
+    await page.evaluate(({ present }) => {
+      const state = window as any;
+      const available = [{ kind: 'audiooutput', deviceId: 'test-headset', label: 'Saída de teste' }];
+      state.pendingEnumerations[2].resolve(present ? available : []);
+    }, { present: scenario !== 'removed' && !scenario.startsWith('manual') });
+    const suspended = scenario === 'removed' || scenario === 'previously-unavailable';
+    await expect.poll(() => video(page).evaluate(v => (v as HTMLMediaElement).muted)).toBe(suspended);
+    await page.evaluate(({ present }) => {
+      const state = window as any;
+      const available = [{ kind: 'audiooutput', deviceId: 'test-headset', label: 'Saída de teste' }];
+      state.pendingEnumerations[1].resolve(present ? [] : available);
+      state.pendingEnumerations[0].reject(new DOMException('', 'NotAllowedError'));
+    }, { present: scenario !== 'removed' && !scenario.startsWith('manual') });
+    await expect.poll(() => video(page).evaluate(v => (v as HTMLMediaElement).muted)).toBe(suspended);
+    await expect(output(page)).toHaveValue(scenario === 'manual-default' ? '' : scenario.startsWith('manual-native') ? 'test-other' : 'test-headset');
+    if (!suspended) {
+      await expect.poll(() => video(page).evaluate(v => (v as HTMLMediaElement).sinkId)).toBe(scenario === 'manual-default' ? '' : scenario.startsWith('manual-native') ? 'test-other' : 'test-headset');
+      await expect(page.getByRole('status').filter({ hasText: 'Saída pronta' })).toBeVisible();
+    } else await expect(page.getByRole('status').filter({ hasText: 'Áudio suspenso' })).toBeVisible();
+    await expect(page.getByRole('alert')).toHaveCount(0);
   });
 }
