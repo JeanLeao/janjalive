@@ -45,6 +45,16 @@ Remover encerra a sessão, libera a vaga e invalida o token anterior; o cliente 
 
 Quedas involuntárias reservam a autoridade por 30 segundos. Expiração ou saída voluntária revogam a credencial e desbloqueiam a sala ocupada, sem promover outro participante. Sem participantes nem reservas, todo o estado é destruído. Salas inexistentes/encerradas rejeitam ingresso com orientação para criar outra sala; `join` nunca cria salas. Bloqueio, remoção, sala inexistente e recuperação inválida têm encerramentos terminais, sem loop de reconexão. Reiniciar o signaling encerra todas as salas e autoridades, como os demais estados efêmeros. Web, signaling e protocolo devem ser atualizados juntos.
 
+## Salas protegidas por chave efêmera (F12)
+
+A proteção por chave é opcional e configurada exclusivamente na criação da sala (`isProtected: true`). Quando habilitada, o servidor gera automaticamente uma chave aleatória com alta entropia criptográfica (128 bits, codificada em `base64url`). O servidor armazena apenas um verificador criptográfico da chave (HMAC-SHA256 com sal aleatório por sala) e realiza comparações resistentes a diferenças de tempo (`timingSafeEqual`), sem nunca persistir a chave em texto puro.
+
+Links, códigos e QR Codes continuam contendo exclusivamente o endereço da sala (`/room/:roomId`), sem embutir a chave. O criador visualiza a chave na criação e pode consultá-la ou copiá-la durante sua sessão na mesma aba via armazenamento de sessão efêmero (`sessionStorage`). O criador entra automaticamente utilizando sua credencial administrativa de host (F11), sem necessidade de digitar a chave.
+
+Visitantes que acessam a sala protegida pela primeira vez devem fornecer a chave antes da admissão. O servidor valida a autorização antes de admitir o participante, enviar snapshots, estabelecer relações de presença ou aceitar mensagens WebRTC. Reconexões legítimas de participantes ativos ou reservados utilizam o token de reconexão existente, sem exigir novamente a chave.
+
+Tentativas incorretas de chave são limitadas pelo servidor por IP e sala (máximo de 5 falhas com bloqueio temporário de 60 segundos), prevenindo ataques de força bruta sem revelar se a sala está cheia ou bloqueada. A chave não concede autoridade administrativa; a F11 continua independente. Ao encerrar a sala ou reiniciar o signaling, todo o estado efêmero é destruído.
+
 ## Prévia, pausa e encerramento
 
 **Compartilhar tela** abre o seletor nativo do navegador. A captura escolhida aparece em uma prévia local silenciosa, com indicação de áudio disponível. Nenhuma mídia é publicada antes de **Entrar ao vivo**. **Cancelar prévia**, fechar a prévia ou sair da sala encerra as tracks; uma nova tentativa solicita outra captura.

@@ -14,6 +14,7 @@ import {
   Badge,
   Card,
   UnstyledButton,
+  Checkbox,
 } from '@mantine/core';
 import { normalizeRoom } from '@screen-room/protocol';
 import {
@@ -59,6 +60,7 @@ function LobbyPage() {
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [protectRoom, setProtectRoom] = useState(false);
   const [inputCode, setInputCode] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
 
@@ -77,7 +79,7 @@ function LobbyPage() {
     if (creating) return;
     setCreating(true); setCreateError(null);
     try {
-      const newRoomId = await createRoom();
+      const { roomId: newRoomId } = await createRoom({ isProtected: protectRoom });
       handleSaveNickname(nickname);
       await navigate({ to: '/room/$roomId', params: { roomId: newRoomId } });
     } catch (error) { setCreateError(error instanceof Error ? error.message : 'Não foi possível criar a sala.'); }
@@ -278,6 +280,21 @@ function LobbyPage() {
                       color: '#fff',
                       height: '42px',
                     },
+                  }}
+                />
+              </Box>
+
+              {/* Protected Room Option */}
+              <Box style={{ maxWidth: '420px' }}>
+                <Checkbox
+                  label="Proteger sala com chave de acesso"
+                  description="Gera uma chave aleatória que os convidados devem informar para entrar."
+                  checked={protectRoom}
+                  onChange={(e) => setProtectRoom(e.currentTarget.checked)}
+                  styles={{
+                    label: { color: '#e6edf3', fontSize: '0.88rem', fontWeight: 500, cursor: 'pointer' },
+                    description: { color: '#8c959f', fontSize: '0.78rem' },
+                    input: { cursor: 'pointer' },
                   }}
                 />
               </Box>

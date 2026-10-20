@@ -43,6 +43,13 @@ interface CaptureSwitch {
   removePendingListener?: () => void;
 }
 
+export interface RoomKeyStatus {
+  required: boolean;
+  error: string | null;
+  rateLimited: boolean;
+  submitting?: boolean;
+}
+
 export interface UseRoomSessionOptions {
   roomId: string;
   displayName?: string;
@@ -50,7 +57,10 @@ export interface UseRoomSessionOptions {
 }
 
 export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomSessionOptions) {
-  const [roomState, setRoomState] = useState<RoomState>({ hostPeerId: null, hostConnected: false, locked: false, revision: 0 });
+  const [roomState, setRoomState] = useState<RoomState>({ hostPeerId: null, hostConnected: false, locked: false, revision: 0, isProtected: false });
+  const [keyStatus, setKeyStatus] = useState<RoomKeyStatus | null>(null);
+  const providedKeyRef = useRef<string | undefined>(undefined);
+  const storedSessionRef = useRef<ReturnType<typeof readRoomSession>>(readRoomSession(roomId));
   const [moderationFeedback, setModerationFeedback] = useState<string | null>(null);
   const [moderationPending, setModerationPending] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
@@ -332,7 +342,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         }
         if (state === 'disconnected') peerManager.closeAll();
         if (state === 'connected') {
-          signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current, storedSession.hostCredential);
+          signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current, storedSession.hostCredential, providedKeyRef.current);
         }
       },
       onMessage: (message) => {
@@ -348,6 +358,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
         }
         if (message.type === 'peers') {
+          setKeyStatus(null);
           if (message.roomState) setRoomState(message.roomState);
           serverClockOffsetRef.current = message.serverTime === undefined ? 0 : Date.now() - message.serverTime;
           annotations.reset();
@@ -495,6 +506,16 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             void peerManager.handleSignal(from, data);
           }
         } else if (message.type === 'error') {
+          if (message.code === 'KEY_REQUIRED' || message.code === 'KEY_INVALID' || message.code === 'KEY_RATE_LIMIT') {
+            setKeyStatus({
+              required: true,
+              error: message.code === 'KEY_REQUIRED' ? null : message.message,
+              rateLimited: message.code === 'KEY_RATE_LIMIT',
+              submitting: false,
+            });
+            logger.log('signal-server-error', { code: message.code, message: message.message });
+            return;
+          }
           if (['REMOVED', 'ROOM_NOT_FOUND', 'ROOM_LOCKED', 'UNAUTHORIZED_HOST', 'UNAUTHORIZED_RECONNECT', 'ROOM_FULL'].includes(message.code || '')) {
             terminalSessionRef.current = true;
             setSessionEnded(true);
@@ -1106,6 +1127,25 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     roomState,
     sessionEnded,
     isHost: roomState.hostPeerId === localPeerRef.current && connectionStatus === 'connected',
+    keyStatus,
+    submitRoomKey: (key: string) => {
+      const trimmed = key.trim();
+      providedKeyRef.current = trimmed;
+      setKeyStatus((prev) => ({
+        required: true,
+        error: null,
+        rateLimited: false,
+        submitting: true,
+      }));
+      const signaling = signalingRef.current;
+      if (!signaling) return;
+      if (signaling.getState() === 'connected') {
+        signaling.join(roomId, localPeerRef.current, nicknameRef.current, reconnectTokenRef.current, storedSessionRef.current?.hostCredential, trimmed);
+      } else {
+        signaling.connect();
+      }
+    },
+    storedRoomKey: storedSessionRef.current?.roomKey,
     moderationPending,
     moderationFeedback,
     moderate: (action: 'lock' | 'unlock' | 'remove', targetPeerId?: string) => {

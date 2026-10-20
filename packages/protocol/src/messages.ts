@@ -295,6 +295,7 @@ export const JoinMessageSchema = z.object({
   nickname: z.string().trim().min(1).max(32).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
   hostCredential: z.string().min(1).max(128).optional(),
+  roomKey: z.string().trim().min(1).max(128).optional(),
 });
 export type JoinMessage = z.infer<typeof JoinMessageSchema>;
 
@@ -321,9 +322,13 @@ export const RoomStateSchema = z.object({
   hostConnected: z.boolean(),
   locked: z.boolean(),
   revision: z.number().int().nonnegative(),
+  isProtected: z.boolean().optional(),
 }).strict();
 export type RoomState = z.infer<typeof RoomStateSchema>;
-export const CreateRoomSchema = z.object({ type: z.literal('create-room') }).strict();
+export const CreateRoomSchema = z.object({
+  type: z.literal('create-room'),
+  isProtected: z.boolean().optional(),
+}).strict();
 export const ModerateRoomSchema = z.object({
   type: z.literal('moderate-room'),
   requestId: z.string().min(1).max(80),
@@ -332,7 +337,10 @@ export const ModerateRoomSchema = z.object({
   targetPeerId: z.string().min(1).max(80).optional(),
 }).strict();
 export const RoomCreatedSchema = z.object({
-  type: z.literal('room-created'), roomId: z.string(), hostCredential: z.string().min(1).max(128),
+  type: z.literal('room-created'),
+  roomId: z.string(),
+  hostCredential: z.string().min(1).max(128),
+  roomKey: z.string().min(1).max(128).optional(),
 }).strict();
 export const RoomStateMessageSchema = z.object({ type: z.literal('room-state'), state: RoomStateSchema }).strict();
 export const ModerationResultSchema = z.object({
@@ -427,6 +435,9 @@ export const WS_CLOSE_CODES = {
   UNAUTHORIZED_RECONNECT: 4401,
   ROOM_FULL: 4009,
   FORBIDDEN_ORIGIN: 4403,
+  KEY_REQUIRED: 4425,
+  KEY_INVALID: 4426,
+  KEY_RATE_LIMIT: 4429,
 } as const;
 
 export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([
@@ -437,6 +448,9 @@ export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([
   WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT,
   WS_CLOSE_CODES.ROOM_FULL,
   WS_CLOSE_CODES.FORBIDDEN_ORIGIN,
+  WS_CLOSE_CODES.KEY_REQUIRED,
+  WS_CLOSE_CODES.KEY_INVALID,
+  WS_CLOSE_CODES.KEY_RATE_LIMIT,
 ]);
 
 export function isTerminalCloseCode(code: number): boolean {

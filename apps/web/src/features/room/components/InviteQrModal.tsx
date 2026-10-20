@@ -24,6 +24,8 @@ export interface InviteQrModalProps {
   onClose: () => void;
   roomId?: string;
   triggerElement?: HTMLElement | null;
+  isProtected?: boolean;
+  roomKey?: string;
 }
 
 export function InviteQrModal({
@@ -31,11 +33,15 @@ export function InviteQrModal({
   onClose,
   roomId,
   triggerElement,
+  isProtected,
+  roomKey,
 }: InviteQrModalProps) {
   const [inviteUrl, setInviteUrl] = useState<string>(() => (typeof window !== 'undefined' ? getRoomInviteUrl() : ''));
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [keyCopyStatus, setKeyCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const [copyAnnouncement, setCopyAnnouncement] = useState<string>('');
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const originRef = useRef<HTMLElement | null>(null);
 
   // Focus tracking to restore focus to origin control on close
@@ -70,8 +76,31 @@ export function InviteQrModal({
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current);
       }
+      if (keyCopyTimeoutRef.current) {
+        clearTimeout(keyCopyTimeoutRef.current);
+      }
     };
   }, []);
+
+  const handleCopyKey = async () => {
+    if (!roomKey) return;
+    try {
+      await navigator.clipboard.writeText(roomKey);
+      setKeyCopyStatus('copied');
+      setCopyAnnouncement('Chave de acesso copiada para a área de transferência.');
+      if (keyCopyTimeoutRef.current) clearTimeout(keyCopyTimeoutRef.current);
+      keyCopyTimeoutRef.current = setTimeout(() => {
+        setKeyCopyStatus('idle');
+      }, 2000);
+    } catch {
+      setKeyCopyStatus('error');
+      setCopyAnnouncement('Não foi possível copiar a chave de acesso.');
+      if (keyCopyTimeoutRef.current) clearTimeout(keyCopyTimeoutRef.current);
+      keyCopyTimeoutRef.current = setTimeout(() => {
+        setKeyCopyStatus('idle');
+      }, 3000);
+    }
+  };
 
   const handleCopy = async () => {
     if (!inviteUrl) return;
@@ -227,6 +256,73 @@ export function InviteQrModal({
           >
             Não foi possível obter o endereço da sala para gerar o QR Code.
           </Alert>
+        )}
+
+        {/* Protected Room Notice */}
+        {isProtected && (
+          <Alert
+            color="blue"
+            variant="light"
+            title="Sala protegida por chave"
+            styles={{
+              root: {
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                borderColor: 'rgba(37, 99, 235, 0.25)',
+                color: '#93c5fd',
+                borderRadius: 8,
+                width: '100%',
+              },
+              title: {
+                fontWeight: 600,
+                color: '#60a5fa',
+              },
+            }}
+          >
+            Esta sala exige uma chave de acesso para novos participantes. Compartilhe a chave separadamente deste link.
+          </Alert>
+        )}
+
+        {/* Creator Access Key with Copy Action */}
+        {isProtected && roomKey && (
+          <Box style={{ width: '100%' }}>
+            <TextInput
+              label="Chave de acesso da sala"
+              value={roomKey}
+              readOnly
+              aria-label="Chave de acesso da sala"
+              onClick={(e) => e.currentTarget.select()}
+              rightSection={
+                <Tooltip label={keyCopyStatus === 'copied' ? 'Copiada!' : 'Copiar chave'} withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color={keyCopyStatus === 'copied' ? 'teal' : 'gray'}
+                    onClick={handleCopyKey}
+                    aria-label={keyCopyStatus === 'copied' ? 'Chave copiada' : 'Copiar chave de acesso'}
+                  >
+                    {keyCopyStatus === 'copied' ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                  </ActionIcon>
+                </Tooltip>
+              }
+              styles={{
+                label: {
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: '#8c959f',
+                  marginBottom: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                },
+                input: {
+                  backgroundColor: '#0d1117',
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  color: '#e6edf3',
+                  fontFamily: 'monospace',
+                  fontSize: '0.82rem',
+                  height: '40px',
+                },
+              }}
+            />
+          </Box>
         )}
 
         {/* Full Public URL input */}

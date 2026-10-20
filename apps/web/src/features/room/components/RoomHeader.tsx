@@ -19,11 +19,13 @@ import {
   IconExit,
   IconLink,
   IconQrCode,
+  IconShield,
 } from './Icons';
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface RoomHeaderProps {
   locked?: boolean;
+  isProtected?: boolean;
   roomId: string;
   participantCount: number;
   raisedHandCount?: number;
@@ -38,6 +40,7 @@ export interface RoomHeaderProps {
 
 export function RoomHeader({
   locked = false,
+  isProtected = false,
   roomId,
   participantCount,
   raisedHandCount = 0,
@@ -204,6 +207,30 @@ export function RoomHeader({
             )}
           </UnstyledButton>
         </Tooltip>
+
+        {isProtected && (
+          <Tooltip label="Sala protegida por chave de acesso" withArrow>
+            <Box
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                border: '1px solid rgba(37, 99, 235, 0.3)',
+                padding: '3px 8px',
+                borderRadius: '16px',
+                color: '#60a5fa',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+              aria-label="Sala protegida por chave de acesso"
+            >
+              <IconShield size={12} />
+              <span>Protegida</span>
+            </Box>
+          </Tooltip>
+        )}
       </Group>
 
       {/* Right: Participant Count, Settings, Status */}
