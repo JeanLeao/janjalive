@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect, Page } from '@playwright/test';
 
 async function enableShortcuts(page: Page) {
@@ -360,7 +361,7 @@ test.describe('F31 - Atalhos de teclado e acessibilidade', () => {
       });
     });
 
-    await page.goto('/room/e2e-f31-qa');
+    await gotoRoom(page, '/room/e2e-f31-qa');
     await page.waitForLoadState('networkidle');
 
     // Start sharing screen to become presenter

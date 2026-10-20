@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
 
@@ -221,7 +222,7 @@ test('participants enter before capture; ten start/stop cycles with real WebRTC'
   const a = await browser.newContext(), b = await browser.newContext();
   const host = await a.newPage(), viewer = await b.newPage();
   await syntheticCapture(host); await syntheticCapture(viewer);
-  await Promise.all([host.goto('/room/e2e-cycles'), viewer.goto('/room/e2e-cycles')]);
+  await Promise.all([gotoRoom(host, '/room/e2e-cycles'), gotoRoom(viewer, '/room/e2e-cycles')]);
   await expect(host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeVisible();
   await expect(viewer.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeVisible();
   await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
@@ -239,7 +240,8 @@ test('participants enter before capture; ten start/stop cycles with real WebRTC'
   await expect(host.locator('video')).toHaveCount(2);
   await expect(viewer.locator('video')).toHaveCount(2);
   await host.getByRole('button', { name: /^Destacar transmissão de / }).click();
-  await expect.poll(() => host.locator('video').first().evaluate(v => (v as HTMLVideoElement).muted)).toBe(false);
+  // These synthetic captures contain no audio tracks; F24 keeps both selected sources muted.
+  await expect.poll(() => host.locator('video').first().evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
   await host.getByRole('button', { name: /^Destacar transmissão de / }).click();
   await expect.poll(() => host.locator('video').first().evaluate(v => (v as HTMLVideoElement).muted)).toBe(true);
   if (browser.browserType().name() === 'firefox') {
@@ -263,10 +265,10 @@ test('late join and a presenter serving nine spectators', async ({ browser }) =>
     const pages = await Promise.all(contexts.map(context => context.newPage()));
     await Promise.all(pages.map(page => syntheticCapture(page)));
     const host = pages[0];
-    await host.goto('/room/e2e-capacity');
+    await gotoRoom(host, '/room/e2e-capacity');
     await expect(host.getByText('Conectado', { exact: true })).toBeVisible();
     await startLive(host);
-    await Promise.all(pages.slice(1).map(page => page.goto('/room/e2e-capacity')));
+    await Promise.all(pages.slice(1).map(page => gotoRoom(page, '/room/e2e-capacity')));
     await Promise.all(pages.slice(1).map(frames));
     await expect(host.getByRole('button', { name: 'Ver participantes (10)', exact: true }).first()).toBeVisible();
     await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
@@ -281,7 +283,7 @@ test('spectator and presenter recover after signaling interruption', async ({ br
   try {
     const host = await a.newPage(), viewer = await b.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await Promise.all([host.goto('/room/e2e-reconnect'), viewer.goto('/room/e2e-reconnect')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-reconnect'), gotoRoom(viewer, '/room/e2e-reconnect')]);
     await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await startLive(host);
     await frames(viewer);
@@ -299,7 +301,7 @@ test('spectator and presenter recover after signaling interruption', async ({ br
 
 test('leaving during the selector stops the eventual capture', async ({ page }) => {
   await syntheticCapture(page);
-  await page.goto('/room/e2e-selector');
+  await gotoRoom(page, '/room/e2e-selector');
   await page.evaluate(() => { (window as any).testDelayCapture = true; });
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
   await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveCapture))).toBe(true);
@@ -314,7 +316,7 @@ test('audio mute, nickname and restart without audio preserve the session', asyn
   try {
     const host = await a.newPage(), viewer = await b.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await Promise.all([host.goto('/room/e2e-audio'), viewer.goto('/room/e2e-audio')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-audio'), gotoRoom(viewer, '/room/e2e-audio')]);
     await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await viewer.evaluate(() => { (window as any).testBlockAudio = true; });
     await host.evaluate(() => { (window as any).testAudio = true; });
@@ -350,7 +352,7 @@ test('simultaneous initial offers deliver both directions; one presenter can sto
   try {
     const first = await a.newPage(), second = await b.newPage();
     await syntheticCapture(first); await syntheticCapture(second);
-    await Promise.all([first.goto('/room/e2e-glare'), second.goto('/room/e2e-glare')]);
+    await Promise.all([gotoRoom(first, '/room/e2e-glare'), gotoRoom(second, '/room/e2e-glare')]);
     await expect(first.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await Promise.all([first, second].map(page =>
       startLive(page)));
@@ -375,7 +377,7 @@ for (const role of ['viewer', 'presenter']) {
     try {
       const host = await a.newPage(), viewer = await b.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer);
-      await Promise.all([host.goto(`/room/e2e-replace-${role}`), viewer.goto(`/room/e2e-replace-${role}`)]);
+      await Promise.all([gotoRoom(host, `/room/e2e-replace-${role}`), gotoRoom(viewer, `/room/e2e-replace-${role}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host);
       await frames(viewer);
@@ -416,7 +418,7 @@ test('F21 local zoom, wheel, pan, fullscreen, touch, selection and restart', asy
     const errors: string[] = [];
     for (const page of [host, viewer]) page.on('pageerror', error => errors.push(error.message));
     await Promise.all([syntheticCapture(host), syntheticCapture(viewer)]);
-    await Promise.all([host.goto('/room/e2e-zoom'), viewer.goto('/room/e2e-zoom')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-zoom'), gotoRoom(viewer, '/room/e2e-zoom')]);
     await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
     await startLive(host);
     await frames(viewer);
@@ -480,7 +482,7 @@ for (const mobile of [false, true]) {
       const host = await a.newPage(), viewer = await b.newPage(), late = await c.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer); await syntheticCapture(late);
       await mockPausePiP(viewer);
-      await host.goto('/room/e2e-preview-' + mobile);
+      await gotoRoom(host, '/room/e2e-preview-' + mobile);
       await host.evaluate(() => { (window as any).testAudio = true; });
       await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
       await expect(host.getByRole('dialog')).toContainText('Não está ao vivo');
@@ -490,7 +492,7 @@ for (const mobile of [false, true]) {
       await cancel.focus();
       await expect(cancel).toBeFocused();
       await expect.poll(() => host.locator('video').evaluateAll(videos => videos.every(v => (v as HTMLVideoElement).muted))).toBe(true);
-      await viewer.goto('/room/e2e-preview-' + mobile);
+      await gotoRoom(viewer, '/room/e2e-preview-' + mobile);
       await expect(viewer.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       const noSenders = () => host.evaluate(() => (window as any).testPeers.every((pc: RTCPeerConnection) =>
         pc.connectionState === 'closed' || pc.getSenders().every(sender => !sender.track)));
@@ -519,7 +521,7 @@ for (const mobile of [false, true]) {
         if (cycle === 0) await host.screenshot({ path: test.info().outputPath('paused.png') });
         await expect.poll(() => host.evaluate(() => (window as any).testCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'live'))).toBe(true);
         if (cycle === 0) {
-          await late.goto('/room/e2e-preview-' + mobile);
+          await gotoRoom(late, '/room/e2e-preview-' + mobile);
           await expect(late.getByText('Transmissão pausada', { exact: true })).toBeVisible();
           await expect.poll(noSenders).toBe(true);
           await host.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.readyState === 1 && s.url.includes('/signal')).forEach((s: WebSocket) => s.close(4001)));
@@ -549,7 +551,7 @@ test('preview reconnect, duplicate confirmation and native end in preview/paused
   try {
     const host = await a.newPage(), viewer = await b.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await Promise.all([host.goto('/room/e2e-preview-end'), viewer.goto('/room/e2e-preview-end')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-preview-end'), gotoRoom(viewer, '/room/e2e-preview-end')]);
     const capture = () => host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
     const endNative = () => host.evaluate(() => {
       const track = (window as any).testCapture.getVideoTracks()[0];
@@ -582,7 +584,7 @@ test('confirm/stop and resume/stop invalidate publication without reloading', as
   try {
     const host = await a.newPage(), viewer = await b.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await Promise.all([host.goto('/room/e2e-rapid'), viewer.goto('/room/e2e-rapid')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-rapid'), gotoRoom(viewer, '/room/e2e-rapid')]);
     await expect(viewer.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
     await host.getByRole('button', { name: 'Entrar ao vivo', exact: true }).evaluate(button => {
@@ -614,7 +616,7 @@ test('a presenter arriving during local preview keeps the spotlight after confir
   try {
     const host = await a.newPage(), other = await b.newPage();
     await syntheticCapture(host); await syntheticCapture(other);
-    await Promise.all([host.goto('/room/e2e-preview-focus'), other.goto('/room/e2e-preview-focus')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-preview-focus'), gotoRoom(other, '/room/e2e-preview-focus')]);
     await expect(other.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
     await expect(host.getByRole('dialog')).toBeVisible();
@@ -653,7 +655,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 768, height: 600 
       }
     };
     try {
-      await page.goto(`/room/e2e-layout-${viewport.width}`);
+      await gotoRoom(page, `/room/e2e-layout-${viewport.width}`);
       const share = page.locator('.floating-dock-bar').getByRole('button', { name: 'Compartilhar tela', exact: true });
       await expect(share).toBeVisible();
       await dockFits();
@@ -723,7 +725,7 @@ for (const mobile of [false, true]) {
       };
     });
     try {
-      await Promise.all([page.goto(`/room/e2e-pending-${mobile}`), viewer.goto(`/room/e2e-pending-${mobile}`)]);
+      await Promise.all([gotoRoom(page, `/room/e2e-pending-${mobile}`), gotoRoom(viewer, `/room/e2e-pending-${mobile}`)]);
       await expect(page.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
       await page.evaluate(() => { (window as any).holdPublication = true; });
@@ -784,7 +786,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 320, height: 568 
       const host = await context.newPage(), viewer = await context.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer);
       await host.addInitScript(() => { (window as any).testAudio = true; });
-      await Promise.all([host.goto(`/room/f27-confirm-${viewport.width}`), viewer.goto(`/room/f27-confirm-${viewport.width}`)]);
+      await Promise.all([gotoRoom(host, `/room/f27-confirm-${viewport.width}`), gotoRoom(viewer, `/room/f27-confirm-${viewport.width}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       await host.getByRole('button', { name: 'Mutar áudio da tela', exact: true }).click();
@@ -846,7 +848,7 @@ for (const paused of [false, true]) {
     try {
       const host = await context.newPage(), viewer = await context.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer);
-      await Promise.all([host.goto(`/room/f27-cancel-${paused}`), viewer.goto(`/room/f27-cancel-${paused}`)]);
+      await Promise.all([gotoRoom(host, `/room/f27-cancel-${paused}`), gotoRoom(viewer, `/room/f27-cancel-${paused}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       const original = await senderTrackIds(host);
@@ -876,7 +878,7 @@ for (const action of ['cancel', 'stop', 'leave', 'old-ended', 'new-ended', 'old-
     const context = await browser.newContext();
     try {
       const host = await context.newPage(); await syntheticCapture(host);
-      await host.goto(`/room/f27-delayed-${action}`); await startLive(host);
+      await gotoRoom(host, `/room/f27-delayed-${action}`); await startLive(host);
       await host.evaluate(() => { (window as any).testDelayCapture = true; });
       await host.getByRole('button', { name: 'Trocar tela', exact: true }).click();
       await expect.poll(() => host.evaluate(() => (window as any).testCaptures.length)).toBe(2);
@@ -914,7 +916,7 @@ for (const failure of ['detach', 'attach']) {
     try {
       const host = await context.newPage(), viewer = await context.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer); await holdReplacement(host);
-      await Promise.all([host.goto(`/room/f27-failure-${failure}`), viewer.goto(`/room/f27-failure-${failure}`)]);
+      await Promise.all([gotoRoom(host, `/room/f27-failure-${failure}`), gotoRoom(viewer, `/room/f27-failure-${failure}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       await host.evaluate(failure => { (window as any).testFailReplace = failure; }, failure);
@@ -932,7 +934,7 @@ test('F27 detach barrier, duplicate clicks, late join, reconnect and independent
   try {
     const host = await context.newPage(), other = await context.newPage();
     await syntheticCapture(host); await syntheticCapture(other); await holdReplacement(host);
-    await Promise.all([host.goto('/room/f27-concurrency'), other.goto('/room/f27-concurrency')]);
+    await Promise.all([gotoRoom(host, '/room/f27-concurrency'), gotoRoom(other, '/room/f27-concurrency')]);
     await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await startLive(host); await startLive(other); await frames(host); await frames(other);
     const originalOthers = await senderTrackIds(other);
@@ -943,7 +945,7 @@ test('F27 detach barrier, duplicate clicks, late join, reconnect and independent
     await expect.poll(() => host.evaluate(() => (window as any).testReplacements?.length || 0)).toBeGreaterThan(0);
     await expect(host.getByRole('dialog')).toHaveCount(0);
     expect(await host.evaluate(() => (window as any).testPeers.filter((pc: RTCPeerConnection) => pc.connectionState !== 'closed').every((pc: RTCPeerConnection) => pc.getSenders().every(s => !s.track || !s.track.enabled)))).toBe(true);
-    const late = await context.newPage(); await syntheticCapture(late); await late.goto('/room/f27-concurrency');
+    const late = await context.newPage(); await syntheticCapture(late); await gotoRoom(late, '/room/f27-concurrency');
     await expect(host.getByRole('button', { name: 'Ver participantes (3)', exact: true }).first()).toBeVisible();
     await host.evaluate(() => { (window as any).testHoldReplace = null; (window as any).testReplacements.forEach((resolve: () => void) => resolve()); });
     await expect(host.getByRole('dialog')).toBeVisible();
@@ -969,7 +971,7 @@ for (const phase of ['detach-cancel', 'detach-stop', 'publish-stop', 'publish-en
       const host = await context.newPage(), viewer = await context.newPage();
       await syntheticCapture(host); await syntheticCapture(viewer); await holdReplacement(host);
       await host.addInitScript(() => { (window as any).testAudio = true; });
-      await Promise.all([host.goto(`/room/f27-queued-${phase}`), viewer.goto(`/room/f27-queued-${phase}`)]);
+      await Promise.all([gotoRoom(host, `/room/f27-queued-${phase}`), gotoRoom(viewer, `/room/f27-queued-${phase}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       const original = await senderTrackIds(host);
@@ -1012,7 +1014,7 @@ test('F27 first audio source negotiates without losing the reused remote video',
   try {
     const host = await context.newPage(), viewer = await context.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await Promise.all([host.goto('/room/f27-first-audio'), viewer.goto('/room/f27-first-audio')]);
+    await Promise.all([gotoRoom(host, '/room/f27-first-audio'), gotoRoom(viewer, '/room/f27-first-audio')]);
     await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await startLive(host); await frames(viewer);
     await host.evaluate(() => { (window as any).testAudio = true; });
@@ -1050,7 +1052,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     };
     try {
       await syntheticCapture(host); await syntheticCapture(viewer);
-      await Promise.all([host.goto(`/room/f01-${viewport.width}`), viewer.goto(`/room/f01-${viewport.width}`)]);
+      await Promise.all([gotoRoom(host, `/room/f01-${viewport.width}`), gotoRoom(viewer, `/room/f01-${viewport.width}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       await openSettings();
@@ -1099,7 +1101,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
 test('F01 cleanup owns captured tracks while initial quality constraints are pending', async ({ page }) => {
   await syntheticCapture(page);
-  await page.goto('/room/f01-pending-constraints');
+  await gotoRoom(page, '/room/f01-pending-constraints');
   await page.evaluate(() => { (window as any).testDelayConstraints = true; });
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
   await expect.poll(() => page.evaluate(() => Boolean((window as any).resolveConstraints))).toBe(true);
@@ -1117,7 +1119,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     const host = await context.newPage(), viewer = await context.newPage();
     try {
       await syntheticCapture(host); await syntheticCapture(viewer);
-      await Promise.all([host.goto(`/room/preview-quality-${viewport.width}`), viewer.goto(`/room/preview-quality-${viewport.width}`)]);
+      await Promise.all([gotoRoom(host, `/room/preview-quality-${viewport.width}`), gotoRoom(viewer, `/room/preview-quality-${viewport.width}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
       const dialog = host.getByRole('dialog');
@@ -1201,7 +1203,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
 test('Preview serializes rapid quality changes, blocks pending publication and reports partial failure', async ({ page }) => {
   await syntheticCapture(page);
-  await page.goto('/room/preview-quality-pending');
+  await gotoRoom(page, '/room/preview-quality-pending');
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
   await expect(page.getByRole('dialog')).toContainText('Captura observada:');
   await page.getByRole('button', { name: 'Alterar qualidade', exact: true }).click();
@@ -1262,7 +1264,7 @@ test('Preview modal maintains visual stability and zero tremor during async qual
   });
 
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/room/preview-tremor-regression');
+  await gotoRoom(page, '/room/preview-tremor-regression');
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
 
   const dialog = page.getByRole('dialog');
@@ -1350,7 +1352,7 @@ test('F13 laser, geometry, immediate drawing, expiry, clear, late join and recon
     const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
     const errors: string[] = [];
     for (const p of [host, viewer, late]) { await syntheticCapture(p); p.on('pageerror', e => errors.push(e.message)); }
-    await Promise.all([host.goto('/room/f13-live'), viewer.goto('/room/f13-live')]);
+    await Promise.all([gotoRoom(host, '/room/f13-live'), gotoRoom(viewer, '/room/f13-live')]);
     await startLive(host); await frames(viewer);
     await expect(host.getByRole('button', { name: 'Ponteiro laser', exact: true })).toBeEnabled();
     await expect(viewer.getByRole('button', { name: 'Ponteiro laser', exact: true })).toHaveCount(0);
@@ -1383,7 +1385,7 @@ test('F13 laser, geometry, immediate drawing, expiry, clear, late join and recon
     await expect.poll(async () => (await annotationPixels(host)).count).toBeGreaterThan(0);
     await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
     expect(await viewer.getByTestId('annotation-overlay').evaluate(el => el.parentElement === document.querySelector('[data-testid="zoom-viewport"] video')?.parentElement)).toBe(true);
-    await late.goto('/room/f13-live'); await frames(late);
+    await gotoRoom(late, '/room/f13-live'); await frames(late);
     expect((await annotationPixels(late)).count).toBe(0);
     await host.mouse.move(gestureBox.x + gestureBox.width * .6, gestureBox.y + gestureBox.height * .55, { steps: 3 });
     await host.mouse.up();
@@ -1411,7 +1413,7 @@ test('F13 independent presenters, pause/resume, cancelled and confirmed replacem
   try {
     const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
     for (const p of [host, viewer]) await syntheticCapture(p);
-    await Promise.all([host.goto('/room/f13-captures'), viewer.goto('/room/f13-captures')]);
+    await Promise.all([gotoRoom(host, '/room/f13-captures'), gotoRoom(viewer, '/room/f13-captures')]);
     await startLive(host); await frames(viewer); await drawAnnotation(host);
     await expect.poll(async () => (await annotationPixels(viewer)).count).toBeGreaterThan(0);
     const captureId = () => viewer.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'sharing-updated').at(-1)?.streamId);
@@ -1449,7 +1451,7 @@ test('F13 independent presenters, pause/resume, cancelled and confirmed replacem
 test('F13 mobile tools, keyboard and touch cancellation do not pan or zoom', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   try {
-    const page = await context.newPage(); await syntheticCapture(page); await page.goto('/room/f13-touch'); await startLive(page);
+    const page = await context.newPage(); await syntheticCapture(page); await gotoRoom(page, '/room/f13-touch'); await startLive(page);
     const draw = page.getByRole('button', { name: 'Desenhar', exact: true });
     await draw.focus(); await page.keyboard.press('Enter'); await expect(draw).toHaveAttribute('aria-pressed', 'true');
     const viewport = page.getByTestId('zoom-viewport'), b = (await viewport.boundingBox())!;
@@ -1485,9 +1487,9 @@ test('F13 spectator quick pointing: presenter and spectator visibility, identity
     }
 
     await Promise.all([
-      hostA.goto('/room/f13-spectator-pointing'),
-      viewer.goto('/room/f13-spectator-pointing'),
-      hostB.goto('/room/f13-spectator-pointing'),
+      gotoRoom(hostA, '/room/f13-spectator-pointing'),
+      gotoRoom(viewer, '/room/f13-spectator-pointing'),
+      gotoRoom(hostB, '/room/f13-spectator-pointing'),
     ]);
 
     await startLive(hostA);
@@ -1578,7 +1580,7 @@ test('F13 spectator pointing permissions: disable/enable, server block, pause/re
     const late = await contexts[2].newPage();
     for (const p of [host, viewer, late]) await syntheticCapture(p);
 
-    await Promise.all([host.goto('/room/f13-pointing-perms'), viewer.goto('/room/f13-pointing-perms')]);
+    await Promise.all([gotoRoom(host, '/room/f13-pointing-perms'), gotoRoom(viewer, '/room/f13-pointing-perms')]);
     await startLive(host);
     await frames(viewer);
 
@@ -1614,7 +1616,7 @@ test('F13 spectator pointing permissions: disable/enable, server block, pause/re
     await expect(host.getByTestId('spectator-pointer-marker')).toHaveCount(0);
 
     // Late joiner receives disabled permission immediately
-    await late.goto('/room/f13-pointing-perms');
+    await gotoRoom(late, '/room/f13-pointing-perms');
     await frames(late);
     await expect(late.getByRole('button', { name: 'Apontar', exact: true })).toBeDisabled();
 
@@ -1681,7 +1683,7 @@ test('F13 spectator pointing: keyboard navigation, Cinema, Fullscreen and mobile
     await syntheticCapture(mobileViewer);
     await mobileViewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Clara'));
 
-    await Promise.all([host.goto('/room/f13-pointing-modes'), mobileViewer.goto('/room/f13-pointing-modes')]);
+    await Promise.all([gotoRoom(host, '/room/f13-pointing-modes'), gotoRoom(mobileViewer, '/room/f13-pointing-modes')]);
     await startLive(host);
     await frames(mobileViewer);
 
@@ -1732,7 +1734,7 @@ test('F13 collaborative drawing permissions: disabled by default, presenter enab
 
     await viewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Mariana'));
 
-    await Promise.all([host.goto('/room/f13-drawing-perms'), viewer.goto('/room/f13-drawing-perms')]);
+    await Promise.all([gotoRoom(host, '/room/f13-drawing-perms'), gotoRoom(viewer, '/room/f13-drawing-perms')]);
     await startLive(host);
     await frames(viewer);
 
@@ -1782,7 +1784,7 @@ test('F13 collaborative drawing permissions: disabled by default, presenter enab
     await expect(host.getByTestId('collaborative-author-badge')).toHaveCount(0);
 
     // 6. Late joiner receives current active permission, but no expired or previous drawing history
-    await late.goto('/room/f13-drawing-perms');
+    await gotoRoom(late, '/room/f13-drawing-perms');
     await frames(late);
     await expect(late.getByRole('button', { name: 'Desenhar', exact: true })).toBeEnabled();
     expect((await annotationPixels(late)).count).toBe(0);
@@ -1822,9 +1824,9 @@ test('F13 collaborative drawing: revocation, pause/resume, switch cancel/confirm
     await viewerB.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Bob'));
 
     await Promise.all([
-      host.goto('/room/f13-drawing-lifecycle'),
-      viewerA.goto('/room/f13-drawing-lifecycle'),
-      viewerB.goto('/room/f13-drawing-lifecycle'),
+      gotoRoom(host, '/room/f13-drawing-lifecycle'),
+      gotoRoom(viewerA, '/room/f13-drawing-lifecycle'),
+      gotoRoom(viewerB, '/room/f13-drawing-lifecycle'),
     ]);
     await startLive(host);
     await frames(viewerA);
@@ -1926,7 +1928,7 @@ for (const width of [1280, 390, 320]) {
     const context = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 844 }, hasTouch: width < 400 });
     try {
       const page = await context.newPage();
-      await syntheticCapture(page); await page.goto(`/room/annotations-menu-${width}`); await startLive(page);
+      await syntheticCapture(page); await gotoRoom(page, `/room/annotations-menu-${width}`); await startLive(page);
       const trigger = page.getByRole('button', { name: 'Anotações', exact: true });
       const menu = page.getByRole('menu');
       const pointing = page.getByRole('menuitemcheckbox', { name: 'Permitir apontamentos', exact: true });
@@ -1969,7 +1971,7 @@ for (const width of [1280, 390, 320]) {
       const viewerContext = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 844 }, hasTouch: width < 400 });
       try {
         const viewer = await viewerContext.newPage(); await syntheticCapture(viewer);
-        await viewer.goto(`/room/annotations-menu-${width}`); await frames(viewer);
+        await gotoRoom(viewer, `/room/annotations-menu-${width}`); await frames(viewer);
         for (const name of ['Apontar', 'Desenhar']) {
           const tool = viewer.getByRole('button', { name, exact: true });
           await expect(tool).toBeEnabled();
@@ -2012,8 +2014,8 @@ for (const width of [1280, 390]) {
     viewer.on('console', message => viewerEvents.push(message.text()));
     try {
       await syntheticCapture(host); await syntheticCapture(viewer);
-      await host.goto(`/room/e2e-f18-${width}`);
-      await viewer.goto(`/room/e2e-f18-${width}`);
+      await gotoRoom(host, `/room/e2e-f18-${width}`);
+      await gotoRoom(viewer, `/room/e2e-f18-${width}`);
       await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
       const openNetwork = async () => {
         const trigger = viewer.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });
@@ -2054,7 +2056,7 @@ test('F18 missing presentation API keeps playback and decoded evidence available
     await viewer.addInitScript(() => {
       Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });
     });
-    await Promise.all([host.goto('/room/e2e-f18-no-callback'), viewer.goto('/room/e2e-f18-no-callback')]);
+    await Promise.all([gotoRoom(host, '/room/e2e-f18-no-callback'), gotoRoom(viewer, '/room/e2e-f18-no-callback')]);
     await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
     await startLive(host);
     await expect.poll(() => viewer.evaluate(() => {
@@ -2071,7 +2073,7 @@ test('F30 privacy notice appears in capture preview without blocking confirmatio
   try {
     const page = await context.newPage();
     await syntheticCapture(page);
-    await page.goto('/room/e2e-f30-notice');
+    await gotoRoom(page, '/room/e2e-f30-notice');
     await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
 
     // Verify privacy notice is clearly present
@@ -2101,8 +2103,8 @@ test('F30 screenshot captures unzoomed frame in PNG, disables on pause, and work
     await syntheticCapture(viewer);
 
     await Promise.all([
-      host.goto('/room/e2e-f30-capture'),
-      viewer.goto('/room/e2e-f30-capture'),
+      gotoRoom(host, '/room/e2e-f30-capture'),
+      gotoRoom(viewer, '/room/e2e-f30-capture'),
     ]);
     await expect(host.getByText('2', { exact: true }).first()).toBeVisible();
 
@@ -2199,8 +2201,8 @@ for (const width of [390, 320]) {
       await syntheticCapture(viewer);
 
       await Promise.all([
-        host.goto(`/room/e2e-f30-mobile-${width}`),
-        viewer.goto(`/room/e2e-f30-mobile-${width}`),
+        gotoRoom(host, `/room/e2e-f30-mobile-${width}`),
+        gotoRoom(viewer, `/room/e2e-f30-mobile-${width}`),
       ]);
       await startLive(host);
       await frames(viewer);
@@ -2245,7 +2247,7 @@ for (const mobile of [false, true]) {
       const host = await contexts[0].newPage(), viewer = await contexts[1].newPage(), late = await contexts[2].newPage();
       for (const page of [host, viewer, late]) await syntheticCapture(page);
       const room = `/room/f38-${mobile ? 'mobile' : 'desktop'}`;
-      await host.goto(room); await viewer.goto(room);
+      await gotoRoom(host, room); await gotoRoom(viewer, room);
       const up = (page: Page) => page.getByRole('button', { name: 'Levantar mão', exact: true });
       const down = (page: Page) => page.getByRole('button', { name: 'Abaixar mão', exact: true });
       await expect(up(host)).toBeEnabled();
@@ -2255,7 +2257,7 @@ for (const mobile of [false, true]) {
       await up(viewer).click(); await expect(down(viewer)).toHaveAttribute('aria-pressed', 'true');
       await expect(host.getByRole('button', { name: /Ver participantes \(2\), 2 mãos levantadas/ }).first()).toBeVisible();
       await host.screenshot({ animations: 'disabled', path: test.info().outputPath(`f38-${mobile ? 'mobile' : 'desktop'}-raised.png`) });
-      await late.goto(room);
+      await gotoRoom(late, room);
       await expect(late.getByRole('button', { name: /Ver participantes \(3\), 2 mãos levantadas/ }).first()).toBeVisible();
       await host.getByRole('button', { name: /Ver participantes/ }).first().click();
       await expect(host.getByText('Mão levantada', { exact: true })).toHaveCount(2);
@@ -2307,7 +2309,7 @@ test('F22 both annotation overlays, silent secondary, replacement and playback c
     for (const [i, page] of [ana, bia, viewer].entries()) {
       await syntheticCapture(page);
       await page.addInitScript(name => sessionStorage.setItem('screen_room_display_name', name), ['Ana', 'Bia', 'Vera'][i]);
-      await page.goto(`/room/f22-annotations-${test.info().workerIndex}`);
+      await gotoRoom(page, `/room/f22-annotations-${test.info().workerIndex}`);
     }
     await ana.evaluate(() => { (window as any).testAudio = true; });
     await bia.evaluate(() => { (window as any).testAudio = true; });
@@ -2354,8 +2356,8 @@ for (const width of [1440, 1024, 768, 600, 390, 320]) {
       const page = await context.newPage();
       const peer = await other.newPage();
       const room = `/room/f22-toolbar-${width}`;
-      await syntheticCapture(page, true); await page.goto(room); await startLive(page);
-      await syntheticCapture(peer, 'browser'); await peer.goto(room); await frames(peer);
+      await syntheticCapture(page, true); await gotoRoom(page, room); await startLive(page);
+      await syntheticCapture(peer, 'browser'); await gotoRoom(peer, room); await frames(peer);
       await peer.screenshot({ path: test.info().outputPath(`viewer-traditional-${width}.png`) });
       await startLive(peer);
       await frames(page);
@@ -2451,7 +2453,7 @@ for (const width of [1440, 320]) {
             },
           });
         });
-        await page.goto(`/room/f24-${width}`);
+        await gotoRoom(page, `/room/f24-${width}`);
       }
       await ana.evaluate(() => { (window as any).testAudio = true; });
       await bia.evaluate(() => { (window as any).testAudio = true; });
@@ -2554,7 +2556,7 @@ test('F24 iOS exposes mute and device volume guidance without a software slider'
   try {
     const host = await hostContext.newPage(), viewer = await viewerContext.newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await host.goto('/room/f24-ios'); await viewer.goto('/room/f24-ios');
+    await gotoRoom(host, '/room/f24-ios'); await gotoRoom(viewer, '/room/f24-ios');
     await startLive(host); await frames(viewer);
     await viewer.getByRole('button', { name: 'Áudio da transmissão', exact: true }).tap();
     await expect(viewer.getByRole('slider')).toHaveCount(0);
@@ -2571,7 +2573,7 @@ test('F24 explicit mute survives blocked autoplay, source replacement and reconn
   try {
     const host = await contexts[0].newPage(), viewer = await contexts[1].newPage();
     await syntheticCapture(host); await syntheticCapture(viewer);
-    await host.goto('/room/f24-blocked'); await viewer.goto('/room/f24-blocked');
+    await gotoRoom(host, '/room/f24-blocked'); await gotoRoom(viewer, '/room/f24-blocked');
     await host.evaluate(() => { (window as any).testAudio = true; });
     await viewer.evaluate(() => { (window as any).testBlockAudio = true; });
     await startLive(host); await frames(viewer);
@@ -2617,7 +2619,7 @@ for (const width of [1280, 390]) {
           return interval(handler, ms, ...args);
         }) as typeof window.setInterval;
       });
-      await Promise.all([host.goto(`/room/f34-${width}`), viewer.goto(`/room/f34-${width}`)]);
+      await Promise.all([gotoRoom(host, `/room/f34-${width}`), gotoRoom(viewer, `/room/f34-${width}`)]);
       await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
       await startLive(host); await frames(viewer);
       const trigger = host.locator('.floating-dock-bar').getByRole('button', { name: 'Configurações e convite', exact: true });

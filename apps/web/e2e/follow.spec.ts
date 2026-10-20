@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 // F29 — Seguir apresentador. Capture is synthetic (canvas); permissions, real audio and STUN/TURN are not covered.
@@ -139,8 +140,9 @@ async function open(browser: Browser, room: string, name: string, viewport?: { w
       },
     });
   }, name);
-  await page.goto(`/room/${room}`);
-  await expect(page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeEnabled();
+  await gotoRoom(page, `/room/${room}`);
+  // Viewers only need an authenticated room session; capture controls are checked by startLive.
+  await expect(page.getByText('Conectado', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Ver participantes/ }).first()).toBeVisible();
   return { context, page };
 }

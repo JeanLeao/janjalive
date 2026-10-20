@@ -1,3 +1,4 @@
+import { createRoom } from '../features/room/signaling/create-room';
 import React, { useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
@@ -14,7 +15,7 @@ import {
   Card,
   UnstyledButton,
 } from '@mantine/core';
-import { generateSecureRoomId, normalizeRoom } from '@screen-room/protocol';
+import { normalizeRoom } from '@screen-room/protocol';
 import {
   IconScreen,
   IconPlus,
@@ -56,6 +57,8 @@ function LobbyPage() {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
 
@@ -70,13 +73,15 @@ function LobbyPage() {
     }
   };
 
-  const handleCreateRoom = () => {
-    const newRoomId = generateSecureRoomId();
-    handleSaveNickname(nickname);
-    navigate({
-      to: '/room/$roomId',
-      params: { roomId: newRoomId },
-    });
+  const handleCreateRoom = async () => {
+    if (creating) return;
+    setCreating(true); setCreateError(null);
+    try {
+      const newRoomId = await createRoom();
+      handleSaveNickname(nickname);
+      await navigate({ to: '/room/$roomId', params: { roomId: newRoomId } });
+    } catch (error) { setCreateError(error instanceof Error ? error.message : 'Não foi possível criar a sala.'); }
+    finally { setCreating(false); }
   };
 
   const handleJoinByCode = (e: React.FormEvent) => {
@@ -277,12 +282,14 @@ function LobbyPage() {
                 />
               </Box>
 
+              {createError && <Text role="alert" c="#fca5a5" size="sm">{createError}</Text>}
               {/* Main Actions */}
               <Group gap="md">
                 <Button
                   size="lg"
                   leftSection={<IconPlus size={18} />}
                   onClick={handleCreateRoom}
+                  loading={creating}
                   style={{
                     backgroundColor: '#2563eb',
                     fontWeight: 600,

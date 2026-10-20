@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { RoomRegistry, RoomCapacityError, UnauthorizedReconnectError } from './room-state.js';
+import { RoomRegistry, RoomCapacityError, UnauthorizedReconnectError, RoomAdmissionError } from './room-state.js';
 import {
   loadTurnConfig,
   createTurnCredentialsProvider,
@@ -30,11 +30,13 @@ export interface SignalSocketMeta {
   roomId: string;
   peerId: string;
   isVoluntary?: boolean;
+  hostAuthorized?: boolean;
 }
 
 export type SignalWebSocket = WebSocket & {
   meta?: SignalSocketMeta | null;
   isAlive?: boolean;
+  moderationRequests?: string[];
   messageCount?: number;
   lastMessageReset?: number;
 };
@@ -59,6 +61,7 @@ export interface SignalServerOptions {
   maxParticipantsPerRoom?: number;
   trustedProxies?: string[];
   recoveryGraceMs?: number;
+  creationTtlMs?: number;
 }
 
 /**
@@ -205,6 +208,7 @@ export function createSignalServer({
   maxParticipantsPerRoom,
   trustedProxies,
   recoveryGraceMs = RoomRegistry.DEFAULT_RECOVERY_GRACE_MS,
+  creationTtlMs = 60000,
 }: SignalServerOptions = {}): SignalServerInstance {
   // Validate and initialize TURN configuration at startup (CFG-01 & PERF-01)
   const resolvedTurnConfig = turnConfig ?? loadTurnConfig();
@@ -212,6 +216,7 @@ export function createSignalServer({
 
   const maxParticipants = parseMaxParticipants(maxParticipantsPerRoom);
   const rooms = new RoomRegistry(maxParticipants);
+  const creationLimits = new Map<string, { count: number; expires: number }>();
   const clients = new Map<string, SignalWebSocket>();
   const allowedList = parseAllowedOrigins(allowedOrigins);
   const trustedProxiesList = parseTrustedProxies(process.env.TRUSTED_PROXIES, trustedProxies);
@@ -297,6 +302,8 @@ export function createSignalServer({
     }
   }
 
+  rooms.onRoomStateChanged = (roomId) => broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
+
   function depart(socket: SignalWebSocket, isVoluntary = false) {
     if (!socket.meta) return;
     const { roomId, peerId } = socket.meta;
@@ -314,6 +321,7 @@ export function createSignalServer({
         type: 'peer-left', peerId, count,
         ...(effectiveVoluntary ? {} : { reconnectGraceMs: Math.max(1, Math.round(recoveryGraceMs)) }),
       }, peerId);
+      broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
       broadcast(roomId, rooms.handsSnapshot(roomId));
       for (const { presenterPeerId, seq } of clearedSelections) {
         if (presenterPeerId !== peerId) broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
@@ -364,6 +372,7 @@ export function createSignalServer({
     }
 
     socket.on('message', (raw) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
       if (!checkMessageRateLimit(socket)) {
         signalLog('rate-limit-ws', { meta: socket.meta });
         send(socket, { type: 'error', message: 'Limite de mensagens excedido.' });
@@ -387,6 +396,41 @@ export function createSignalServer({
       const message = parseResult.data;
 
       try {
+        if (message.type === 'create-room') {
+          if (socket.meta) { send(socket, { type: 'error', code: 'CREATE_ERROR', message: 'Saia da sala antes de criar outra.' }); return; }
+          const now = Date.now();
+          for (const [ip, budget] of creationLimits) if (budget.expires <= now) creationLimits.delete(ip);
+          const ip = resolveClientIp(req, trustedProxiesList);
+          const budget = creationLimits.get(ip) ?? { count: 0, expires: now + 60000 };
+          if (budget.count >= 10 || (!creationLimits.has(ip) && creationLimits.size >= 10000)) {
+            send(socket, { type: 'error', code: 'CREATE_RATE_LIMIT', message: 'Muitas salas criadas. Aguarde um minuto e tente novamente.' }); return;
+          }
+          budget.count++; creationLimits.set(ip, budget);
+          send(socket, { type: 'room-created', ...rooms.createRoom(undefined, creationTtlMs) });
+          return;
+        }
+        if (message.type === 'moderate-room') {
+          const meta = socket.meta;
+          try {
+            if (!meta?.hostAuthorized || peerSocket(meta.roomId, meta.peerId) !== socket) throw new Error('Somente o host conectado pode moderar a sala.');
+            if (socket.moderationRequests?.includes(message.requestId)) throw new Error('Comando já processado.');
+            socket.moderationRequests = [...(socket.moderationRequests ?? []).slice(-63), message.requestId];
+            rooms.moderate(meta.roomId, meta.peerId, message.revision, message.action, message.targetPeerId);
+            if (message.action === 'remove') {
+              const target = peerSocket(meta.roomId, message.targetPeerId!);
+              if (target) {
+                send(target, { type: 'error', code: 'REMOVED', message: 'Você foi removido da sala pelo host.' });
+                depart(target, true);
+                target.close(WS_CLOSE_CODES.REMOVED, 'Removed by host');
+              }
+            }
+            broadcast(meta.roomId, { type: 'room-state', state: rooms.roomState(meta.roomId) });
+            send(socket, { type: 'moderation-result', requestId: message.requestId, ok: true, message: message.action === 'remove' ? 'Participante removido.' : message.action === 'lock' ? 'Novas entradas bloqueadas.' : 'Novas entradas desbloqueadas.' });
+          } catch (err) {
+            send(socket, { type: 'moderation-result', requestId: message.requestId, ok: false, message: err instanceof Error ? err.message : 'Não foi possível moderar a sala.' });
+          }
+          return;
+        }
         if (message.type === 'join') {
           let normalizedRoom: string;
           let normalizedPeer: string;
@@ -463,6 +507,36 @@ export function createSignalServer({
             }
           }
 
+          const rawNick =
+            typeof message.nickname === 'string' && message.nickname.trim()
+              ? message.nickname.trim().slice(0, 32)
+              : undefined;
+
+          const prevQaRev = rooms.questionsSnapshot(normalizedRoom).revision;
+          let peers: string[];
+          try {
+            peers = rooms.join(normalizedRoom, normalizedPeer, rawNick, message.reconnectToken, message.hostCredential);
+          } catch (err: any) {
+            signalLog('join-rejected', { roomId: normalizedRoom, peerId: normalizedPeer, error: err?.message });
+            send(socket, {
+              type: 'error',
+              message: err?.message || 'Não foi possível entrar na sala.',
+              code: err instanceof RoomAdmissionError ? err.code : err instanceof RoomCapacityError
+                ? 'ROOM_FULL'
+                : err instanceof UnauthorizedReconnectError
+                ? 'UNAUTHORIZED_RECONNECT'
+                : 'JOIN_ERROR',
+            });
+            if (err instanceof RoomAdmissionError) {
+              socket.close(err.code === 'ROOM_NOT_FOUND' ? WS_CLOSE_CODES.ROOM_NOT_FOUND : err.code === 'ROOM_LOCKED' ? WS_CLOSE_CODES.ROOM_LOCKED : WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT, err.code);
+            } else if (err instanceof RoomCapacityError) {
+              socket.close(WS_CLOSE_CODES.ROOM_FULL, 'Room is full');
+            } else if (err instanceof UnauthorizedReconnectError) {
+              socket.close(WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT, 'Unauthorized reconnect');
+            }
+            return;
+          }
+
           // If this socket was already associated with another room/peer, depart cleanly
           if (socket.meta && (socket.meta.roomId !== normalizedRoom || socket.meta.peerId !== normalizedPeer)) {
             depart(socket);
@@ -481,35 +555,8 @@ export function createSignalServer({
             }
           }
 
-          const rawNick =
-            typeof message.nickname === 'string' && message.nickname.trim()
-              ? message.nickname.trim().slice(0, 32)
-              : undefined;
-
-          const prevQaRev = rooms.questionsSnapshot(normalizedRoom).revision;
-          let peers: string[];
-          try {
-            peers = rooms.join(normalizedRoom, normalizedPeer, rawNick, message.reconnectToken);
-          } catch (err: any) {
-            signalLog('join-rejected', { roomId: normalizedRoom, peerId: normalizedPeer, error: err?.message });
-            send(socket, {
-              type: 'error',
-              message: err?.message || 'Não foi possível entrar na sala.',
-              code: err instanceof RoomCapacityError
-                ? 'ROOM_FULL'
-                : err instanceof UnauthorizedReconnectError
-                ? 'UNAUTHORIZED_RECONNECT'
-                : 'JOIN_ERROR',
-            });
-            if (err instanceof RoomCapacityError) {
-              socket.close(WS_CLOSE_CODES.ROOM_FULL, 'Room is full');
-            } else if (err instanceof UnauthorizedReconnectError) {
-              socket.close(WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT, 'Unauthorized reconnect');
-            }
-            return;
-          }
-
           socket.meta = {
+            hostAuthorized: rooms.authorizeHost(normalizedRoom, normalizedPeer, message.hostCredential),
             roomId: normalizedRoom,
             peerId: normalizedPeer,
           };
@@ -533,6 +580,7 @@ export function createSignalServer({
             peers,
             count,
             participants,
+            roomState: rooms.roomState(normalizedRoom),
             ...(reservedPeers.length > 0 ? { reservedPeers } : {}),
             reconnectToken,
           });
@@ -547,6 +595,7 @@ export function createSignalServer({
             },
             normalizedPeer
           );
+          broadcast(normalizedRoom, { type: 'room-state', state: rooms.roomState(normalizedRoom) });
           broadcast(normalizedRoom, rooms.handsSnapshot(normalizedRoom));
           const qaSnap = rooms.questionsSnapshot(normalizedRoom);
           if (qaSnap.revision > prevQaRev) {

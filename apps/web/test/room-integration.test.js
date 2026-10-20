@@ -1,3 +1,4 @@
+import { createTestRooms } from '../../signaling/test/helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSignalServer } from '@screen-room/signaling';
@@ -23,7 +24,7 @@ test('room-integration: full negotiation flow between host and viewers with scre
   t.after(() => server.close());
 
   const serverUrl = `ws://127.0.0.1:${server.port}/signal`;
-  const roomId = 'integration-room';
+  const roomId = (await createTestRooms(server, ['integration-room']))['integration-room'];
 
   // 1. Host setup
   let hostReceivedStreams = [];

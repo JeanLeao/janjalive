@@ -1,3 +1,4 @@
+import { createTestRooms } from '../../signaling/test/helpers/create-rooms.js';
 import { createSignalServer } from '@screen-room/signaling';
 import { WebSocket as WsClient } from 'ws';
 import { SignalingClient } from '../src/features/room/signaling/signaling-client.ts';
@@ -32,7 +33,7 @@ async function runValidation() {
   if (!iceConfig.iceServers.length) throw new Error('Nenhum servidor ICE recebido');
 
   const serverUrl = `ws://127.0.0.1:${server.port}/signal`;
-  const roomId = 'sala-teste-manual';
+  const roomId = (await createTestRooms(server, ['sala-teste-manual']))['sala-teste-manual'];
 
   // 3. Cliente A (Host) conecta e entra na sala
   console.log('\n3. Conectando Cliente A (Host)...');

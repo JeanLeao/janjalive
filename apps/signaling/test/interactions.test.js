@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -24,15 +25,16 @@ const reaction = (r = 'like') => ({ type: 'send-reaction', requestId: randomUUID
 test('interactions: authoritative identity, isolation, no history, validation, limits and recovery', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["talk", "other"]);
   t.after(() => app.close());
   const a = await connect(app), b = await connect(app), other = await connect(app);
   a.send(chat());
   assert.match((await a.next('interaction-rejected')).message, /Entre/);
-  a.send({ type: 'join', roomId: 'talk', peerId: 'a', nickname: 'Ana' });
+  a.send({ type: 'join', roomId: ids["talk"], peerId: 'a', nickname: 'Ana' });
   const peers = await a.next('peers');
   const originalSocket = [...app.wss.clients].find(socket => socket.meta?.peerId === 'a');
-  b.send({ type: 'join', roomId: 'talk', peerId: 'b' }); await b.next('peers');
-  other.send({ type: 'join', roomId: 'other', peerId: 'c' }); await other.next('peers');
+  b.send({ type: 'join', roomId: ids["talk"], peerId: 'b' }); await b.next('peers');
+  other.send({ type: 'join', roomId: ids["other"], peerId: 'c' }); await other.next('peers');
   const message = chat('<b>texto</b>'); a.send(message);
   const accepted = await a.next('chat-message');
   assert.equal(accepted.peerId, 'a'); assert.equal(accepted.nickname, 'Ana');
@@ -53,7 +55,7 @@ test('interactions: authoritative identity, isolation, no history, validation, l
   }
   a.send(reaction('rocket')); await a.next('interaction-rejected');
   const replacement = await connect(app);
-  replacement.send({ type: 'join', roomId: 'talk', peerId: 'a', reconnectToken: peers.reconnectToken });
+  replacement.send({ type: 'join', roomId: ids["talk"], peerId: 'a', reconnectToken: peers.reconnectToken });
   await replacement.next('peers');
   originalSocket.emit('message', Buffer.from(JSON.stringify(chat('stale socket'))));
   originalSocket.emit('message', Buffer.from(JSON.stringify(reaction())));
@@ -61,10 +63,10 @@ test('interactions: authoritative identity, isolation, no history, validation, l
   replacement.ws.terminate();
   await new Promise(resolve => setTimeout(resolve, 40));
   const recovered = await connect(app);
-  recovered.send({ type: 'join', roomId: 'talk', peerId: 'a', reconnectToken: peers.reconnectToken }); await recovered.next('peers');
+  recovered.send({ type: 'join', roomId: ids["talk"], peerId: 'a', reconnectToken: peers.reconnectToken }); await recovered.next('peers');
   recovered.send(reaction()); await recovered.next('interaction-rejected');
   b.send(chat('Resposta')); assert.equal((await recovered.next('chat-message')).nickname, undefined); await b.next('chat-message');
-  const late = await connect(app); late.send({ type: 'join', roomId: 'talk', peerId: 'late' }); await late.next('peers');
+  const late = await connect(app); late.send({ type: 'join', roomId: ids["talk"], peerId: 'late' }); await late.next('peers');
   recovered.send({ type: 'leave' }); recovered.send(chat()); await recovered.next('interaction-rejected');
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(other.events.some(e => ['chat-message', 'reaction'].includes(e.type)), false);

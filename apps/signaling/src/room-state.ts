@@ -3,7 +3,7 @@ import {
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
   type StageSelection, STAGE_SELECTION_LIMITS, type HandState, type HandsSnapshot, HAND_LIMITS,
-  type QaQuestion, type QuestionsSnapshot, type UpdateQuestionMessage, QA_LIMITS,
+  type RoomState, type QaQuestion, type QuestionsSnapshot, type UpdateQuestionMessage, QA_LIMITS,
 } from '@screen-room/protocol';
 import { RoomPolls } from './room-polls.js';
 import * as crypto from 'node:crypto';
@@ -91,9 +91,79 @@ export class UnauthorizedReconnectError extends Error {
   }
 }
 
+export class RoomAdmissionError extends Error {
+  constructor(readonly code: 'ROOM_NOT_FOUND' | 'ROOM_LOCKED' | 'UNAUTHORIZED_HOST') {
+    super(code === 'ROOM_NOT_FOUND' ? 'Sala inexistente ou encerrada. Crie uma nova sala na página inicial.' : code === 'ROOM_LOCKED' ? 'Sala bloqueada pelo host. Novas entradas estão desativadas.' : 'Credencial administrativa inválida ou revogada.');
+  }
+}
+interface Administration {
+  credential?: string;
+  hostPeerId: string | null;
+  locked: boolean;
+  revision: number;
+  timer?: NodeJS.Timeout;
+}
+
 export class RoomRegistry {
   static readonly DEFAULT_RECOVERY_GRACE_MS = 30000;
   readonly polls = new RoomPolls();
+  #administration = new Map<string, Administration>();
+  onRoomStateChanged?: (roomId: string) => void;
+  createRoom(roomId = crypto.randomBytes(16).toString('hex'), ttlMs = 60000): { roomId: string; hostCredential: string } {
+    roomId = normalizeRoom(roomId);
+    if (this.#rooms.has(roomId)) throw new Error('Sala já existe.');
+    const hostCredential = crypto.randomBytes(32).toString('base64url');
+    const admin: Administration = { credential: hostCredential, hostPeerId: null, locked: false, revision: 0 };
+    this.#rooms.set(roomId, new Map());
+    this.#administration.set(roomId, admin);
+    admin.timer = setTimeout(() => {
+      // An invited visitor cannot extend the unclaimed creation grant indefinitely.
+      if (!admin.hostPeerId) {
+        this.#revokeHost(roomId);
+        if (!this.count(roomId) && !this.hasAnyRecoveryForRoom(roomId)) this.#destroyAdministration(roomId);
+      }
+    }, ttlMs);
+    admin.timer.unref();
+    return { roomId, hostCredential };
+  }
+  roomState(roomId: string): RoomState {
+    const admin = this.#administration.get(roomId);
+    return { hostPeerId: admin?.hostPeerId ?? null, hostConnected: Boolean(admin?.hostPeerId && this.hasPeer(roomId, admin.hostPeerId)), locked: admin?.locked ?? false, revision: admin?.revision ?? 0 };
+  }
+  authorizeHost(room: string, peer: string, credential: unknown): boolean {
+    const admin = this.#administration.get(room);
+    return Boolean(admin?.credential && admin.hostPeerId === peer && credential === admin.credential && this.hasPeer(room, peer));
+  }
+  moderate(room: string, peer: string, revision: number, action: 'lock' | 'unlock' | 'remove', target?: string): void {
+    const admin = this.#administration.get(room);
+    if (!admin || admin.hostPeerId !== peer || !this.hasPeer(room, peer)) throw new Error('Somente o host pode moderar a sala.');
+    if (admin.revision !== revision) throw new Error('O estado da sala mudou. Tente novamente.');
+    if (action === 'remove') {
+      if (!target || target === peer || !this.hasPeer(room, target)) throw new Error('Participante indisponível para remoção.');
+    } else admin.locked = action === 'lock';
+    admin.revision++;
+  }
+  #revokeHost(room: string): void {
+    const admin = this.#administration.get(room);
+    if (!admin) return;
+    admin.credential = undefined;
+    admin.hostPeerId = null;
+    admin.locked = false;
+    admin.revision++;
+    this.onRoomStateChanged?.(room);
+  }
+  #destroyAdministration(room: string): void {
+    clearTimeout(this.#administration.get(room)?.timer);
+    this.#administration.delete(room);
+    this.#rooms.delete(room);
+    this.#qaByRoom.delete(room);
+    this.polls.delete(room);
+  }
+  #expireRecovery(room: string, peer: string): void {
+    this.clearRecovery(room, peer);
+    if (this.#administration.get(room)?.hostPeerId === peer) this.#revokeHost(room);
+    if (!this.count(room) && !this.hasAnyRecoveryForRoom(room)) this.#destroyAdministration(room);
+  }
   #handClock = 0;
   #rooms = new Map<string, Map<string, ParticipantMeta>>();
   #qaByRoom = new Map<string, RoomQaState>();
@@ -105,26 +175,25 @@ export class RoomRegistry {
     this.maxParticipants = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
   }
 
-  join(roomId: unknown, peerId: unknown, nickname?: unknown, reconnectToken?: unknown): string[] {
+  join(roomId: unknown, peerId: unknown, nickname?: unknown, reconnectToken?: unknown, hostCredential?: unknown): string[] {
     const room = normalizeRoom(roomId);
     const peer = normalizePeer(peerId);
-    let participants = this.#rooms.get(room);
-    if (!participants) {
-      participants = new Map();
-      this.#rooms.set(room, participants);
-    }
+    this.getReservedPeers(room);
+    const participants = this.#rooms.get(room);
+    if (!participants) throw new RoomAdmissionError('ROOM_NOT_FOUND');
+    const admin = this.#administration.get(room)!;
+    if (hostCredential !== undefined && (!admin.credential || hostCredential !== admin.credential || (admin.hostPeerId !== null && admin.hostPeerId !== peer))) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
+    if (admin.hostPeerId === peer && hostCredential !== admin.credential) throw new RoomAdmissionError('UNAUTHORIZED_HOST');
 
     const existingMeta = participants.get(peer);
     const reservation = this.getRecoveryReservation(room, peer);
 
     if (existingMeta) {
-      if (reconnectToken !== undefined) {
-        const provided = typeof reconnectToken === 'string' ? reconnectToken.trim() : '';
-        if (!provided || provided !== existingMeta.reconnectToken) {
-          throw new UnauthorizedReconnectError(
-            'Sessão ativa detectada para este peer. Credencial de reconexão inválida ou ausente.'
-          );
-        }
+      const provided = typeof reconnectToken === 'string' ? reconnectToken.trim() : '';
+      if (!provided || provided !== existingMeta.reconnectToken) {
+        throw new UnauthorizedReconnectError(
+          'Sessão ativa detectada para este peer. Credencial de reconexão inválida ou ausente.'
+        );
       }
     } else if (reservation) {
       const provided = typeof reconnectToken === 'string' ? reconnectToken.trim() : '';
@@ -135,11 +204,18 @@ export class RoomRegistry {
       }
       this.clearRecovery(room, peer);
     } else {
+      if (reconnectToken !== undefined) throw new UnauthorizedReconnectError('Sessão anterior expirada ou removida. Entre novamente pela página inicial.');
+      if (admin.locked) throw new RoomAdmissionError('ROOM_LOCKED');
       if (this.occupiedSlots(room) >= this.maxParticipants) {
         throw new RoomCapacityError(this.maxParticipants);
       }
     }
 
+    if (hostCredential && !admin.hostPeerId) {
+      admin.hostPeerId = peer;
+      admin.revision++;
+      clearTimeout(admin.timer);
+    }
     const existingPeers = Array.from(participants.keys()).filter((p) => p !== peer);
 
     const cleanNickname =
@@ -150,9 +226,7 @@ export class RoomRegistry {
     const token =
       existingMeta?.reconnectToken ??
       reservation?.reconnectToken ??
-      (typeof reconnectToken === 'string' && reconnectToken.trim()
-        ? reconnectToken.trim()
-        : crypto.randomUUID());
+      crypto.randomUUID();
 
     const preservedSharing = existingMeta?.sharing ?? reservation?.sharing;
     participants.set(peer, {
@@ -169,6 +243,7 @@ export class RoomRegistry {
       ...((existingMeta?.selection ?? reservation?.selection) ? { selection: existingMeta?.selection ?? reservation?.selection } : {}),
       ...((existingMeta?.selectionSeq ?? reservation?.selectionSeq) !== undefined ? { selectionSeq: existingMeta?.selectionSeq ?? reservation?.selectionSeq } : {}),
     });
+    admin.revision++;
     const restored = participants.get(peer)!;
     if (restored.selection && !this.#validSelection(participants, restored)) restored.selection = undefined;
     this.#syncQaNicknames(room, peer, cleanNickname);
@@ -189,24 +264,19 @@ export class RoomRegistry {
 
     const existingMeta = participants.get(peer);
     participants.delete(peer);
+    const admin = this.#administration.get(room);
+    if (existingMeta && admin) admin.revision++;
 
     if (isVoluntary) {
       this.clearRecovery(room, peer);
+      if (this.#administration.get(room)?.hostPeerId === peer) this.#revokeHost(room);
       if (participants.size === 0 && !this.hasAnyRecoveryForRoom(room)) {
-        this.#rooms.delete(room);
-        this.#qaByRoom.delete(room);
-        this.polls.delete(room);
+        this.#destroyAdministration(room);
       }
     } else if (existingMeta) {
       this.clearRecovery(room, peer);
       const timer = setTimeout(() => {
-        this.clearRecovery(room, peer);
-        const currentParticipants = this.#rooms.get(room);
-        if ((!currentParticipants || currentParticipants.size === 0) && !this.hasAnyRecoveryForRoom(room)) {
-          this.#rooms.delete(room);
-          this.#qaByRoom.delete(room);
-          this.polls.delete(room);
-        }
+        this.#expireRecovery(room, peer);
       }, graceMs);
 
       if (typeof timer.unref === 'function') {
@@ -802,8 +872,7 @@ export class RoomRegistry {
     for (const [key, res] of this.#recoveryReservations.entries()) {
       if (key.startsWith(prefix)) {
         if (now > res.expiresAt) {
-          clearTimeout(res.timer);
-          this.#recoveryReservations.delete(key);
+          this.#expireRecovery(room, key.slice(prefix.length));
         } else {
           count++;
         }
@@ -843,7 +912,7 @@ export class RoomRegistry {
     const res = this.#recoveryReservations.get(`${room}:${peer}`);
     if (!res) return false;
     if (Date.now() > res.expiresAt) {
-      this.clearRecovery(room, peer);
+      this.#expireRecovery(room, peer);
       return false;
     }
     return true;
@@ -855,7 +924,7 @@ export class RoomRegistry {
     const res = this.#recoveryReservations.get(`${room}:${peer}`);
     if (!res) return undefined;
     if (Date.now() > res.expiresAt) {
-      this.clearRecovery(room, peer);
+      this.#expireRecovery(room, peer);
       return undefined;
     }
     return res;
@@ -877,8 +946,7 @@ export class RoomRegistry {
       if (key.startsWith(prefix)) {
         const remaining = res.expiresAt - now;
         if (remaining <= 0) {
-          clearTimeout(res.timer);
-          this.#recoveryReservations.delete(key);
+          this.#expireRecovery(room, key.slice(prefix.length));
         } else {
           const peerId = key.slice(prefix.length);
           result.push({ peerId, reconnectGraceMs: Math.max(1, Math.round(remaining)) });
@@ -909,6 +977,7 @@ export class RoomRegistry {
   }
 
   clearAllRecovery(): void {
+    for (const room of this.#administration.keys()) this.#destroyAdministration(room);
     for (const res of this.#recoveryReservations.values()) {
       clearTimeout(res.timer);
     }

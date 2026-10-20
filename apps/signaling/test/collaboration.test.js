@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -8,7 +9,8 @@ import { COLLABORATION_LIMITS as L } from '@screen-room/protocol';
 const laser = (seq, streamId = 's') => ({ type: 'laser', seq, streamId, eventId: randomUUID(), point: { x: .2, y: .8 } });
 const sharing = (streamId = 's', paused = false) => ({ active: true, paused, streamId, hasAudio: false, audioMuted: false });
 test('operational limits are independent, bounded, owner/capture checked and pause preserves identity', () => {
-  const rooms = new RoomRegistry(); rooms.join('r', 'a'); rooms.join('r', 'b');
+  const rooms = new RoomRegistry();
+  rooms.createRoom('r'); rooms.join('r', 'a'); rooms.join('r', 'b');
   assert.equal(rooms.acceptCollaboration('r', 'a', laser(1), 0), false);
   rooms.updateSharing('r', 'a', sharing());
   assert.equal(rooms.acceptCollaboration('r', 'b', laser(1), 0), false);
@@ -47,16 +49,17 @@ async function connect(app, roomId, peerId, reconnectToken) {
   const peers = await next('peers'); return { ws, events, send, next, peers };
 }
 test('relay derives socket identity, isolates rooms, skips history, stale sockets and backpressure', async t => {
-  const app = createSignalServer({ port: 0, host: '127.0.0.1' }); await app.ready; t.after(() => app.close());
-  const a = await connect(app, 'room', 'a'), b = await connect(app, 'room', 'b'), other = await connect(app, 'other', 'c');
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' }); await app.ready;
+  const ids = await createTestRooms(app, ["room", "other"]); t.after(() => app.close());
+  const a = await connect(app, ids["room"], 'a'), b = await connect(app, ids["room"], 'b'), other = await connect(app, ids["other"], 'c');
   a.send({ type: 'update-sharing', ...sharing() }); await b.next('sharing-updated');
   a.send(laser(1)); const received = await b.next('collaboration');
-  assert.equal(received.peerId, 'a'); assert.equal(received.roomId, 'room'); assert.equal(received.event.seq, 1);
+  assert.equal(received.peerId, 'a'); assert.equal(received.roomId, ids["room"]); assert.equal(received.event.seq, 1);
   b.send(laser(1)); a.send({ ...laser(2), peerId: 'b' }); await a.next('error');
   a.send(laser(1));
-  const late = await connect(app, 'room', 'late');
+  const late = await connect(app, ids["room"], 'late');
   const original = [...app.wss.clients].find(s => s.meta?.peerId === 'a');
-  const replacement = await connect(app, 'room', 'a', a.peers.reconnectToken);
+  const replacement = await connect(app, ids["room"], 'a', a.peers.reconnectToken);
   original.emit('message', Buffer.from(JSON.stringify(laser(3))));
   original.emit('message', Buffer.from(JSON.stringify({ type: 'update-sharing', ...sharing('spoof') })));
   replacement.send(laser(4)); assert.equal((await b.next('collaboration')).event.seq, 4); await late.next('collaboration');
@@ -83,6 +86,7 @@ const pointMsg = (seq, targetPeerId = 'a', streamId = 's', eventId = randomUUID(
 
 test('spectator pointing: default enabled, owner permission control, multi-spectator isolation, deduplication, rate limiting and lifecycle', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a', 'HostA');
   rooms.join('r', 'b', 'ViewerB');
   rooms.join('r', 'c', 'ViewerC');
@@ -153,11 +157,12 @@ test('spectator pointing: default enabled, owner permission control, multi-spect
 test('spectator pointing relay: delivers to presenter and spectators, preserves disabled permission across reconnect and blocks cross-stream tampering', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["room-pt"]);
   t.after(() => app.close());
 
-  const hostA = await connect(app, 'room-pt', 'a');
-  const hostB = await connect(app, 'room-pt', 'b');
-  const viewer = await connect(app, 'room-pt', 'v');
+  const hostA = await connect(app, ids["room-pt"], 'a');
+  const hostB = await connect(app, ids["room-pt"], 'b');
+  const viewer = await connect(app, ids["room-pt"], 'v');
   hostA.send({ type: 'update-nickname', nickname: 'Host A' });
   viewer.send({ type: 'update-nickname', nickname: 'Nina' });
   await hostA.next('peer-updated');
@@ -192,7 +197,7 @@ test('spectator pointing relay: delivers to presenter and spectators, preserves 
   assert.equal(updated.pointingEnabled, false);
 
   // Late joiner receives pointingEnabled: false in initial peers snapshot
-  const late = await connect(app, 'room-pt', 'late');
+  const late = await connect(app, ids["room-pt"], 'late');
   assert.equal(late.peers.participants.find(p => p.peerId === 'a').sharing.pointingEnabled, false);
 
   // Manual point attempt by viewer to stream-a is blocked on server, while stream-b remains enabled
@@ -206,7 +211,7 @@ test('spectator pointing relay: delivers to presenter and spectators, preserves 
   hostA.events.length = 0;
 
   // Reconnect of Host A (both active session replacement and involuntary drop recovery) preserves pointingEnabled: false without opening a window
-  const reconnectedA = await connect(app, 'room-pt', 'a', hostA.peers.reconnectToken);
+  const reconnectedA = await connect(app, ids["room-pt"], 'a', hostA.peers.reconnectToken);
   viewer.send(pointMsg(3, 'a', 'stream-a'));
   reconnectedA.send({ type: 'update-sharing', ...sharing('stream-a') }); // even if update-sharing omits pointingEnabled
   await viewer.next('sharing-updated');
@@ -236,6 +241,7 @@ const clearCollabMsg = (seq, streamId = 's', eventId = randomUUID()) => ({
 
 test('collaborative drawing: initially disabled, owner toggle, multi-spectator isolation, rate limits, revocation and presenter clear', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a', 'HostA');
   rooms.join('r', 'b', 'ViewerB');
   rooms.join('r', 'c', 'ViewerC');
@@ -313,11 +319,12 @@ test('collaborative drawing: initially disabled, owner toggle, multi-spectator i
 test('collaborative drawing relay: distributes server-derived identity, honors revocation and presenter clear', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["room-cd"]);
   t.after(() => app.close());
 
-  const host = await connect(app, 'room-cd', 'h');
-  const viewer1 = await connect(app, 'room-cd', 'v1');
-  const viewer2 = await connect(app, 'room-cd', 'v2');
+  const host = await connect(app, ids["room-cd"], 'h');
+  const viewer1 = await connect(app, ids["room-cd"], 'v1');
+  const viewer2 = await connect(app, ids["room-cd"], 'v2');
   host.send({ type: 'update-nickname', nickname: 'Host Aldo' });
   viewer1.send({ type: 'update-nickname', nickname: 'Viewer Bob' });
   await host.next('peer-updated');

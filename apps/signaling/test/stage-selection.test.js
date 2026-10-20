@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
@@ -10,6 +11,8 @@ const stopped = { active: false, hasAudio: false, audioMuted: false };
 
 test('room-state: only active sharers publish selections, targets must be live streams of the same room', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
+  rooms.createRoom('other');
   rooms.join('r', 'a'); rooms.join('r', 'b'); rooms.join('r', 'c'); rooms.join('other', 'x');
   rooms.updateSharing('other', 'x', sharing('x'));
   assert.equal(rooms.selectStage('r', 'a', 'b'), undefined, 'not sharing');
@@ -27,6 +30,7 @@ test('room-state: only active sharers publish selections, targets must be live s
 
 test('room-state: pause and F27 source swap preserve selections; stopping clears them with a growing seq', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a'); rooms.join('r', 'b');
   rooms.updateSharing('r', 'a', sharing('a1')); rooms.updateSharing('r', 'b', sharing('b1'));
   rooms.selectStage('r', 'a', 'b');
@@ -44,6 +48,7 @@ test('room-state: pause and F27 source swap preserve selections; stopping clears
 
 test('room-state: involuntary drop reserves the selection; voluntary leave and expired targets do not', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a'); rooms.join('r', 'b'); rooms.join('r', 'c');
   const token = rooms.getReconnectToken('r', 'a');
   for (const id of ['a', 'b', 'c']) rooms.updateSharing('r', id, sharing(id));
@@ -65,6 +70,7 @@ test('room-state: involuntary drop reserves the selection; voluntary leave and e
 
 test('room-state: target stopping while presenter is disconnected clears selection in reservation', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'ana'); rooms.join('r', 'bia');
   const tokenAna = rooms.getReconnectToken('r', 'ana');
   rooms.updateSharing('r', 'ana', sharing('a1'));
@@ -92,6 +98,7 @@ test('room-state: target stopping while presenter is disconnected clears selecti
 
 test('room-state: selections are rate limited and a self-target is cleared when the presenter leaves', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a'); rooms.updateSharing('r', 'a', sharing('a'));
   for (let i = 0; i < 5; i++) assert.ok(rooms.selectStage('r', 'a', 'a', 0));
   assert.equal(rooms.selectStage('r', 'a', 'a', 999), undefined);
@@ -125,9 +132,10 @@ async function connect(app, roomId, peerId, reconnectToken) {
 }
 
 test('integration: broadcast, late join snapshot, stop, spoofing, isolation and reconnect', async t => {
-  const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 500 }); await app.ready; t.after(() => app.close());
-  const a = await connect(app, 'room', 'a'), b = await connect(app, 'room', 'b'), v = await connect(app, 'room', 'v');
-  const other = await connect(app, 'other', 'o');
+  const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 500 }); await app.ready;
+  const ids = await createTestRooms(app, ["room", "other"]); t.after(() => app.close());
+  const a = await connect(app, ids["room"], 'a'), b = await connect(app, ids["room"], 'b'), v = await connect(app, ids["room"], 'v');
+  const other = await connect(app, ids["other"], 'o');
   a.send({ type: 'select-stage', targetPeerId: 'b' });
   v.send({ type: 'select-stage', targetPeerId: 'b' });
   assert.ok(await v.quiet('stage-selected'), 'not sharing: ignored');
@@ -145,7 +153,7 @@ test('integration: broadcast, late join snapshot, stop, spoofing, isolation and 
   b.send({ type: 'select-stage', targetPeerId: 'b' });
   assert.equal((await v.next('stage-selected')).peerId, 'b');
 
-  const late = await connect(app, 'room', 'late');
+  const late = await connect(app, ids["room"], 'late');
   assert.deepEqual(late.peers.participants.find(p => p.peerId === 'a').selection, { targetPeerId: 'b', seq: 1 });
   assert.deepEqual(late.peers.participants.find(p => p.peerId === 'b').selection, { targetPeerId: 'b', seq: 1 });
   assert.equal(late.peers.participants.find(p => p.peerId === 'v').selection, undefined);
@@ -155,7 +163,7 @@ test('integration: broadcast, late join snapshot, stop, spoofing, isolation and 
   a.ws.terminate();
   const left = await v.next('peer-left', e => e.peerId === 'a');
   assert.equal(left.reconnectGraceMs, 500);
-  const a2 = await connect(app, 'room', 'a', token);
+  const a2 = await connect(app, ids["room"], 'a', token);
   a2.send({ type: 'update-sharing', ...sharing('a') });
   assert.deepEqual(await v.next('stage-selected', e => e.peerId === 'a'), { type: 'stage-selected', peerId: 'a', targetPeerId: 'b', seq: 1 });
 
@@ -174,11 +182,12 @@ test('integration: broadcast, late join snapshot, stop, spoofing, isolation and 
 test('integration: Ana indica Bia -> Ana desconecta involuntariamente -> Bia encerra e reinicia -> Ana reconecta: seleção antiga não é restaurada nem retransmitida', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 1000 });
   await app.ready;
+  const ids = await createTestRooms(app, ["room-swap"]);
   t.after(() => app.close());
 
-  const ana = await connect(app, 'room-swap', 'ana');
-  const bia = await connect(app, 'room-swap', 'bia');
-  const viewer = await connect(app, 'room-swap', 'viewer');
+  const ana = await connect(app, ids["room-swap"], 'ana');
+  const bia = await connect(app, ids["room-swap"], 'bia');
+  const viewer = await connect(app, ids["room-swap"], 'viewer');
 
   ana.send({ type: 'update-sharing', ...sharing('a1') });
   bia.send({ type: 'update-sharing', ...sharing('b1') });
@@ -204,7 +213,7 @@ test('integration: Ana indica Bia -> Ana desconecta involuntariamente -> Bia enc
   await viewer.next('sharing-updated', e => e.peerId === 'bia' && e.active);
 
   // Ana reconecta com o token de recuperação
-  const ana2 = await connect(app, 'room-swap', 'ana', tokenAna);
+  const ana2 = await connect(app, ids["room-swap"], 'ana', tokenAna);
   ana2.send({ type: 'update-sharing', ...sharing('a2') });
   await viewer.next('sharing-updated', e => e.peerId === 'ana' && e.active);
 
@@ -217,11 +226,12 @@ test('integration: Ana indica Bia -> Ana desconecta involuntariamente -> Bia enc
 test('integration: peers message reports authoritative reservedPeers and omits voluntary leaves', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 2000 });
   await app.ready;
+  const ids = await createTestRooms(app, ["room-res"]);
   t.after(() => app.close());
 
-  const host = await connect(app, 'room-res', 'host');
-  const dropped = await connect(app, 'room-res', 'dropped');
-  const leaver = await connect(app, 'room-res', 'leaver');
+  const host = await connect(app, ids["room-res"], 'host');
+  const dropped = await connect(app, ids["room-res"], 'dropped');
+  const leaver = await connect(app, ids["room-res"], 'leaver');
 
   // dropped desconecta involuntariamente
   dropped.ws.terminate();
@@ -232,7 +242,7 @@ test('integration: peers message reports authoritative reservedPeers and omits v
   await host.next('peer-left', e => e.peerId === 'leaver');
 
   // Novo participante (ou reconexão do espectador) recebe peers
-  const viewer = await connect(app, 'room-res', 'viewer');
+  const viewer = await connect(app, ids["room-res"], 'viewer');
   assert.ok(viewer.peers.reservedPeers);
   assert.equal(viewer.peers.reservedPeers.length, 1);
   assert.equal(viewer.peers.reservedPeers[0].peerId, 'dropped');

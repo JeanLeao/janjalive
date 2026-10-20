@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
@@ -11,7 +12,7 @@ function connect(url) {
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
       // F38 snapshots are verified in hands.test.js and qa.test.js; these queues assert presence/relay ordering.
-      if (parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
+      if (parsed.type === 'room-state' || parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {
@@ -37,6 +38,7 @@ function nextMessage(socket) {
 test('signaling: reports presence count and broadcast peer-joined to existing peers', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["demo"]);
   t.after(() => app.close());
 
   const url = `ws://127.0.0.1:${app.port}/signal`;
@@ -45,7 +47,7 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
   const third = await connect(url);
   t.after(() => [host, viewer, third].forEach((socket) => socket.close()));
 
-  host.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'host' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["demo"], peerId: 'host' }));
   const hostPeers = await nextMessage(host);
   assert.equal(hostPeers.type, 'peers');
   assert.deepEqual(hostPeers.peers, []);
@@ -53,7 +55,7 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
   assert.deepEqual(hostPeers.participants, [{ peerId: 'host' }]);
   assert.ok(typeof hostPeers.reconnectToken === 'string' && hostPeers.reconnectToken.length >= 16);
 
-  viewer.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'viewer' }));
+  viewer.send(JSON.stringify({ type: 'join', roomId: ids["demo"], peerId: 'viewer' }));
   const viewerPeers = await nextMessage(viewer);
   assert.equal(viewerPeers.type, 'peers');
   assert.deepEqual(viewerPeers.peers, ['host']);
@@ -62,7 +64,7 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
   assert.ok(typeof viewerPeers.reconnectToken === 'string' && viewerPeers.reconnectToken.length >= 16);
   assert.deepEqual(await nextMessage(host), { type: 'peer-joined', peerId: 'viewer', count: 2 });
 
-  third.send(JSON.stringify({ type: 'join', roomId: 'demo', peerId: 'third' }));
+  third.send(JSON.stringify({ type: 'join', roomId: ids["demo"], peerId: 'third' }));
   const thirdPeers = await nextMessage(third);
   assert.equal(thirdPeers.type, 'peers');
   assert.deepEqual(thirdPeers.peers, ['host', 'viewer']);
@@ -76,6 +78,7 @@ test('signaling: reports presence count and broadcast peer-joined to existing pe
 test('signaling: registers and broadcasts temporary nicknames', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["nick-room"]);
   t.after(() => app.close());
 
   const url = `ws://127.0.0.1:${app.port}/signal`;
@@ -83,7 +86,7 @@ test('signaling: registers and broadcasts temporary nicknames', async (t) => {
   const viewer = await connect(url);
   t.after(() => [host, viewer].forEach((socket) => socket.close()));
 
-  host.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p1', nickname: 'Aldo' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["nick-room"], peerId: 'p1', nickname: 'Aldo' }));
   const hostPeers = await nextMessage(host);
   assert.equal(hostPeers.type, 'peers');
   assert.deepEqual(hostPeers.peers, []);
@@ -91,7 +94,7 @@ test('signaling: registers and broadcasts temporary nicknames', async (t) => {
   assert.deepEqual(hostPeers.participants, [{ peerId: 'p1', nickname: 'Aldo' }]);
   assert.ok(typeof hostPeers.reconnectToken === 'string');
 
-  viewer.send(JSON.stringify({ type: 'join', roomId: 'nick-room', peerId: 'p2', nickname: 'Marina' }));
+  viewer.send(JSON.stringify({ type: 'join', roomId: ids["nick-room"], peerId: 'p2', nickname: 'Marina' }));
   const viewerPeers = await nextMessage(viewer);
   assert.equal(viewerPeers.type, 'peers');
   assert.deepEqual(viewerPeers.peers, ['p1']);
@@ -111,6 +114,7 @@ test('signaling: registers and broadcasts temporary nicknames', async (t) => {
 test('signaling: propagates nickname updates and removal, avoiding redundant updates', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["nick-sync"]);
   t.after(() => app.close());
 
   const url = `ws://127.0.0.1:${app.port}/signal`;
@@ -118,10 +122,10 @@ test('signaling: propagates nickname updates and removal, avoiding redundant upd
   const viewer = await connect(url);
   t.after(() => [host, viewer].forEach((socket) => socket.close()));
 
-  host.send(JSON.stringify({ type: 'join', roomId: 'nick-sync', peerId: 'p1', nickname: 'Aldo' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["nick-sync"], peerId: 'p1', nickname: 'Aldo' }));
   await nextMessage(host); // peers message
 
-  viewer.send(JSON.stringify({ type: 'join', roomId: 'nick-sync', peerId: 'p2', nickname: 'Marina' }));
+  viewer.send(JSON.stringify({ type: 'join', roomId: ids["nick-sync"], peerId: 'p2', nickname: 'Marina' }));
   await nextMessage(viewer); // peers message
   await nextMessage(host); // peer-joined message
 
@@ -159,6 +163,7 @@ test('signaling: propagates nickname updates and removal, avoiding redundant upd
 test('signaling: relays targeted signaling data', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["relay"]);
   t.after(() => app.close());
 
   const url = `ws://127.0.0.1:${app.port}/signal`;
@@ -166,10 +171,10 @@ test('signaling: relays targeted signaling data', async (t) => {
   const viewer = await connect(url);
   t.after(() => [host, viewer].forEach((socket) => socket.close()));
 
-  host.send(JSON.stringify({ type: 'join', roomId: 'relay', peerId: 'host' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["relay"], peerId: 'host' }));
   await nextMessage(host);
 
-  viewer.send(JSON.stringify({ type: 'join', roomId: 'relay', peerId: 'viewer' }));
+  viewer.send(JSON.stringify({ type: 'join', roomId: ids["relay"], peerId: 'viewer' }));
   await nextMessage(viewer);
   await nextMessage(host);
 
@@ -265,18 +270,19 @@ test('signaling: returns 200 on /healthz and 404 for unknown HTTP paths', async 
 test('sharing updates belong to socket identity and are included in late join snapshots', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["sharing-state"]);
   t.after(() => app.close());
   const url = `ws://127.0.0.1:${app.port}/signal`;
   const host = await connect(url), viewer = await connect(url), late = await connect(url);
   t.after(() => [host, viewer, late].forEach(socket => socket.close()));
-  host.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'host' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["sharing-state"], peerId: 'host' }));
   await nextMessage(host);
-  viewer.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'viewer' }));
+  viewer.send(JSON.stringify({ type: 'join', roomId: ids["sharing-state"], peerId: 'viewer' }));
   await nextMessage(viewer); await nextMessage(host);
   const sharing = { active: true, streamId: 'screen-1', hasAudio: true, audioMuted: false };
   host.send(JSON.stringify({ type: 'update-sharing', peerId: 'viewer', ...sharing }));
   assert.deepEqual(await nextMessage(viewer), { type: 'sharing-updated', peerId: 'host', ...sharing });
-  late.send(JSON.stringify({ type: 'join', roomId: 'sharing-state', peerId: 'late' }));
+  late.send(JSON.stringify({ type: 'join', roomId: ids["sharing-state"], peerId: 'late' }));
   const snapshot = await nextMessage(late);
   assert.deepEqual(snapshot.participants.find(p => p.peerId === 'host').sharing, sharing);
   assert.equal(snapshot.participants.find(p => p.peerId === 'viewer').sharing, undefined);

@@ -20,6 +20,18 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ---
 
+## Host efêmero e moderação (F11)
+
+**Criar sala** solicita a criação ao signaling por WebSocket (`create-room`). O servidor gera um código aleatório de 128 bits e uma credencial administrativa independente de 256 bits, mantidos somente em memória. O primeiro visitante não recebe autoridade. Uma criação não reivindicada expira após 60 segundos; se convidados já estiverem conectados, a sala continua sem administrador, com a credencial revogada. A criação respeita origens permitidas, o limite de mensagens e um limite adicional de 10 salas por minuto por IP (resolução via proxies confiáveis, sem confiar livremente em `X-Forwarded-For`). O mapa desse limite aceita até 10.000 IPs por janela.
+
+A credencial administrativa fica no `sessionStorage` da aba, isolada por sala, junto da identidade e do token de reconexão. Não integra links, códigos, QR Codes, snapshots públicos ou diagnósticos. No primeiro ingresso autorizado, o servidor vincula o host à identidade do criador. Reconexões seguintes exigem **ambas** as credenciais; o token de reconexão sozinho não concede administração. Recarregar a página pode recuperar a sessão dentro dos 30 segundos de reserva. Sair pela interface revoga a autoridade imediatamente e limpa o armazenamento da sala. O armazenamento de sessão precisa estar disponível para criar uma sala; convidados podem continuar com recuperação em memória quando ele estiver indisponível.
+
+Em **Participantes**, o host pode **Bloquear entradas**, **Desbloquear entradas** e **Remover** outros participantes, com confirmação e feedback. A identificação do host e o bloqueio são públicos. Comandos usam a sessão WebSocket ativa, revisão autoritativa e identificação de requisição; mudanças de presença invalidam comandos antigos, e sockets substituídos perdem autorização. O snapshot de ingresso/reconexão inclui o estado administrativo. A sala bloqueada aceita apenas recuperações autenticadas de identidades ativas ou reservadas, mantendo a capacidade padrão de 10 vagas, incluindo reservas.
+
+Remover encerra a sessão, libera a vaga e invalida o token anterior; o cliente limpa a mídia e não tenta reconectar automaticamente. **Não há banimento permanente:** sem contas, uma pessoa pode entrar com nova identidade enquanto a sala estiver aberta. Bloquear entradas é o mecanismo complementar. Uma remoção não pode apagar mídia que outro navegador já tenha recebido por P2P; o servidor impede a continuidade daquela sessão no signaling, e os clientes encerram as conexões correspondentes.
+
+Quedas involuntárias reservam a autoridade por 30 segundos. Expiração ou saída voluntária revogam a credencial e desbloqueiam a sala ocupada, sem promover outro participante. Sem participantes nem reservas, todo o estado é destruído. Salas inexistentes/encerradas rejeitam ingresso com orientação para criar outra sala; `join` nunca cria salas. Bloqueio, remoção, sala inexistente e recuperação inválida têm encerramentos terminais, sem loop de reconexão. Reiniciar o signaling encerra todas as salas e autoridades, como os demais estados efêmeros. Web, signaling e protocolo devem ser atualizados juntos.
+
 ## Prévia, pausa e encerramento
 
 **Compartilhar tela** abre o seletor nativo do navegador. A captura escolhida aparece em uma prévia local silenciosa, com indicação de áudio disponível. Nenhuma mídia é publicada antes de **Entrar ao vivo**. **Cancelar prévia**, fechar a prévia ou sair da sala encerra as tracks; uma nova tentativa solicita outra captura.

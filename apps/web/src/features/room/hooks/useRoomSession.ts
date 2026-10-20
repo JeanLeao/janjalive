@@ -1,3 +1,5 @@
+import { readRoomSession, saveRoomSession, clearRoomSession } from '../signaling/room-session-storage';
+import type { RoomState } from '@screen-room/protocol';
 import { StageSelectionPublisher } from './stage-selection-publisher';
 import { LiveAnnotations } from '../collaboration/live-annotations';
 import type { CollaborationMessage } from '@screen-room/protocol';
@@ -48,6 +50,17 @@ export interface UseRoomSessionOptions {
 }
 
 export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomSessionOptions) {
+  const [roomState, setRoomState] = useState<RoomState>({ hostPeerId: null, hostConnected: false, locked: false, revision: 0 });
+  const [moderationFeedback, setModerationFeedback] = useState<string | null>(null);
+  const [moderationPending, setModerationPending] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const terminalSessionRef = useRef(false);
+  const moderationRequestRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!moderationPending) return;
+    const timer = setTimeout(() => { moderationRequestRef.current = null; setModerationPending(false); setModerationFeedback('Sem resposta. Confira o estado da sala antes de tentar novamente.'); }, 5000);
+    return () => clearTimeout(timer);
+  }, [moderationPending]);
   const annotations = useMemo(() => new LiveAnnotations(), [roomId]);
   const serverClockOffsetRef = useRef(0);
   const collaborationReadyRef = useRef(false);
@@ -179,7 +192,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     loggerRef.current = logger;
     const unsubscribeLogger = logger.subscribe(setDiagnostics);
 
-    const peerId = `p_${crypto.randomUUID().replace(/-/g, '')}`;
+    terminalSessionRef.current = false;
+    setSessionEnded(false);
+    const storedSession = readRoomSession(roomId);
+    const peerId = storedSession.peerId || `p_${crypto.randomUUID().replace(/-/g, '')}`;
+    reconnectTokenRef.current = storedSession.reconnectToken;
     localPeerRef.current = peerId;
     const initialNick = nicknameRef.current;
     logger.log('session-init', { roomId, peerId, displayName: initialNick || 'Anonymous' });
@@ -306,6 +323,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state !== 'connected') {
+          setModerationPending(false);
+          moderationRequestRef.current = null;
           stageSelectionPublisher.cancel();
           interactionsRef.current.resetConnection();
           collaborationReadyRef.current = false;
@@ -313,16 +332,23 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         }
         if (state === 'disconnected') peerManager.closeAll();
         if (state === 'connected') {
-          signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current);
+          signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current, storedSession.hostCredential);
         }
       },
       onMessage: (message) => {
         if (isDisposed) return;
+        if (message.type === 'room-state') setRoomState(message.state);
+        if (message.type === 'moderation-result' && message.requestId === moderationRequestRef.current) {
+          setModerationFeedback(message.message);
+          setModerationPending(false);
+          moderationRequestRef.current = null;
+        }
         interactionsRef.current.receive(message);
         if (message.type === 'collaboration') {
           if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
         }
         if (message.type === 'peers') {
+          if (message.roomState) setRoomState(message.roomState);
           serverClockOffsetRef.current = message.serverTime === undefined ? 0 : Date.now() - message.serverTime;
           annotations.reset();
           collaborationReadyRef.current = true;
@@ -346,6 +372,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
           if (message.reconnectToken) {
             reconnectTokenRef.current = message.reconnectToken;
+            try { saveRoomSession(roomId, { ...storedSession, peerId, reconnectToken: message.reconnectToken }); } catch { /* in-memory recovery remains available */ }
           }
           cancelPendingRecovery();
           statsCollector.resetAdaptation();
@@ -468,6 +495,23 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             void peerManager.handleSignal(from, data);
           }
         } else if (message.type === 'error') {
+          if (['REMOVED', 'ROOM_NOT_FOUND', 'ROOM_LOCKED', 'UNAUTHORIZED_HOST', 'UNAUTHORIZED_RECONNECT', 'ROOM_FULL'].includes(message.code || '')) {
+            terminalSessionRef.current = true;
+            setSessionEnded(true);
+            clearRoomSession(roomId);
+            stopSharing();
+            statsCollector.stop();
+            peerManager.dispose();
+            collaborationReadyRef.current = false;
+            annotations.reset();
+            stageSelectionPublisher.cancel();
+            for (const timer of followExpiryTimers.values()) clearTimeout(timer);
+            followExpiryTimers.clear();
+            dispatchFollow({ type: 'reset' });
+            setParticipants([]);
+            setParticipantCount(0);
+            setRoomState({ hostPeerId: null, hostConnected: false, locked: false, revision: 0 });
+          }
           logger.log('signal-server-error', { message: message.message });
           if (!message.message.includes('não encontrado')) {
             setErrorMessage(message.message);
@@ -587,7 +631,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   }, [annotations, stageSelectionPublisher]);
 
   const startSharing = useCallback(async () => {
-    if (captureStateRef.current !== 'idle') return;
+    if (terminalSessionRef.current || captureStateRef.current !== 'idle') return;
     setQualityNotice(null);
     transition('requesting');
     const generation = ++captureGenerationRef.current;
@@ -1056,6 +1100,21 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   };
 
   return {
+    roomState,
+    sessionEnded,
+    isHost: roomState.hostPeerId === localPeerRef.current && connectionStatus === 'connected',
+    moderationPending,
+    moderationFeedback,
+    moderate: (action: 'lock' | 'unlock' | 'remove', targetPeerId?: string) => {
+      if (moderationRequestRef.current) return;
+      const requestId = crypto.randomUUID();
+      moderationRequestRef.current = requestId;
+      setModerationFeedback(null);
+      const sent = signalingRef.current?.send({ type: 'moderate-room', requestId, revision: roomState.revision, action, ...(targetPeerId ? { targetPeerId } : {}) });
+      setModerationPending(Boolean(sent));
+      if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
+    },
+    leaveRoom: () => { clearRoomSession(roomId); signalingRef.current?.disconnect(); },
     onVideoPresented: (peerId: string, stream: MediaStream) => {
       if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
         loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });

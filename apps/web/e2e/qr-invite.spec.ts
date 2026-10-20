@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect, Page } from '@playwright/test';
 
 async function enableShortcuts(page: Page) {
@@ -93,7 +94,7 @@ test.describe('F10 — Convites por QR Code', () => {
   });
 
   test('Abertura no estado sem transmissão ativa, preservando botão de cópia rápida', async ({ page }) => {
-    await page.goto('/room/e2e-qr-empty');
+    await gotoRoom(page, '/room/e2e-qr-empty');
     await expect(page.getByText('Nenhuma transmissão ativa')).toBeVisible();
     await expect(page.getByText('Conectado')).toBeVisible();
 
