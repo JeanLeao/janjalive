@@ -20,6 +20,19 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ---
 
+## Instalação como aplicativo (F33)
+
+Em um navegador compatível, acesse o Screen Room por HTTPS (ou localhost para
+testes) e use a opção nativa **Instalar aplicativo** do menu do navegador. Em
+dispositivos Apple compatíveis, use **Adicionar à Tela de Início** ou **Adicionar
+ao Dock**, conforme as opções disponíveis. O aplicativo instalado abre no lobby.
+
+A instalação não oferece funcionamento offline: criar e entrar em salas depende
+da conexão com o signaling. A captura de tela e áudio depende do suporte real do
+dispositivo e navegador. Salas e sessões continuam efêmeras; a instalação não as
+preserva permanentemente nem transfere credenciais entre a aba do navegador e o
+aplicativo. Fechar o aplicativo não garante recuperação posterior da sessão.
+
 ## Host efêmero e moderação (F11)
 
 **Criar sala** solicita a criação ao signaling por WebSocket (`create-room`). O servidor gera um código aleatório de 128 bits e uma credencial administrativa independente de 256 bits, mantidos somente em memória. O primeiro visitante não recebe autoridade. Uma criação não reivindicada expira após 60 segundos; se convidados já estiverem conectados, a sala continua sem administrador, com a credencial revogada. A criação respeita origens permitidas, o limite de mensagens e um limite adicional de 10 salas por minuto por IP (resolução via proxies confiáveis, sem confiar livremente em `X-Forwarded-For`). O mapa desse limite aceita até 10.000 IPs por janela.
