@@ -1,3 +1,4 @@
+import { useLocalClips } from './useLocalClips';
 import { readRoomSession, saveRoomSession, clearRoomSession } from '../signaling/room-session-storage';
 import type { RoomState } from '@screen-room/protocol';
 import { StageSelectionPublisher } from './stage-selection-publisher';
@@ -94,6 +95,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const pointingEnabledRef = useRef<boolean>(true);
   const [drawingEnabled, setDrawingEnabled] = useState<boolean>(false);
   const drawingEnabledRef = useRef<boolean>(false);
+  const clips = useLocalClips(roomId);
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
   const interactions = useRoomInteractions(roomId);
   const interactionsRef = useRef(interactions);
   interactionsRef.current = interactions;
@@ -347,6 +351,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           setModerationPending(false);
           moderationRequestRef.current = null;
           stageSelectionPublisher.cancel();
+          clipsRef.current.reset();
           interactionsRef.current.resetConnection();
           collaborationReadyRef.current = false;
           annotations.reset();
@@ -364,6 +369,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           setModerationPending(false);
           moderationRequestRef.current = null;
         }
+        clipsRef.current.receive(message, signaling);
         interactionsRef.current.receive(message);
         if (message.type === 'collaboration') {
           if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
@@ -572,6 +578,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
 
     return () => {
+      clipsRef.current.reset();
       isDisposed = true;
       stageSelectionPublisher.cancel();
       for (const timer of followExpiryTimers.values()) clearTimeout(timer);
@@ -971,6 +978,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     }));
   }, [participants, isSharing, remoteStreams, captureState, pointingEnabled, drawingEnabled]);
 
+  useEffect(() => {
+    clipsRef.current.validate(participantsWithSharing, localStream, remoteStreams, captureState, remoteConnectionStates);
+  }, [participantsWithSharing, localStream, remoteStreams, captureState, remoteConnectionStates]);
+
   // Applies the followed presenter's selection (or, once, their own stream) to the local highlight.
   useEffect(() => {
     const target = followTarget(follow, {
@@ -1048,6 +1059,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     if (!localStreamRef.current || switchRef.current) return;
     const nextMuted = !isAudioMuted;
     setStreamAudioMuted(localStreamRef.current, nextMuted);
+    clipsRef.current.syncTracks();
     setIsAudioMuted(nextMuted);
     if (sharingIdRef.current) signalingRef.current?.updateSharing({ active: true, paused: captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, drawingEnabled: drawingEnabledRef.current, hasAudio: true, audioMuted: nextMuted });
     loggerRef.current?.log('screen-audio', { muted: nextMuted });
@@ -1170,12 +1182,13 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setModerationPending(Boolean(sent));
       if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
     },
-    leaveRoom: () => { setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
+    leaveRoom: () => { clipsRef.current.reset(); setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
     onVideoPresented: (peerId: string, stream: MediaStream) => {
       if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
         loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });
       }
     },
+    clips,
     annotations, sendCollaboration,
     collaborationAvailable: connectionStatus === 'connected' && collaborationReadyRef.current,
     pointingEnabled,

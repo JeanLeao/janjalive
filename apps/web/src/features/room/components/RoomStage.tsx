@@ -38,6 +38,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  clipControls?: React.ReactNode;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
   onTogglePointingPermission?: () => void;
@@ -75,6 +76,7 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  clipControls,
   onVideoPresented,
   annotations,
   onTogglePointingPermission,
@@ -434,7 +436,7 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
-        {showAccess && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
+        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -574,6 +576,7 @@ export function RoomStage({
         {announceMessage}
       </Box>
       {interactions}
+      <Box style={{ position: 'absolute', top: 56, right: 14, zIndex: 30 }}>{clipControls}</Box>
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
         .comparison-panel { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; background: #000; display: flex; flex-direction: column; }
