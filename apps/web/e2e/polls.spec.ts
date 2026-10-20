@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect } from '@playwright/test';
 
 test('polls: presenting, voting, touch, keyboard, history, reconnect, Cinema and fullscreen', async ({ browser }) => {
@@ -28,7 +29,7 @@ test('polls: presenting, voting, touch, keyboard, history, reconnect, Cinema and
   const lateContext = await browser.newContext(); const late = await lateContext.newPage();
   const room = `/room/polls-${Date.now()}`;
   try {
-    await Promise.all([p.goto(room), v.goto(room)]);
+    await Promise.all([gotoRoom(p, room), gotoRoom(v, room)]);
     await expect(p.getByText('Conectado', { exact: true })).toBeVisible();
     await expect(v.getByRole('button', { name: 'Levantar mão', exact: true })).toBeEnabled();
     await v.getByRole('button', { name: 'Abrir chat', exact: true }).tap();
@@ -84,7 +85,7 @@ test('polls: presenting, voting, touch, keyboard, history, reconnect, Cinema and
     await expect(v.getByText('2 votos · Resultados ao vivo')).toBeVisible();
     await expect(v.getByRole('radio').first()).toBeChecked();
     // Late entry gets the open poll, without seeing results before voting.
-    await late.goto(room); await expect(late.getByText('Conectado', { exact: true })).toBeVisible();
+    await gotoRoom(late, room); await expect(late.getByText('Conectado', { exact: true })).toBeVisible();
     await late.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await late.getByRole('tab', { name: /Enquetes/ }).click();
     await expect(late.getByText('Vote para acompanhar os resultados ao vivo.')).toBeVisible();

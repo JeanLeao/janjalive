@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
@@ -7,6 +8,8 @@ import { createSignalServer } from '../dist/server.js';
 const state = (rooms, room = 'r') => rooms.handsSnapshot(room).hands;
 test('F38 authoritative order, duplicate/stale intent, abuse limits and media independence', () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
+  rooms.createRoom('other');
   for (const peer of ['a', 'b', 'c']) rooms.join('r', peer);
   rooms.join('other', 'x');
   assert.equal(rooms.setHand('r', 'x', true, 0, 0), false);
@@ -37,6 +40,7 @@ test('F38 authoritative order, duplicate/stale intent, abuse limits and media in
 
 test('F38 recovery privately preserves order/version/budget; voluntary exit and expiry discard hands', async () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'a'); rooms.join('r', 'b');
   const token = rooms.getReconnectToken('r', 'a');
   rooms.setHand('r', 'a', true, 0);
@@ -53,6 +57,7 @@ test('F38 recovery privately preserves order/version/budget; voluntary exit and 
   rooms.leave('r', 'a', false, 10); rooms.leave('r', 'b', true);
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(rooms.has('r'), false);
+  rooms.createRoom('r');
   rooms.join('r', 'a');
   assert.deepEqual(state(rooms), [{ peerId: 'a', order: null, version: 0 }]);
   rooms.leave('r', 'a', true);
@@ -76,32 +81,33 @@ async function connect(app, roomId, peerId, reconnectToken) {
 }
 test('F38 WebSocket snapshots synchronize joins, recovery, departure and isolation; stale sockets cannot write', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 200 });
-  await app.ready; t.after(() => app.close());
-  const a = await connect(app, 'r', 'a');
+  await app.ready;
+  const ids = await createTestRooms(app, ["r", "other"]); t.after(() => app.close());
+  const a = await connect(app, ids["r"], 'a');
   const peers = await a.next('peers'); await a.next('hands-snapshot');
   const original = [...app.wss.clients].find(s => s.meta?.peerId === 'a');
-  const b = await connect(app, 'r', 'b'); await b.next('hands-snapshot'); await a.next('hands-snapshot');
-  const other = await connect(app, 'other', 'x'); await other.next('hands-snapshot');
+  const b = await connect(app, ids["r"], 'b'); await b.next('hands-snapshot'); await a.next('hands-snapshot');
+  const other = await connect(app, ids["other"], 'x'); await other.next('hands-snapshot');
   a.send({ type: 'set-hand', raised: true, version: 0 });
   const raised = await a.next('hands-snapshot');
   assert.deepEqual(await b.next('hands-snapshot'), raised);
   assert.equal(raised.hands.find(h => h.peerId === 'a').order !== null, true);
   assert.equal(JSON.stringify(raised).includes(peers.reconnectToken), false);
-  const late = await connect(app, 'r', 'late');
+  const late = await connect(app, ids["r"], 'late');
   assert.deepEqual((await late.next('hands-snapshot')).hands.find(h => h.peerId === 'a'), raised.hands.find(h => h.peerId === 'a'));
   a.send({ type: 'set-hand', raised: false, version: 0 });
   assert.equal((await a.next('error')).code, 'HAND_REJECTED');
   a.send({ type: 'set-hand', raised: false, version: 1, peerId: 'b' }); await a.next('error');
-  const replacement = await connect(app, 'r', 'a', peers.reconnectToken);
+  const replacement = await connect(app, ids["r"], 'a', peers.reconnectToken);
   await replacement.next('hands-snapshot');
   original.emit('message', Buffer.from(JSON.stringify({ type: 'set-hand', raised: false, version: 1 })));
   replacement.ws.terminate();
   await b.next('hands-snapshot', e => !e.hands.some(h => h.peerId === 'a'));
-  const recovered = await connect(app, 'r', 'a', peers.reconnectToken);
+  const recovered = await connect(app, ids["r"], 'a', peers.reconnectToken);
   assert.deepEqual((await recovered.next('hands-snapshot')).hands.find(h => h.peerId === 'a'), raised.hands.find(h => h.peerId === 'a'));
   recovered.send({ type: 'leave' });
   await b.next('hands-snapshot', e => !e.hands.some(h => h.peerId === 'a'));
-  const fresh = await connect(app, 'r', 'a');
+  const fresh = await connect(app, ids["r"], 'a');
   assert.equal((await fresh.next('hands-snapshot')).hands.find(h => h.peerId === 'a').order, null);
   assert.equal(other.events.some(e => e.type === 'hands-snapshot'), false);
 });

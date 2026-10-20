@@ -1,3 +1,4 @@
+import type { RoomState } from '@screen-room/protocol';
 import React, { useRef, useEffect, useState } from 'react';
 import {
   Drawer,
@@ -28,6 +29,11 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface ParticipantsDrawerProps {
+  roomState?: RoomState;
+  isHost?: boolean;
+  moderationPending?: boolean;
+  moderationFeedback?: string | null;
+  onModerate?: (action: 'lock' | 'unlock' | 'remove', targetPeerId?: string) => void;
   opened: boolean;
   onClose: () => void;
   participants: RoomParticipant[];
@@ -41,6 +47,7 @@ export interface ParticipantsDrawerProps {
 }
 
 export function ParticipantsDrawer({
+  roomState, isHost = false, moderationPending = false, moderationFeedback, onModerate,
   opened,
   onClose,
   participants,
@@ -52,6 +59,19 @@ export function ParticipantsDrawer({
   onResumeFollowing,
   onStopFollowing,
 }: ParticipantsDrawerProps) {
+  const [removal, setRemoval] = useState<string | null>(null);
+  const moderationStatusRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (moderationFeedback && opened && isHost) moderationStatusRef.current?.focus(); }, [moderationFeedback, opened, isHost]);
+  const cancelRemovalRef = useRef<HTMLButtonElement>(null);
+  const removeButtonsRef = useRef(new Map<string, HTMLButtonElement>());
+  const previousRemovalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!removal && previousRemovalRef.current) removeButtonsRef.current.get(previousRemovalRef.current)?.focus();
+    previousRemovalRef.current = removal;
+  }, [removal]);
+  useEffect(() => { if (removal) cancelRemovalRef.current?.focus(); }, [removal]);
+  useEffect(() => { if (!opened || !isHost || !participants.some(p => p.peerId === removal)) setRemoval(null); }, [opened, isHost, participants, removal]);
+  const cancelRemoval = () => setRemoval(null);
   const [isEditingNick, setIsEditingNick] = useState(false);
   const [nickDraft, setNickDraft] = useState(currentNickname);
   const [copied, setCopied] = useState(false);
@@ -94,7 +114,7 @@ export function ParticipantsDrawer({
     <Drawer
       opened={opened}
       onClose={onClose}
-      closeOnEscape={!isEditingNick}
+      closeOnEscape={!isEditingNick && !removal}
       position="right"
       size="sm"
       withCloseButton={false}
@@ -164,6 +184,17 @@ export function ParticipantsDrawer({
         .participants-follow-action .mantine-Button-label { white-space: normal; text-align: left; overflow-wrap: anywhere; }
         .participants-follow-action:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
       `}</style>
+      {roomState && <Box px="xl" py="md" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <Text size="sm" fw={600}>{roomState.locked ? 'Sala bloqueada' : 'Entradas abertas'}</Text>
+        <Text size="xs" c="#8c959f" mt={4}>
+          {!roomState.hostPeerId ? 'Sala sem administrador. Novas entradas permanecem abertas.' : !roomState.hostConnected ? 'Host desconectado. Autoridade reservada por até 30 segundos.' : isHost ? 'Você é o host desta sala.' : 'Somente o host pode moderar a sala.'}
+        </Text>
+        {isHost && <Button variant="default" fullWidth mt="sm" mih={44} disabled={moderationPending}
+          onClick={() => onModerate?.(roomState.locked ? 'unlock' : 'lock')}>
+          {roomState.locked ? 'Desbloquear entradas' : 'Bloquear entradas'}
+        </Button>}
+        {moderationFeedback && <Text ref={moderationStatusRef} tabIndex={-1} size="sm" mt="sm" role="status">{moderationFeedback}</Text>}
+      </Box>}
       {/* Participants List */}
       <Box style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem' }}>
         <Stack gap="xs">
@@ -189,6 +220,7 @@ export function ParticipantsDrawer({
                   border: '1px solid rgba(255, 255, 255, 0.05)',
                 }}
               >
+                {roomState?.hostPeerId === part.peerId && <Text size="xs" c="#93c5fd" fw={600} mb={4}>Host</Text>}
                 {part.handOrder != null && <Group gap={6} mb={4} c="#93c5fd"><IconHand size={14} aria-hidden /><Text size="xs">Mão levantada</Text></Group>}
                 <Group gap="sm" style={{ flex: 1, minWidth: 0 }}>
                   <Box
@@ -306,6 +338,20 @@ export function ParticipantsDrawer({
                     )}
                   </Box>
                 </Group>
+                {isHost && !part.isLocal && part.peerId !== roomState?.hostPeerId && (
+                  removal === part.peerId ? <Box mt="sm" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); cancelRemoval(); } }}>
+                    <Text size="sm">Remover {displayName} da sala?</Text>
+                    <Text size="xs" c="#8c959f" mt={4}>A sessão será encerrada. Em uma sala aberta, a pessoa poderá entrar novamente.</Text>
+                    <Group gap="xs" mt="xs">
+                      <Button ref={cancelRemovalRef} variant="default" mih={44} onClick={cancelRemoval}>Cancelar</Button>
+                      <Button color="red" mih={44} disabled={moderationPending} onClick={() => {
+                        onModerate?.('remove', part.peerId); setRemoval(null);
+                      }}>Confirmar remoção</Button>
+                    </Group>
+                  </Box> : <Button variant="subtle" color="red" size="compact-xs" mih={44} mt={4} disabled={moderationPending}
+                    ref={element => { if (element) removeButtonsRef.current.set(part.peerId, element); else removeButtonsRef.current.delete(part.peerId); }}
+                    aria-label={`Remover ${displayName}`} onClick={() => setRemoval(part.peerId)}>Remover</Button>
+                )}
                 {part.peerId === followPresenterId ? <Box mt={8}>
                   <Text size="xs" c="#8c959f" role="status" data-follow-status={followStatus}>{statusLabel}</Text>
                   {followActions}

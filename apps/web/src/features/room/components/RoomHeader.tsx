@@ -23,6 +23,7 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface RoomHeaderProps {
+  locked?: boolean;
   roomId: string;
   participantCount: number;
   raisedHandCount?: number;
@@ -36,6 +37,7 @@ export interface RoomHeaderProps {
 }
 
 export function RoomHeader({
+  locked = false,
   roomId,
   participantCount,
   raisedHandCount = 0,
@@ -234,6 +236,7 @@ export function RoomHeader({
           </Box>
         </Tooltip>
 
+        {locked && <Text size="xs" c="#fcd34d" fw={600} role="status">Bloqueada</Text>}
         {interactions}
 
         {/* Participant cluster button */}

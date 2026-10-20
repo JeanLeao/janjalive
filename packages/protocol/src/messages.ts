@@ -294,6 +294,7 @@ export const JoinMessageSchema = z.object({
   peerId: z.string().min(1),
   nickname: z.string().trim().min(1).max(32).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
+  hostCredential: z.string().min(1).max(128).optional(),
 });
 export type JoinMessage = z.infer<typeof JoinMessageSchema>;
 
@@ -315,6 +316,29 @@ export const LeaveMessageSchema = z.object({
 });
 export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
+export const RoomStateSchema = z.object({
+  hostPeerId: z.string().nullable(),
+  hostConnected: z.boolean(),
+  locked: z.boolean(),
+  revision: z.number().int().nonnegative(),
+}).strict();
+export type RoomState = z.infer<typeof RoomStateSchema>;
+export const CreateRoomSchema = z.object({ type: z.literal('create-room') }).strict();
+export const ModerateRoomSchema = z.object({
+  type: z.literal('moderate-room'),
+  requestId: z.string().min(1).max(80),
+  revision: z.number().int().nonnegative(),
+  action: z.enum(['lock', 'unlock', 'remove']),
+  targetPeerId: z.string().min(1).max(80).optional(),
+}).strict();
+export const RoomCreatedSchema = z.object({
+  type: z.literal('room-created'), roomId: z.string(), hostCredential: z.string().min(1).max(128),
+}).strict();
+export const RoomStateMessageSchema = z.object({ type: z.literal('room-state'), state: RoomStateSchema }).strict();
+export const ModerationResultSchema = z.object({
+  type: z.literal('moderation-result'), requestId: z.string(), ok: z.boolean(), message: z.string(),
+}).strict();
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
@@ -325,6 +349,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   UpdateQuestionBaseSchema,
   SendChatSchema,
   SendReactionSchema,
+  CreateRoomSchema, ModerateRoomSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
   SelectStageMessageSchema,
@@ -355,6 +380,7 @@ export const PeersMessageSchema = z.object({
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
+  roomState: RoomStateSchema.optional(),
   reservedPeers: z.array(ReservedPeerInfoSchema).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
 });
@@ -392,6 +418,9 @@ export const RelayedSignalMessageSchema = z.object({
 export type RelayedSignalMessage = z.infer<typeof RelayedSignalMessageSchema>;
 
 export const WS_CLOSE_CODES = {
+  ROOM_NOT_FOUND: 4404,
+  ROOM_LOCKED: 4423,
+  REMOVED: 4408,
   NORMAL: 1000,
   POLICY_VIOLATION: 1008,
   SUPERSEDED: 4000,
@@ -401,6 +430,7 @@ export const WS_CLOSE_CODES = {
 } as const;
 
 export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([
+  WS_CLOSE_CODES.ROOM_NOT_FOUND, WS_CLOSE_CODES.ROOM_LOCKED, WS_CLOSE_CODES.REMOVED,
   WS_CLOSE_CODES.NORMAL,
   WS_CLOSE_CODES.POLICY_VIOLATION,
   WS_CLOSE_CODES.SUPERSEDED,
@@ -421,6 +451,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  RoomCreatedSchema, RoomStateMessageSchema, ModerationResultSchema,
   PollsSnapshotSchema, PollAcceptedSchema,
   HandsSnapshotSchema,
   QuestionsSnapshotSchema,

@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect } from '@playwright/test';
 
 test('chat and reactions without media: bidirectional, unread, late join, mobile and cleanup', async ({ browser }) => {
@@ -7,7 +8,7 @@ test('chat and reactions without media: bidirectional, unread, late join, mobile
   const late = await browser.newPage();
   try {
     await a.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Ana'));
-    await Promise.all([a.goto('/room/e2e-interactions'), b.goto('/room/e2e-interactions')]);
+    await Promise.all([gotoRoom(a, '/room/e2e-interactions'), gotoRoom(b, '/room/e2e-interactions')]);
     await expect(a.getByText('2', { exact: true }).first()).toBeVisible();
     await a.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await a.getByRole('textbox', { name: 'Mensagem', exact: true }).fill('<b>Olá</b>');
@@ -107,12 +108,12 @@ test('chat and reactions without media: bidirectional, unread, late join, mobile
     await expect(a.getByTestId('reaction-event').getByText('👎')).toBeVisible();
 
     await expect(a.getByTestId('reaction-event')).toHaveCount(0, { timeout: 6000 });
-    await late.goto('/room/e2e-interactions');
+    await gotoRoom(late, '/room/e2e-interactions');
     await late.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await expect(late.getByRole('log').locator('article')).toHaveCount(0);
     await b.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await expect(b.getByRole('log').locator('article')).toHaveCount(2);
-    await a.goto('/room/e2e-new-interactions');
+    await gotoRoom(a, '/room/e2e-new-interactions');
     await a.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await expect(a.getByRole('log').locator('article')).toHaveCount(0);
   } finally { await contextA.close(); await contextB.close(); await late.close(); }
@@ -166,7 +167,7 @@ test('reconnection preserves accepted chat without replay; rejection keeps the d
   });
   const page = await context.newPage();
   try {
-    await page.goto('/room/e2e-interactions-recovery');
+    await gotoRoom(page, '/room/e2e-interactions-recovery');
     await expect(page.getByText('Conectado', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     const input = page.getByRole('textbox', { name: 'Mensagem', exact: true });
@@ -237,9 +238,9 @@ test('F38 Q&A: questions without stream, ordering, multiple presenters, answers,
     await viewer.addInitScript(() => sessionStorage.setItem('screen_room_display_name', 'Clara'));
 
     await Promise.all([
-      presA.goto('/room/e2e-f38-qa'),
-      presB.goto('/room/e2e-f38-qa'),
-      viewer.goto('/room/e2e-f38-qa'),
+      gotoRoom(presA, '/room/e2e-f38-qa'),
+      gotoRoom(presB, '/room/e2e-f38-qa'),
+      gotoRoom(viewer, '/room/e2e-f38-qa'),
     ]);
     await expect(presA.getByText('3', { exact: true }).first()).toBeVisible();
 
@@ -399,7 +400,7 @@ test('F38 Q&A: questions without stream, ordering, multiple presenters, answers,
     await presA.getByRole('button', { name: /Sair do Modo Cinema/ }).click();
 
     // 4. Late joiner receives full synchronized Q&A snapshot
-    await late.goto('/room/e2e-f38-qa');
+    await gotoRoom(late, '/room/e2e-f38-qa');
     await expect(late.getByText('Conectado', { exact: true })).toBeVisible();
     await late.getByRole('button', { name: 'Abrir chat', exact: true }).click();
     await late.getByRole('tab', { name: /^Perguntas/ }).click();

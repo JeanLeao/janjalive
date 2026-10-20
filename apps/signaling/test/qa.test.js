@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +9,7 @@ import { createSignalServer } from '../dist/server.js';
 
 test('F38 RoomRegistry: ordering (open before answered), presenter permissions, author withdraw, multiple presenters, limits and lifecycle', async () => {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   rooms.join('r', 'viewer1', 'Vitor');
   rooms.join('r', 'viewer2', 'Clara');
   rooms.join('r', 'pres1', 'Ana');
@@ -143,6 +145,7 @@ test('F38 RoomRegistry: ordering (open before answered), presenter permissions, 
   assert.equal(rooms.questionsSnapshot('r').questions.length > 0, true);
   await new Promise(resolve => setTimeout(resolve, 60));
   assert.equal(rooms.has('r'), false);
+  rooms.createRoom('r');
   rooms.join('r', 'fresh');
   assert.equal(rooms.questionsSnapshot('r').questions.length, 0);
 });
@@ -171,17 +174,18 @@ async function connect(app, roomId, peerId, nickname, reconnectToken) {
 test('F38 WebSocket server: synchronization, late join, reconnect, duplicate requestId rejection, and room isolation', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', recoveryGraceMs: 200 });
   await app.ready;
+  const ids = await createTestRooms(app, ["qa-room", "other-room"]);
   t.after(() => app.close());
 
-  const pres = await connect(app, 'qa-room', 'pres', 'Apresentadora');
+  const pres = await connect(app, ids["qa-room"], 'pres', 'Apresentadora');
   const presPeers = await pres.next('peers');
   await pres.next('questions-snapshot');
 
-  const viewer = await connect(app, 'qa-room', 'viewer', 'Participante');
+  const viewer = await connect(app, ids["qa-room"], 'viewer', 'Participante');
   await viewer.next('peers');
   await viewer.next('questions-snapshot');
 
-  const otherRoom = await connect(app, 'other-room', 'outsider', 'Outro');
+  const otherRoom = await connect(app, ids["other-room"], 'outsider', 'Outro');
   await otherRoom.next('peers');
   await otherRoom.next('questions-snapshot');
 
@@ -227,7 +231,7 @@ test('F38 WebSocket server: synchronization, late join, reconnect, duplicate req
   assert.equal(answeredSnap.questions[0].answer?.text, 'Cerca de 35ms em rede local.');
 
   // Late joiner receives full current Q&A snapshot
-  const late = await connect(app, 'qa-room', 'late', 'Atrasado');
+  const late = await connect(app, ids["qa-room"], 'late', 'Atrasado');
   const lateSnap = await late.next('questions-snapshot');
   assert.equal(lateSnap.highlightedQuestionId, qId);
   assert.equal(lateSnap.questions.length, 1);
@@ -236,7 +240,7 @@ test('F38 WebSocket server: synchronization, late join, reconnect, duplicate req
   // Presenter disconnects involuntarily and reconnects with token -> state intact
   pres.ws.terminate();
   await new Promise(resolve => setTimeout(resolve, 30));
-  const presRecovered = await connect(app, 'qa-room', 'pres', 'Apresentadora', presPeers.reconnectToken);
+  const presRecovered = await connect(app, ids["qa-room"], 'pres', 'Apresentadora', presPeers.reconnectToken);
   const recSnap = await presRecovered.next('questions-snapshot');
   assert.equal(recSnap.questions.length, 1);
   assert.equal(recSnap.highlightedQuestionId, qId);

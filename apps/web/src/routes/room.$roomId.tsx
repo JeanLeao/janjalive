@@ -2,7 +2,7 @@ import { InteractionActions, InteractionLayer, useInteractionsUi } from '../feat
 import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
-import { Box, Alert } from '@mantine/core';
+import { Box, Alert, Button } from '@mantine/core';
 import { useRoomSession } from '../features/room/hooks/useRoomSession';
 import { RoomHeader } from '../features/room/components/RoomHeader';
 import { RoomStage } from '../features/room/components/RoomStage';
@@ -209,12 +209,14 @@ function RoomPage() {
     const current = session.connectionStatus;
     prevConnectionStatusRef.current = current;
 
-    if (prev === 'connected' && (current === 'disconnected' || current === 'error')) {
+    if (session.sessionEnded) {
+      setConnectionAnnouncement('Sessão encerrada.');
+    } else if (prev === 'connected' && (current === 'disconnected' || current === 'error')) {
       setConnectionAnnouncement('Conexão perdida. Tentando reconectar…');
     } else if ((prev === 'disconnected' || prev === 'error') && current === 'connected') {
       setConnectionAnnouncement('Conexão restabelecida.');
     }
-  }, [session.connectionStatus]);
+  }, [session.connectionStatus, session.sessionEnded]);
 
   const handleOpenOrFocusInteractions = useCallback(() => {
     if (!interactionsUi.opened) {
@@ -232,6 +234,7 @@ function RoomPage() {
 
   const handleLeave = () => {
     session.stopSharing();
+    session.leaveRoom();
     navigate({ to: '/' });
   };
 
@@ -327,7 +330,7 @@ function RoomPage() {
           <Alert
             color="red"
             variant="filled"
-            withCloseButton
+            withCloseButton={!session.sessionEnded}
             onClose={session.clearError}
             styles={{
               root: {
@@ -339,6 +342,7 @@ function RoomPage() {
             }}
           >
             {session.errorMessage}
+            {session.sessionEnded && <Button variant="white" color="dark" mih={44} fullWidth mt="sm" onClick={handleLeave}>Voltar ao início</Button>}
           </Alert>
         </Box>
       )}
@@ -346,6 +350,7 @@ function RoomPage() {
       {/* Header */}
       {!isCinema && (
         <RoomHeader
+          locked={session.roomState.locked}
           roomId={roomId}
           raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
           participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}
@@ -446,6 +451,11 @@ function RoomPage() {
 
       {/* Right Drawer: Participants */}
       <ParticipantsDrawer
+        roomState={isDemo ? undefined : session.roomState}
+        isHost={session.isHost}
+        moderationPending={session.moderationPending}
+        moderationFeedback={session.moderationFeedback}
+        onModerate={session.moderate}
         opened={isParticipantsOpen}
         onClose={() => setIsParticipantsOpen(false)}
         participants={isDemo && demoParticipants ? demoParticipants : session.participants}
