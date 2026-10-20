@@ -48,6 +48,7 @@ export interface RoomKeyStatus {
   error: string | null;
   rateLimited: boolean;
   submitting?: boolean;
+  retryAt?: number;
 }
 
 export interface UseRoomSessionOptions {
@@ -65,6 +66,16 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [moderationPending, setModerationPending] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const terminalSessionRef = useRef(false);
+  useEffect(() => {
+    if (!enabled || sessionEnded || !keyStatus?.retryAt) return;
+    const timer = setTimeout(() => {
+      setKeyStatus(prev => prev && prev.retryAt === keyStatus.retryAt
+        ? { ...prev, rateLimited: false, retryAt: undefined, error: 'Você já pode tentar novamente.' }
+        : prev);
+    }, Math.max(0, keyStatus.retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [enabled, sessionEnded, roomId, keyStatus?.retryAt]);
+
   const moderationRequestRef = useRef<string | null>(null);
   useEffect(() => {
     if (!moderationPending) return;
@@ -511,6 +522,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
               required: true,
               error: message.code === 'KEY_REQUIRED' ? null : message.message,
               rateLimited: message.code === 'KEY_RATE_LIMIT',
+              retryAt: message.code === 'KEY_RATE_LIMIT' ? Date.now() + 60_000 : undefined,
               submitting: false,
             });
             logger.log('signal-server-error', { code: message.code, message: message.message });
@@ -1129,6 +1141,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     isHost: roomState.hostPeerId === localPeerRef.current && connectionStatus === 'connected',
     keyStatus,
     submitRoomKey: (key: string) => {
+      if (keyStatus?.rateLimited || keyStatus?.submitting || sessionEnded) return;
       const trimmed = key.trim();
       providedKeyRef.current = trimmed;
       setKeyStatus((prev) => ({
@@ -1157,7 +1170,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setModerationPending(Boolean(sent));
       if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
     },
-    leaveRoom: () => { clearRoomSession(roomId); signalingRef.current?.disconnect(); },
+    leaveRoom: () => { setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
     onVideoPresented: (peerId: string, stream: MediaStream) => {
       if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
         loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });

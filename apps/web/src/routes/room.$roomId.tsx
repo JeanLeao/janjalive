@@ -691,6 +691,11 @@ function RoomPage() {
                 }}
               />
 
+              <Text size="sm" role="status" aria-live="polite">
+                {session.keyStatus?.retryAt
+                  ? `Tente novamente após ${new Date(session.keyStatus.retryAt).toLocaleTimeString()}.`
+                  : session.keyStatus?.error === 'Você já pode tentar novamente.' ? session.keyStatus.error : ''}
+              </Text>
               <Group justify="space-between" mt="xs">
                 <Button
                   variant="subtle"

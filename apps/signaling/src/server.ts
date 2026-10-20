@@ -1,3 +1,4 @@
+import { KeyRateLimiter } from './key-rate-limiter.js';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -221,52 +222,10 @@ export function createSignalServer({
   const allowedList = parseAllowedOrigins(allowedOrigins);
   const trustedProxiesList = parseTrustedProxies(process.env.TRUSTED_PROXIES, trustedProxies);
 
-  interface KeyRateLimitEntry {
-    failures: number;
-    resetTime: number;
-    lockedUntil?: number;
-  }
-  const keyRateLimitMap = new Map<string, KeyRateLimitEntry>();
-  const KEY_RATE_LIMIT_MAX_FAILURES = 5;
-  const KEY_RATE_LIMIT_WINDOW_MS = 60_000;
-  const KEY_RATE_LIMIT_LOCKOUT_MS = 60_000;
-  const KEY_RATE_LIMIT_MAX_ENTRIES = 5000;
-
-  function isKeyRateLimited(ip: string, roomId: string): boolean {
-    const now = Date.now();
-    const key = `${ip}:${roomId}`;
-    const entry = keyRateLimitMap.get(key);
-    if (!entry) return false;
-    if (entry.lockedUntil && now < entry.lockedUntil) return true;
-    if (now > entry.resetTime) {
-      keyRateLimitMap.delete(key);
-      return false;
-    }
-    return entry.failures >= KEY_RATE_LIMIT_MAX_FAILURES;
-  }
-
-  function recordKeyFailure(ip: string, roomId: string): void {
-    const now = Date.now();
-    const key = `${ip}:${roomId}`;
-    if (keyRateLimitMap.size >= KEY_RATE_LIMIT_MAX_ENTRIES) {
-      for (const [k, v] of keyRateLimitMap.entries()) {
-        if (now > (v.lockedUntil ?? v.resetTime)) keyRateLimitMap.delete(k);
-      }
-    }
-    const entry = keyRateLimitMap.get(key);
-    if (!entry || now > entry.resetTime) {
-      keyRateLimitMap.set(key, { failures: 1, resetTime: now + KEY_RATE_LIMIT_WINDOW_MS });
-      return;
-    }
-    entry.failures++;
-    if (entry.failures >= KEY_RATE_LIMIT_MAX_FAILURES) {
-      entry.lockedUntil = now + KEY_RATE_LIMIT_LOCKOUT_MS;
-    }
-  }
-
-  function clearKeyRateLimit(ip: string, roomId: string): void {
-    keyRateLimitMap.delete(`${ip}:${roomId}`);
-  }
+  const keyRateLimiter = new KeyRateLimiter();
+  const isKeyRateLimited = (ip: string, roomId: string) => keyRateLimiter.isLimited(`${ip}:${roomId}`);
+  const recordKeyFailure = (ip: string, roomId: string) => keyRateLimiter.recordFailure(`${ip}:${roomId}`);
+  const clearKeyRateLimit = (ip: string, roomId: string) => keyRateLimiter.clear(`${ip}:${roomId}`);
 
   const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);

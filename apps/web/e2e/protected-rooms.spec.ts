@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 for (const mobile of [false, true]) {
   test(`F12: protected room creation, creator key modal, visitor key prompt and admission (${mobile ? 'mobile' : 'desktop'})`, async ({ browser }) => {
+    test.setTimeout(150_000);
     const hostContext = await browser.newContext({
       viewport: mobile ? { width: 360, height: 800 } : { width: 1440, height: 1000 },
       hasTouch: mobile,
@@ -66,6 +67,27 @@ for (const mobile of [false, true]) {
 
     // Expect error feedback
     await expect(guest.getByText('Chave de acesso incorreta')).toBeVisible();
+
+    // Five failures lock subsequent attempts; recovery requires a manual submission.
+    for (let attempt = 1; attempt < 5; attempt++) {
+      await expect(visitorKeyInput).toBeEnabled();
+      await visitorKeyInput.fill(`wrong-access-key-${attempt}`);
+      await visitorModal.getByTestId('submit-room-key-btn').click();
+      await expect(guest.getByText('Chave de acesso incorreta')).toBeVisible();
+      await expect(visitorKeyInput).toBeEnabled();
+    }
+    await visitorModal.getByTestId('submit-room-key-btn').click();
+    await expect(visitorKeyInput).toBeDisabled();
+    await expect(visitorModal.getByTestId('submit-room-key-btn')).toBeDisabled();
+    await expect(visitorModal.getByRole('status')).toContainText('Tente novamente após');
+    let joins = 0;
+    guest.on('websocket', socket => socket.on('framesent', event => {
+      if (typeof event.payload === 'string' && JSON.parse(event.payload).type === 'join') joins++;
+    }));
+    await expect(visitorKeyInput).toBeEnabled({ timeout: 65_000 });
+    await expect(visitorModal.getByRole('status')).toContainText('Você já pode tentar novamente.');
+    expect(joins).toBe(0);
+    await expect(visitorModal).toBeVisible();
 
     // Visitor enters valid key
     await visitorKeyInput.fill(generatedKey);
