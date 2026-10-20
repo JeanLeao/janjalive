@@ -118,3 +118,72 @@ test('F11: removal stops pending capture and prevents automatic recovery', async
     expect(await guest.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('screen_room_session:')).length)).toBe(0);
   } finally { await a.close(); await b.close(); }
 });
+
+
+test('F11: history navigation discards revoked sessions while reload and socket loss recover the host', async ({ browser }) => {
+  const hostContext = await browser.newContext(), guestContext = await browser.newContext();
+  const host = await hostContext.newPage(), guest = await guestContext.newPage();
+  try {
+    await hostContext.addInitScript(() => {
+      const NativeSocket = window.WebSocket;
+      (window as any).f11Sockets = [];
+      window.WebSocket = class extends NativeSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          (window as any).f11Sockets.push(this);
+        }
+      };
+    });
+    await host.goto('/');
+    await host.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent?.includes('Criar sala') && Object.keys(button).some(key => key.startsWith('__reactProps'))));
+    await host.getByRole('button', { name: 'Criar sala', exact: true }).click();
+    await expect(host).toHaveURL(/\/room\/[a-f0-9]{32}$/);
+    const invite = host.url();
+    const storageKey = `screen_room_session:${new URL(invite).pathname.split('/').pop()}`;
+    // Put the home route behind the guest's room entry without reloading the document.
+    await guest.goto('/');
+    await guest.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent?.includes('Criar sala') && Object.keys(button).some(key => key.startsWith('__reactProps'))));
+    await guest.evaluate(url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); }, invite);
+    const count = (page: typeof host, n: number) => page.getByRole('button', { name: `Ver participantes (${n})`, exact: true }).first();
+    await expect(count(host, 2)).toBeVisible();
+    const assertHost = async () => {
+      await host.getByRole('button', { name: /Ver participantes/ }).first().click();
+      await expect(host.getByText('Você é o host desta sala.', { exact: true })).toBeVisible();
+      await host.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+    };
+    await assertHost();
+    await host.reload();
+    await expect(count(host, 2)).toBeVisible();
+    await assertHost();
+    await host.evaluate(() => {
+      (window as any).f11Sockets.filter((socket: WebSocket) => socket.readyState === 1 && socket.url.includes('/signal')).forEach((socket: WebSocket) => socket.close(4001));
+    });
+    await expect(count(guest, 1)).toBeVisible();
+    await expect(count(guest, 2)).toBeVisible();
+    await expect(count(host, 2)).toBeVisible();
+    await assertHost();
+
+    await guest.goBack();
+    await expect(guest).toHaveURL(/\/$/);
+    await expect(count(host, 1)).toBeVisible();
+    expect(await guest.evaluate(key => sessionStorage.getItem(key) === null, storageKey)).toBe(true);
+    await guest.goForward();
+    await expect(count(guest, 2)).toBeVisible();
+
+    await host.goBack();
+    await expect(host).toHaveURL(/\/$/);
+    await expect(count(guest, 1)).toBeVisible();
+    expect(await host.evaluate(key => sessionStorage.getItem(key) === null, storageKey)).toBe(true);
+    await host.goForward();
+    await expect(count(host, 2)).toBeVisible();
+    await host.getByRole('button', { name: /Ver participantes/ }).first().click();
+    const drawer = host.getByRole('dialog', { name: 'Participantes', exact: true });
+    await expect(drawer.getByText('Sala sem administrador. Novas entradas permanecem abertas.')).toBeVisible();
+    await expect(drawer.getByText('Você é o host desta sala.', { exact: true })).toHaveCount(0);
+    await expect(drawer.getByRole('button', { name: /^Remover |Bloquear entradas/ })).toHaveCount(0);
+    await host.reload();
+    await expect(count(host, 2)).toBeVisible();
+    await host.getByRole('button', { name: /Ver participantes/ }).first().click();
+    await expect(drawer.getByText('Você é o host desta sala.', { exact: true })).toHaveCount(0);
+  } finally { await hostContext.close(); await guestContext.close(); }
+});

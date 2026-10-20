@@ -576,6 +576,9 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       unsubscribeLogger();
       statsCollector.stop();
       peerManager.dispose();
+      // Route/effect teardown is a voluntary departure, just like leaveRoom.
+      // Document reload and involuntary socket loss do not run this cleanup.
+      clearRoomSession(roomId);
       signaling.disconnect();
     };
   }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery]);
