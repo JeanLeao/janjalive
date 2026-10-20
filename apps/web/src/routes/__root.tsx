@@ -23,6 +23,8 @@ export const Route = createRootRoute({
       { title: 'Screen Room — compartilhamento em tempo real' },
     ],
     links: [
+      { rel: 'manifest', href: '/manifest.webmanifest' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180' },
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
       { rel: 'alternate icon', href: '/favicon.ico' },
     ],
