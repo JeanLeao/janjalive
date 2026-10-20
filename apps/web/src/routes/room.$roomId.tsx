@@ -1,3 +1,4 @@
+import { AudioOutputProvider } from '../features/room/hooks/AudioOutput';
 import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
 import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -21,6 +22,11 @@ export const Route = createFileRoute('/room/$roomId')({
 });
 
 function RoomPage() {
+  const { roomId } = useParams({ from: '/room/$roomId' });
+  return <AudioOutputProvider key={roomId}><RoomPageContent /></AudioOutputProvider>;
+}
+
+function RoomPageContent() {
   const { roomId } = useParams({ from: '/room/$roomId' });
   const navigate = useNavigate();
 
