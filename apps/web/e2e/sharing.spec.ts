@@ -2863,8 +2863,9 @@ test('F16 original source in Compare, Cinema, fullscreen, source switch and sign
     await host.getByRole('button', { name: 'Tela cheia', exact: true }).click();
     await host.getByRole('button', { name: /^Clipes/ }).click();
     await expect(preview).toBeVisible();
+    await expect(host.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
     expect(await preview.evaluate(v => document.fullscreenElement?.contains(v))).toBe(true);
-    await host.screenshot({ path: test.info().outputPath('f16-compare-fullscreen.png') });
+    await host.screenshot({ path: test.info().outputPath('f16-compare-fullscreen.png'), animations: 'disabled' });
     await host.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
     await host.keyboard.press('Escape');
     await host.evaluate(async () => { if (document.fullscreenElement) await document.exitFullscreen(); });
@@ -2889,10 +2890,10 @@ test('F16 original source in Compare, Cinema, fullscreen, source switch and sign
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
 
-for (const width of [1280, 390]) test(`F16 recording source A stays identified and exported after selecting B at ${width}px`, async ({ browser }) => {
+for (const width of [1280, 390, 320]) test(`F16 recording source A stays identified and exported after selecting B at ${width}px`, async ({ browser }) => {
   const contexts = await Promise.all([
     browser.newContext(), browser.newContext(),
-    browser.newContext({ viewport: { width, height: 844 }, hasTouch: width === 390 }),
+    browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 400 }),
   ]);
   try {
     const a = await contexts[0].newPage(), b = await contexts[1].newPage(), viewer = await contexts[2].newPage();
@@ -2920,7 +2921,7 @@ for (const width of [1280, 390]) test(`F16 recording source A stays identified a
     await viewer.keyboard.press('Escape');
     await primary.selectOption({ label: 'Fonte B' });
     await viewer.getByRole('button', { name: /● Gravando/ }).click();
-    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true }).first()).toBeVisible();
+    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true })).toHaveCount(1);
     await expect(viewer.getByText('Fonte do clipe: Fonte B', { exact: true })).toHaveCount(0);
     await expect(viewer.getByText('O apresentador ainda não permitiu gravar esta transmissão.')).toHaveCount(0);
     await expect(viewer.getByText('Gravação ativa: 2 de 60 segundos.', { exact: true })).toBeVisible();
@@ -2928,7 +2929,7 @@ for (const width of [1280, 390]) test(`F16 recording source A stays identified a
     await a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
-    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true }).first()).toBeVisible();
+    await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true })).toHaveCount(1);
     const downloadPromise = viewer.waitForEvent('download');
     await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).click();
     const download = await downloadPromise;
@@ -2955,9 +2956,16 @@ for (const width of [1280, 390]) test(`F16 recording source A stays identified a
     }, { encoded, mp4: download.suggestedFilename().endsWith('.mp4') });
     expect(pixel[1]).toBeGreaterThan(180); expect(pixel[0]).toBeLessThan(70); expect(pixel[2]).toBeLessThan(70);
     expect(await viewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const dropdownBox = await viewer.locator('[data-clip-controls] [role="dialog"], [data-clip-controls] .mantine-Popover-dropdown').first().boundingBox();
+    expect(dropdownBox!.x).toBeGreaterThanOrEqual(0);
+    expect(dropdownBox!.x + dropdownBox!.width).toBeLessThanOrEqual(width);
     await viewer.screenshot({ path: test.info().outputPath(`f16-fixed-source-${width}.png`) });
     await viewer.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
     await expect(viewer.getByText('Transmissão selecionada: Fonte B', { exact: true })).toBeVisible();
     await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
+    await viewer.keyboard.press('Escape');
+    const triggerBox = await viewer.getByRole('button', { name: /^Clipes/ }).boundingBox();
+    const railBox = await viewer.locator('.stage-view-controls').first().boundingBox();
+    expect(triggerBox!.y + triggerBox!.height).toBeLessThanOrEqual(railBox!.y);
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
