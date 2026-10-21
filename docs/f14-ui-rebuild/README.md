@@ -1,43 +1,11 @@
-# F14 — capturas da reconstrução visual
+# F14 — resumo da inspeção visual
 
-Aplicação real em Chromium com mídia sintética. Aprovação visual do proprietário pendente.
+A reconstrução visual recebeu aprovação explícita do proprietário para o HEAD `b2db2a2472028ff850823419867fb24a4ba8ec2d`, conforme o handoff de limpeza final do PR #38 em 21/10/2026. Merge e deploy não estão autorizados.
 
-[bright-player-1280](bright-player-1280.png)
+A inspeção ocorreu na aplicação real em Chromium, com mídia sintética, em 1280, 768, 390 e 320 px. Cobriu sala vazia, preparação, vídeo horizontal/vertical e claro/escuro, convite, transferência, controlador/espectador, zero/um/vários espectadores, participantes, confirmação, Cinema/fullscreen, chat, teclado/retorno de foco e toque emulado. Foram inspecionadas 75 capturas finais.
 
-[bright-player-320](bright-player-320.png)
+Os 20 PNGs selecionados para revisão foram retirados do versionamento, com cópias locais preservadas. Este documento mantém o resumo sem depender de links para imagens locais.
 
-[empty-1280](empty-1280.png)
+Validações anteriores: `pnpm typecheck`, `pnpm test` (366/366) e `pnpm build` passaram; F14 funcional/visual teve 9/9 E2E e as regressões direcionadas tiveram 35/35, totalizando 44 cenários distintos aprovados em rodadas separadas. Veja [validações, ocorrências e limitações](../../F14.md#validação-desta-reconstrução).
 
-[empty-320](empty-320.png)
-
-[end-confirmation-320](end-confirmation-320.png)
-
-[fullscreen-participants-1280](fullscreen-participants-1280.png)
-
-[fullscreen-participants-320](fullscreen-participants-320.png)
-
-[horizontal-paused-1280](horizontal-paused-1280.png)
-
-[horizontal-paused-390](horizontal-paused-390.png)
-
-[incumbent-participants-1280](incumbent-participants-1280.png)
-
-[incumbent-participants-320](incumbent-participants-320.png)
-
-[incumbent-room-desktop](incumbent-room-desktop.png)
-
-[incumbent-room-mobile](incumbent-room-mobile.png)
-
-[invitation-390](invitation-390.png)
-
-[participants-1280](participants-1280.png)
-
-[several-participants-1280](several-participants-1280.png)
-
-[several-participants-320](several-participants-320.png)
-
-[transfer-320](transfer-320.png)
-
-[vertical-320](vertical-320.png)
-
-[vertical-chat-desktop](vertical-chat-desktop.png)
+Chromium headless e toque emulado não comprovam permissões nativas, áudio real de aba/sistema, hardware móvel, leitores de tela, Safari/iOS/Firefox ou STUN/TURN entre redes. A limpeza documental não reexecutou a suíte da aplicação.
