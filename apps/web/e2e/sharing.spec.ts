@@ -2815,7 +2815,7 @@ test('F16 viewer consent, late join, revocation, pause and mobile keyboard contr
     await expect(viewer.getByRole('button', { name: /● Gravando/ })).toBeVisible();
     await gotoRoom(late, '/room/e2e-f16-consent');
     await expect(late.getByRole('button', { name: 'Clipes (1)', exact: true })).toBeVisible();
-    await expect(late.getByText(/gravando/, { exact: false })).toBeVisible();
+    await expect(late.getByText(/^● .* gravando /)).toBeVisible();
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
@@ -2968,4 +2968,59 @@ for (const width of [1280, 390, 320]) test(`F16 recording source A stays identif
     const railBox = await viewer.locator('.stage-view-controls').first().boundingBox();
     expect(triggerBox!.y + triggerBox!.height).toBeLessThanOrEqual(railBox!.y);
   } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+for (const mobile of [false, true]) test(`F16-C transient feedback and stable announcements ${mobile ? 'mobile' : 'desktop'}`, async ({ browser }) => {
+  const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, hasTouch: mobile });
+  try {
+    const page = await context.newPage();
+    await syntheticCapture(page);
+    await gotoRoom(page, `/room/f16-c-${mobile}`);
+    await startLive(page);
+    const controls = page.locator('[data-clip-controls]');
+    const live = controls.getByRole('status');
+    const trigger = controls.getByRole('button').first();
+    if (mobile) await trigger.tap(); else await trigger.click();
+    await page.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).check();
+    await expect(live).toContainText('Permissão de gravação atualizada.');
+    await page.keyboard.press('Escape');
+    await expect(controls.getByText('Permissão de gravação atualizada.', { exact: true })).toHaveCount(2);
+    await expect(live).toBeEmpty({ timeout: 12000 });
+    await expect(controls.getByText('Permissão de gravação atualizada.', { exact: true })).toHaveCount(0);
+    await trigger.press('Enter');
+    await page.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(live).toContainText('Gravação local ativa.');
+    await expect(controls.getByRole('timer')).toHaveAttribute('aria-live', 'off');
+    const announcement = await live.textContent();
+    await expect(controls.getByRole('timer')).toHaveText(/[2-9]s \/ 60s/);
+    expect(await live.textContent()).toBe(announcement);
+    await expect(trigger).toHaveAccessibleName('● Gravando');
+    await page.keyboard.press('Escape');
+    await expect(controls.getByText(/● Gravação local ativa/)).toBeVisible();
+    // Expiring event feedback must leave all persistent recording indicators intact.
+    await expect(controls.getByText(/Gravação local ativa · (9|1\d)s/)).toBeVisible({ timeout: 12000 });
+    await expect(controls.getByText(/Fonte do clipe:/)).toBeVisible();
+    await expect(controls.getByText(/● .* gravando /)).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`f16-c-${mobile}-active.png`) });
+    await trigger.press('Enter');
+    await page.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+    await expect(page.getByLabel('Prévia local do clipe')).toBeVisible();
+    await expect(live).toContainText(/encerr/);
+    await expect(live).toBeEmpty({ timeout: 12000 });
+    await expect(controls.getByText(/Fonte do clipe:/)).toBeVisible();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Salvar clipe', exact: true }).click();
+    await download;
+    await expect(live).toContainText('Download solicitado.');
+    await page.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await expect(live).toBeEmpty();
+    await expect(page.getByLabel('Prévia local do clipe')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+    await expect(controls.getByText(/Fonte do clipe:|Download solicitado/)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const box = await trigger.boundingBox();
+    if (mobile) expect(box!.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: test.info().outputPath(`f16-c-${mobile}-discarded.png`) });
+  } finally { await context.close(); }
 });

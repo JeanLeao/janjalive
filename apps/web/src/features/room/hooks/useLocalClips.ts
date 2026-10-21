@@ -12,7 +12,16 @@ export function useLocalClips(roomId: string) {
   const snapshotRef = useRef<ClipsSnapshot | null>(null);
   const [status, setStatus] = useState<'idle' | 'pending' | 'recording' | 'finishing'>('idle');
   const [source, setSource] = useState<ClipSource | null>(null);
-  const [notice, setNotice] = useState('');
+  const [notice, updateNotice] = useState('');
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setNotice = (message: string) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    updateNotice(message);
+    noticeTimer.current = message ? setTimeout(() => {
+      noticeTimer.current = null;
+      updateNotice('');
+    }, 8000) : null;
+  };
   const [file, setFile] = useState<ClipFile | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -71,7 +80,7 @@ export function useLocalClips(roomId: string) {
           if (pending.current !== p || !ready.current) { local.stop(); return; }
           p.phase = 'active'; clearTimeout(p.timer);
           if (!send('started', p, p.id)) { stop('Sem conexão para confirmar a gravação.'); return; }
-          setStatus('recording');
+          setNotice(''); setStatus('recording');
         },
         stopping: () => { if (pending.current === p) stop(); },
         finished: (result, error) => {
@@ -91,6 +100,7 @@ export function useLocalClips(roomId: string) {
     setSource(null); setFile(null); setSnapshot(null); setStatus('idle'); setNotice('');
     return () => {
       mounted.current = false;
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
       const p = pending.current;
       if (p) { clearTimeout(p.timer); send('stop', p, p.id); }
       pending.current = null; recorder.current?.dispose(); recorder.current = null;
@@ -116,6 +126,7 @@ export function useLocalClips(roomId: string) {
         (target.isLocal ? localState !== 'sharing' : ['failed', 'closed', 'disconnected'].includes(connections[p.presenterId]))) stop('Gravação interrompida pela mudança ou perda da transmissão.');
     },
     permission(presenterId: string, allowed: boolean) {
+      setNotice('');
       const p = snapshotRef.current?.permissions.find(item => item.presenterId === presenterId);
       if (p && ready.current) {
         const id = crypto.randomUUID(); permissionRequest.current = id;
@@ -124,15 +135,16 @@ export function useLocalClips(roomId: string) {
     },
     start(target: RoomParticipant, stream: MediaStream, audio: boolean) {
       if (pending.current || recorder.current || file) return;
+      setNotice('');
       const p = snapshotRef.current?.permissions.find(item => item.presenterId === target.peerId && item.streamId === target.streamId);
       if (!p || !ready.current || target.isPaused || (!target.isLocal && !p.allowed)) { setNotice('O apresentador não autorizou a gravação desta transmissão.'); return; }
       const operation: Pending = { presenterId: target.peerId, streamId: p.streamId, version: p.version, stream,
         own: target.isLocal, id: crypto.randomUUID(), audio, phase: 'request', timer: setTimeout(() => { if (pending.current === operation) stop('A autorização não foi confirmada.'); }, 5000) };
       setSource({ presenterId: target.peerId, streamId: p.streamId, displayName: target.nickname || target.peerId.slice(0, 8) });
-      pending.current = operation; setElapsed(0); setStatus('pending'); setNotice('Solicitando autorização…');
+      pending.current = operation; setElapsed(0); setStatus('pending');
       if (!send('request', operation, operation.id)) stop('Sem conexão com a sala.');
     },
-    discard() { setFile(null); setSource(null); },
+    discard() { setNotice(''); setFile(null); setSource(null); },
     save() {
       if (!file || !url) return;
       try { const a = document.createElement('a'); a.href = url; a.download = `screen-room-${Date.now()}.${file.extension}`; document.body.append(a); a.click(); a.remove(); setNotice('Download solicitado. Confira os arquivos salvos pelo navegador.'); }

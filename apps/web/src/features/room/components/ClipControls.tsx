@@ -63,7 +63,11 @@ export function ClipControls({
 
   const statusLine =
     clips.status === 'recording'
-      ? `Gravação ativa: ${clips.elapsed} de 60 segundos.`
+      ? 'Gravação local ativa.'
+      : clips.status === 'pending'
+      ? 'Solicitando autorização…'
+      : clips.status === 'finishing'
+      ? 'Finalizando clipe…'
       : clips.notice;
 
   const hasAmbientStatus =
@@ -80,6 +84,11 @@ export function ClipControls({
 
   return (
     <div className={classes.root} data-clip-controls>
+      <p role="status" aria-live="polite" className={classes.announcement}>
+        {[statusLine, clips.status !== 'idle' ? clips.notice : '', ...recordings.map(r =>
+          `${name(r.recorderId)} está gravando ${name(r.presenterId)}.`,
+        )].filter(Boolean).join(' ')}
+      </p>
       <Popover
         opened={opened}
         onChange={setOpened}
@@ -100,6 +109,7 @@ export function ClipControls({
             data-state={busy ? clips.status : undefined}
             data-preview={clips.file ? true : undefined}
             aria-expanded={opened}
+            aria-label={clips.status === 'recording' ? '● Gravando' : undefined}
             onClick={() => setOpened(v => !v)}
           >
             {clips.status === 'recording' || recordings.length > 0 ? (
@@ -131,7 +141,7 @@ export function ClipControls({
               <div className={classes.titleRow}>
                 <p className={classes.title}>Clipe local · até 60 segundos</p>
                 {clips.status === 'recording' && (
-                  <span className={classes.badge} data-recording>
+                  <span className={classes.badge} data-recording role="timer" aria-live="off">
                     {clips.elapsed}s / 60s
                   </span>
                 )}
@@ -210,8 +220,10 @@ export function ClipControls({
                 </button>
               )}
 
-              <p role="status" aria-live="polite" className={classes.statusText}>
-                {statusLine}
+              <p className={classes.statusText}>
+                {clips.status === 'recording'
+                  ? `Gravação ativa: ${clips.elapsed} de 60 segundos.`
+                  : statusLine}
               </p>
             </div>
 
@@ -260,8 +272,6 @@ export function ClipControls({
 
       {hasAmbientStatus && (
         <div
-          role="status"
-          aria-live="polite"
           className={classes.ambientPill}
           data-recording={clips.status === 'recording' || recordings.length > 0 || undefined}
         >
