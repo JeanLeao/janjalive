@@ -2,11 +2,11 @@ import { expect, type Page } from '@playwright/test';
 
 // Generate real encoded VP8 video without committing a media artifact. MediaRecorder's
 // live WebM lacks duration; add an EBML Duration to the Info element for a finite file.
-export async function videoFile(page: Page, mime = 'video/webm;codecs=vp8', withAudio = false, vertical = false) {
-  const bytes = Buffer.from(await page.evaluate(async ({ mime, withAudio, vertical }) => {
+export async function videoFile(page: Page, mime = 'video/webm;codecs=vp8', withAudio = false, vertical = false, light = false) {
+  const bytes = Buffer.from(await page.evaluate(async ({ mime, withAudio, vertical, light }) => {
     const canvas = document.createElement('canvas'); canvas.width = vertical ? 180 : 320; canvas.height = vertical ? 320 : 180;
     const ctx = canvas.getContext('2d')!; let frame = 0;
-    const draw = setInterval(() => { ctx.fillStyle = frame++ % 2 ? '#164e63' : '#1e3a5f'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#fff'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Watch Party', canvas.width / 2, canvas.height / 2); ctx.font = '12px sans-serif'; ctx.fillText(`Quadro ${frame}`, canvas.width / 2, canvas.height / 2 + 24); }, 50);
+    const draw = setInterval(() => { ctx.fillStyle = light ? (frame++ % 2 ? '#fff' : '#eee') : (frame++ % 2 ? '#164e63' : '#1e3a5f'); ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = light ? '#111' : '#fff'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Watch Party', canvas.width / 2, canvas.height / 2); ctx.font = '12px sans-serif'; ctx.fillText(`Quadro ${frame}`, canvas.width / 2, canvas.height / 2 + 24); }, 50);
     const stream = canvas.captureStream(20);
     const audio = withAudio ? new AudioContext() : null;
     if (audio) {
@@ -20,7 +20,7 @@ export async function videoFile(page: Page, mime = 'video/webm;codecs=vp8', with
     recorder.start(); await new Promise(resolve => setTimeout(resolve, 8000)); recorder.stop(); await ended;
     clearInterval(draw); stream.getTracks().forEach(t => t.stop()); await audio?.close();
     return [...new Uint8Array(await new Blob(chunks).arrayBuffer())];
-  }, { mime, withAudio, vertical }));
+  }, { mime, withAudio, vertical, light }));
   if (mime.startsWith('video/mp4')) return bytes;
   const info = bytes.indexOf(Buffer.from([0x15, 0x49, 0xa9, 0x66]));
   expect(info).toBeGreaterThan(0);

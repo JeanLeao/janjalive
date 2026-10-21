@@ -78,7 +78,7 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     await expect(b.getByRole('button', { name: 'Aceitar vídeo', exact: true })).toBeVisible();
     await captureWidths(b, 'invitation');
     await b.getByRole('button', { name: 'Aceitar vídeo', exact: true }).tap();
-    await expect(b.getByRole('heading', { name: 'Transferindo' })).toBeVisible();
+    await expect(b.getByRole('heading', { name: 'Transferindo vídeo' })).toBeVisible();
     await expect(b.getByTestId('watch-video')).toHaveCount(0);
     await captureWidths(b, 'transfer');
     await capture(a, 'transfer-controller');
@@ -109,7 +109,7 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     }
     await a.setViewportSize({ width: 1280, height: 900 });
     await a.getByRole('button', { name: /Participantes da sessão/ }).click();
-    await expect(a.getByRole('complementary', { name: 'Participantes do vídeo compartilhado' })).toBeVisible();
+    await expect(a.getByRole('dialog', { name: 'Participantes do vídeo' })).toBeVisible();
     await captureWidths(a, 'participants');
     await a.setViewportSize({ width: 1280, height: 900 });
     await a.getByRole('button', { name: 'Fechar participantes' }).click();
@@ -171,8 +171,7 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
         await expect.poll(async () => {
           const chat = (await a.locator('#room-chat-panel').boundingBox())!;
           const media = (await a.getByTestId('watch-video').boundingBox())!;
-          const console = (await a.getByRole('complementary', { name: 'Controles e participantes' }).boundingBox())!;
-          return media.y >= stage.y && media.y + media.height <= stage.y + stage.height && console.x + console.width <= chat.x;
+          return media.y >= stage.y && media.y + media.height <= stage.y + stage.height && media.x + media.width <= chat.x;
         }).toBe(true);
         await capture(a, 'vertical-chat-desktop');
         await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
@@ -209,7 +208,7 @@ test('F14 UI: solo participants, compact labels and end confirmation', async ({ 
   await page.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'Costa.webm', mimeType: 'video/webm', buffer: await videoFile(page) });
   await expect(page.getByTestId('watch-video')).toBeVisible();
   await page.getByRole('button', { name: /Participantes da sessão/ }).click();
-  const drawer = page.getByRole('complementary', { name: 'Participantes do vídeo compartilhado' });
+  const drawer = page.getByRole('dialog', { name: 'Participantes do vídeo' });
   await expect(drawer.getByText(/Só você por enquanto/)).toBeVisible();
   await expect(drawer.getByText('0/0 prontos')).toHaveCount(0);
   await capture(page, 'solo-participants-desktop');
@@ -228,5 +227,44 @@ test('F14 UI: solo participants, compact labels and end confirmation', async ({ 
   }
   await drawer.getByRole('button', { name: 'Confirmar encerramento' }).click();
   await expect(page.getByTestId('watch-video')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Assistir vídeo com a sala' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Escolha um vídeo' })).toBeVisible();
+});
+
+
+test('F14 UI: several spectators and controls against bright video', async ({ browser }) => {
+  test.setTimeout(60000);
+  if (evidence) await mkdir(evidence, { recursive: true });
+  const contexts = await Promise.all([0, 1, 2, 3].map(() => browser.newContext({ viewport: { width: 1280, height: 900 } })));
+  try {
+    const [host, ready, declined, waiting] = await Promise.all(contexts.map(context => context.newPage()));
+    await Promise.all([host, ready, declined, waiting].map(page => gotoRoom(page, '/room/f14-many-ui')));
+    await expect(host.getByRole('button', { name: 'Ver participantes (4)', exact: true }).first()).toBeVisible();
+    await Promise.all([host, ready, declined, waiting].map(page => page.getByRole('button', { name: 'Assistir vídeo com a sala', exact: true }).click()));
+    await host.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'Luz.webm', mimeType: 'video/webm', buffer: await videoFile(host, 'video/webm;codecs=vp8', false, false, true) });
+    await ready.getByRole('button', { name: 'Aceitar vídeo', exact: true }).click();
+    await expect(ready.getByTestId('watch-video')).toBeVisible();
+    await declined.getByRole('button', { name: 'Recusar vídeo', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Participantes da sessão: 1 de 3 prontos' })).toBeVisible();
+    await captureWidths(host, 'bright-player');
+    await host.getByRole('button', { name: /Participantes da sessão/ }).click();
+    const drawer = host.getByRole('dialog', { name: 'Participantes do vídeo' });
+    for (const label of ['Assistindo', 'A caminho', 'Indisponíveis']) await expect(drawer.getByRole('heading', { name: new RegExp(label) })).toBeVisible();
+    await captureWidths(host, 'several-participants');
+    await host.getByRole('button', { name: 'Fechar participantes' }).click();
+    await expect(host.getByRole('button', { name: /Participantes da sessão/ })).toBeFocused();
+    for (const width of [1280, 320]) {
+      await host.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+      await host.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => host.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await host.getByRole('button', { name: /Participantes da sessão/ }).click();
+      await expect(drawer).toBeVisible();
+      expect(await drawer.evaluate(el => document.fullscreenElement?.contains(el))).toBe(true);
+      await capture(host, `fullscreen-participants-${width}`);
+      await host.getByRole('button', { name: 'Fechar participantes' }).click();
+      await host.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+    }
+    await host.getByRole('button', { name: 'Ver participantes (4)', exact: true }).first().click();
+    await captureWidths(host, 'incumbent-participants');
+    await host.getByRole('button', { name: 'Fechar lista de participantes' }).click();
+  } finally { await Promise.all(contexts.map(context => context.close())); }
 });

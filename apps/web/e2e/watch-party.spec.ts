@@ -86,7 +86,7 @@ for (const mobile of [false, true]) test(`F14: P2P consent, playback, late join,
     await mode(b); await expect(b.getByTestId('watch-video')).toBeVisible();
     await a.evaluate(() => (window as any).watchSocket.close(1000));
     for (const page of [b, c, late]) {
-      await expect(page.getByLabel('Selecionar vídeo local')).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Selecionar (vídeo local|outro vídeo)$/ })).toBeVisible();
       await expect(page.getByTestId('watch-video')).toHaveCount(0);
       await expect.poll(() => page.evaluate(() => (window as any).watchUrls.size)).toBe(0);
     }
@@ -112,6 +112,7 @@ test('F14: MP4 decode, decline/retry, spectator reconnect and explicit end', asy
     await a.getByRole('button', { name: /Participantes da sessão/ }).click();
     await expect(a.getByText('Recusado', { exact: true })).toBeVisible();
     await a.getByRole('button', { name: 'Convidar participantes indisponíveis' }).click(); await ready(b);
+    await a.getByRole('button', { name: 'Fechar participantes', exact: true }).click();
     await a.getByRole('button', { name: 'Reproduzir para todos' }).click();
     await expect.poll(() => b.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
     await a.getByRole('button', { name: 'Pausar para todos' }).click();
@@ -121,10 +122,11 @@ test('F14: MP4 decode, decline/retry, spectator reconnect and explicit end', asy
     await b.getByTestId('watch-video').evaluate(video => video.dispatchEvent(new Event('error')));
     await expect(b.getByTestId('watch-video')).toHaveCount(0);
     await expect(b.getByRole('alert').filter({ hasText: /Codec/ })).toBeVisible();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
     await expect(a.getByRole('button', { name: 'Encerrar vídeo compartilhado' })).toBeVisible();
     await a.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
     await a.getByRole('button', { name: 'Confirmar encerramento' }).click();
-    for (const page of [a, b]) { await expect(page.getByLabel('Selecionar vídeo local')).toBeVisible(); await expect(page.getByTestId('watch-video')).toHaveCount(0); }
+    for (const page of [a, b]) { await expect(page.getByRole('button', { name: /^Selecionar (vídeo local|outro vídeo)$/ })).toBeVisible(); await expect(page.getByTestId('watch-video')).toHaveCount(0); }
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
 

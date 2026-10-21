@@ -1,7 +1,6 @@
 import { WatchPartyPanel, StageContentSelector } from './WatchParty';
 import watchStyles from './WatchParty.module.css';
 import type { WatchParty } from '../hooks/useWatchParty';
-import { expectedPosition } from '../watch/timeline';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useId } from 'react';
@@ -483,7 +482,6 @@ export function RoomStage({
               hasSession={!!watch.state}
               streamCount={streamItems.length}
               onSelectMode={(mode) => setWatchMode(mode === 'watch')}
-              watchPosition={watch.state ? expectedPosition(watch.state, watch.clock.now()) : 0}
             />
           </div>
         )}
@@ -568,13 +566,12 @@ export function RoomStage({
                   backgroundColor: '#161b22',
                   borderColor: 'rgba(255, 255, 255, 0.12)',
                   color: '#e6edf3',
-                  height: 'auto',
-                  minHeight: 44,
-                  padding: '10px 16px',
-                  flex: '1 1 240px',
+                  height: '42px',
+                  padding: '0 1.25rem',
+                  flex: '1 1 160px',
                 }}
               >
-                {watch.state ? 'Vídeo compartilhado' : 'Assistir vídeo com a sala'}
+                Vídeo compartilhado
               </Button>
             )}
 
@@ -929,6 +926,16 @@ export function RoomStage({
           }
         }
       `}</style>
+      {watch && (
+        <div className={watchStyles.streamsSelectorHost}>
+          <StageContentSelector
+            watchMode={false}
+            hasSession={!!watch.state}
+            streamCount={streamItems.length}
+            onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+          />
+        </div>
+      )}
       <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined}>
       <Box className={comparing ? 'comparison-header' : (showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right')}>
         {comparing && (
@@ -978,17 +985,6 @@ export function RoomStage({
           {showAccess && interactionAccess}
         </Box>
       </Box>
-      {watch && (
-        <div className={watchStyles.streamsSelectorHost}>
-          <StageContentSelector
-            watchMode={false}
-            hasSession={!!watch.state}
-            streamCount={streamItems.length}
-            onSelectMode={(mode) => setWatchMode(mode === 'watch')}
-            watchPosition={watch.state ? expectedPosition(watch.state, watch.clock.now()) : 0}
-          />
-        </div>
-      )}
       {/* Main Spotlight Canvas */}
       <Box
         ref={primaryPlayerContainerRef}

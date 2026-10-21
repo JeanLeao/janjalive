@@ -1,9 +1,6 @@
-/* F14: surfaces and typography follow the shared Screen Room theme. */
-
-.watchStage,
-.stageNav {
+/* Uses the room's Mantine theme, stage header and drawer surfaces. */
+.watchStage, .stageNav {
   --watch-bg: var(--mantine-color-dark-9);
-  --watch-surface: var(--mantine-color-dark-7);
   --watch-deep: var(--mantine-color-dark-8);
   --watch-elev: var(--mantine-color-dark-6);
   --watch-border: var(--mantine-color-dark-5);
@@ -13,332 +10,89 @@
   --watch-blue: var(--mantine-primary-color-filled);
   --watch-blue-h: var(--mantine-primary-color-filled-hover);
   --watch-focus: var(--mantine-color-blue-3);
-  --watch-ok: #22c55e;
+  --watch-ok: #86efac;
   --watch-warn: #f0c35b;
   --watch-danger-t: #fca5a5;
-  --ease: cubic-bezier(.16, 1, .3, 1);
+}
+.watchStage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--watch-bg); color: var(--watch-text); }
+.watchStage p, .watchStage h2, .watchStage h3, .watchStage h4 { margin: 0; }
+.watchStage :focus-visible, .stageNav :focus-visible { outline: 2px solid var(--watch-focus); outline-offset: 2px; }
+.stageTopbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px; background: var(--watch-deep); border-bottom: 1px solid var(--watch-border); flex-shrink: 0; z-index: 10; }
+.topbarCenter { min-width: 0; }
+.topbarRight { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.stageNav { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.stageTab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; min-height: 44px; border: 0; border-radius: var(--mantine-radius-md); background: transparent; color: var(--watch-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.stageTab:hover, .glassBtn:hover, .crewPill:hover, .muteBtn:hover { background: var(--watch-elev); }
+.selected { background: var(--mantine-primary-color-light); color: var(--mantine-primary-color-light-color); }
+.countTag { font-size: 12px; color: var(--watch-muted); }
+.livePip { width: 6px; height: 6px; border-radius: 50%; background: var(--watch-ok); }
+.shortLabel { display: none; }
+.glassBtn, .crewPill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 0; border-radius: var(--mantine-radius-md); background: transparent; color: var(--watch-text); font: inherit; font-size: 13px; cursor: pointer; }
+.warnDot { width: 6px; height: 6px; border-radius: 50%; background: var(--watch-warn); }
+.topbarLeft { padding: 8px 16px; flex-shrink: 0; min-width: 0; }
+.topbarLeft:empty { display: none; }
+.videoMetaPill { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.videoMetaPill b { font-size: 13px; font-weight: 500; }
+.ellip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theaterCenter { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 24px; }
+.stagecard { width: min(440px, 100%); min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 20px; margin: auto; }
+.prepBox { width: 100%; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.prepIcon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 16px; background: var(--mantine-color-dark-7); border: 1px solid var(--watch-border); color: var(--watch-muted); margin-bottom: 8px; }
+.prepBox h2, .prepBox h3 { color: var(--watch-text); font-size: 22px; line-height: 1.3; }
+.prepLede { color: var(--watch-muted); font-size: 14px; line-height: 1.5; max-width: 42ch; }
+.prepActions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.theaterStage { flex: 1; min-height: 0; display: flex; position: relative; }
+.playerUnit { width: 100%; min-height: 0; display: flex; flex-direction: column; }
+.videoFrame { flex: 1; min-height: 0; position: relative; background: #000; }
+.videoFrame video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+.transportBar { flex-shrink: 0; padding: 6px 16px; background: var(--watch-deep); border-top: 1px solid var(--watch-border); display: flex; flex-direction: column; gap: 2px; }
+.timelineRow { display: flex; align-items: center; gap: 12px; }
+.tVal { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 36px; }
+.dim { color: var(--watch-muted); text-align: right; }
+.controlsRow { display: flex; align-items: center; gap: 12px; }
+.playBtn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--mantine-radius-md); background: var(--watch-blue); color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.playBtn:hover:not(:disabled) { background: var(--watch-blue-h); }
+.playBtn:disabled { opacity: .5; cursor: default; }
+.authorityBadge { display: inline-flex; gap: 6px; align-items: center; min-height: 44px; font-size: 13px; min-width: 0; }
+.statusMsg { flex: 1; min-width: 0; color: var(--watch-muted); font-size: 12px; line-height: 1.4; }
+.localAudio { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.muteBtn { width: 44px; height: 44px; display: grid; place-items: center; flex-shrink: 0; border: 0; border-radius: var(--mantine-radius-md); background: transparent; color: var(--watch-text); cursor: pointer; }
+.localAudio small { font-size: 12px; color: var(--watch-muted); white-space: nowrap; }
+.blockedVeil { position: absolute; inset: 0; z-index: 6; background: rgba(0,0,0,.8); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 16px; }
+.blockedVeil p { max-width: 36ch; font-size: 14px; }
+.xferBlock { width: 100%; text-align: left; }
+.xferLabel { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+.stepTrail { display: none; }
+.streamsSelectorHost { position: relative; flex-shrink: 0; display: flex; align-items: center; padding: 6px 12px; background: var(--mantine-color-dark-8); border-bottom: 1px solid var(--mantine-color-dark-5); z-index: 20; }
+:global(.stage-empty-container):has(.streamsSelectorHost) .streamsSelectorHost { position: absolute; top: 0; left: 0; right: 0; }
+.peopleEmpty { padding: 16px 0; color: var(--watch-muted); font-size: 14px; line-height: 1.5; }
+.endActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.endActions button { min-height: 44px; }
+.endButton { color: var(--mantine-color-red-3); }
+.confirmEnd { background: var(--mantine-color-red-8); color: white; }
+@media (max-width: 900px) {
+  .w, .fullLabel { display: none; }
+  .shortLabel { display: inline; }
+  .stageTopbar { padding: 4px 8px; }
+  .stageTab { padding: 0 8px; }
+  .glassBtn { padding: 0; width: 44px; }
+  .controlsRow { flex-wrap: wrap; gap: 4px; }
+  .statusMsg { order: 3; flex-basis: 100%; }
+  .localAudio small, .fe { display: none; }
+  .transportBar { padding: 4px 12px 8px; }
+  .theaterCenter { padding: 24px 16px; }
+  .videoMetaPill { flex-wrap: wrap; gap: 2px 12px; }
+}
+@media (min-width: 901px) {
+  .watchStage:has(:global(#room-chat-panel)) .theaterStage { margin-right: 396px; }
+}
+@media (max-width: 380px) {
+  .topbarCenter { flex-basis: 100%; }
+  .stageNav { width: 100%; }
+  .stageTab { flex: 1; }
+  .topbarRight { margin-left: 0; width: 100%; justify-content: flex-end; }
 }
 
-.watchStage {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--watch-bg);
-  color: var(--watch-text);
-}
-
-.watchStage p,
-.watchStage h2,
-.watchStage h3,
-.watchStage h4 {
-  margin: 0;
-}
-
-.watchStage :focus-visible {
-  outline: 2px solid var(--watch-focus);
-  outline-offset: 2px;
-}
-
-.streamsSelectorHost {
-  position: absolute;
-  top: 14px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  z-index: 20;
-  pointer-events: none;
-}
-
-.stageNav {
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border-radius: var(--mantine-radius-md);
-  background: var(--watch-deep);
-  border: 1px solid var(--watch-border);
-  max-width: 100%;
-  min-width: 0;
-}
-
-.stageTab {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  min-height: 44px;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: var(--mantine-radius-md);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--watch-muted);
-  position: relative;
-  transition: background 0.15s var(--ease), color 0.15s ease;
-  white-space: nowrap;
-}
-
-.stageTab:hover {
-  color: var(--watch-text);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.stageTab.selected {
-  background: var(--mantine-primary-color-light);
-  color: var(--mantine-primary-color-light-color);
-}
-
-.countTag {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.10);
-  font-size: 13px;
-  display: grid;
-  place-items: center;
-  color: var(--watch-text);
-}
-
-.livePip {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--watch-ok);
-}
-
-
-.liveTc {
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  color: #22c55e;
-  font-weight: 600;
-  margin-left: 2px;
-}
-
-/* ==========================================================================
-   3. CABEÇALHO SUPERIOR DO PALCO (Top Bar)
-   ========================================================================== */
-.stageTopbar {
-  position: absolute;
-  top: 14px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  pointer-events: none;
-}
-
-.stageTopbar > * {
-  pointer-events: auto;
-}
-
-.topbarLeft {
-  justify-self: start;
-  min-width: 0;
-}
-
-.topbarCenter {
-  grid-column: 1 / -1;
-  grid-row: 1;
-  justify-self: center;
-  min-width: 0;
-}
-
-.topbarRight {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.videoMetaPill {
-  display: inline-flex;
-  flex-direction: column;
-  max-width: 100%;
-  padding: 4px 12px;
-  border-radius: 10px;
-  background: var(--watch-deep);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-}
-
-.videoMetaPill b {
-  font-size: 14px;
-  color: #fff;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.videoMetaPill small {
-  font-size: 13px;
-  color: var(--watch-muted);
-}
-
-.crewPill {
-  appearance: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 3px 12px 3px 6px;
-  border-radius: 18px;
-  background: var(--watch-deep);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--watch-text);
-  font-size: 13px;
-  font-weight: 600;
-  transition: background 0.15s ease;
-}
-
-.crewPill:hover {
-  background: var(--watch-elev);
-}
-
-.crewAvatars {
-  display: inline-flex;
-}
-
-.crewAvatars > span {
-  margin-left: -7px;
-}
-
-.crewAvatars > span:first-child {
-  margin-left: 0;
-}
-
-.crewLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.warnDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--watch-warn);
-}
-
-.glassBtn {
-  min-height: 44px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 18px;
-  background: var(--watch-deep);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--watch-text);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.glassBtn:hover {
-  background: var(--watch-elev);
-}
-
-.iconbtn {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--watch-text);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.iconbtn:hover {
-  background: rgba(255, 255, 255, 0.10);
-}
-
-/* ==========================================================================
-   4. PALCO DE EXIBIÇÃO E PROPORÇÕES DO VÍDEO
-   ========================================================================== */
-.theaterStage {
-  position: absolute;
-  z-index: 2;
-  inset: 140px 24px 24px;
-  display: grid;
-  place-items: center;
-  container-type: size;
-}
-
-.playerUnit {
-  position: relative;
-  width: min(100cqw, calc((100cqh - 108px) * var(--ar, 1.7778)));
-  display: flex;
-  flex-direction: column;
-}
-
-.videoFrame {
-  position: relative;
-  width: 100%;
-  aspect-ratio: var(--ar, 1.7778);
-  border-radius: 12px;
-  overflow: hidden;
-  background: #000 center / cover no-repeat;
-}
-
-.videoFrame video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-
-/* Barra de Transporte Integrada */
-.transportBar {
-  position: relative;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 4;
-  padding: 8px 16px;
-  background: var(--watch-deep);
-  border: 1px solid var(--watch-border);
-  border-radius: 0 0 var(--mantine-radius-md) var(--mantine-radius-md);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.timelineRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.tVal {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  min-width: 36px;
-  font-weight: 500;
-}
-
-.tVal.dim {
-  color: var(--watch-muted);
-  text-align: right;
-}
-
-/* Range input slider personalizado */
 .rng {
   -webkit-appearance: none;
   appearance: none;
@@ -402,262 +156,6 @@
   margin-top: -2px;
 }
 
-.controlsRow {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.playBtn {
-  min-height: 44px;
-  padding: 0 16px;
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 8px;
-  background: var(--watch-blue);
-  color: #fff;
-  border: 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: background 0.15s ease;
-}
-
-.playBtn:hover:not(:disabled) {
-  background: var(--watch-blue-h);
-}
-
-.playBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.authorityBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 44px;
-  padding: 0 14px;
-  border-radius: 19px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  font-size: 13px;
-  font-weight: 600;
-  color: #c4cdd8;
-}
-
-.statusMsg {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--watch-dim);
-  line-height: 1.4;
-}
-
-.localAudio {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.muteBtn {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--watch-text);
-  background: transparent;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s ease;
-}
-
-.muteBtn:hover {
-  background: rgba(255, 255, 255, 0.10);
-}
-
-.vol {
-  width: 88px;
-  min-height: 44px;
-  height: 44px;
-}
-
-.localAudio small {
-  font-size: 13px;
-  color: var(--watch-muted);
-  margin-left: 6px;
-  padding-left: 8px;
-  border-left: 1px solid rgba(255, 255, 255, 0.18);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-/* Bloqueio de autoplay */
-.blockedVeil {
-  position: absolute;
-  inset: 0;
-  z-index: 6;
-  background: rgba(5, 7, 11, 0.70);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  text-align: center;
-  padding: 24px;
-}
-
-.blockedVeil p {
-  margin: 0;
-  max-width: 32ch;
-  color: var(--mantine-color-dark-0);
-  line-height: 1.5;
-  font-size: 14px;
-}
-
-.bigPlayBtn {
-  width: 68px;
-  height: 68px;
-  border-radius: 50%;
-  border: 0;
-  background: var(--watch-blue);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-
-.bigPlayBtn:hover {
-  transform: scale(1.06);
-}
-
-/* ==========================================================================
-   5. VÍDEO VERTICAL (9:16) NO DESKTOP: Console lateral dedicado
-   ========================================================================== */
-.theaterStage.hasSideConsole {
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  gap: 28px;
-  justify-content: center;
-  align-content: stretch;
-}
-
-.theaterStage.hasSideConsole .playerUnit {
-  width: auto;
-  height: 100cqh;
-  aspect-ratio: var(--ar, 0.5625);
-}
-
-.theaterStage.hasSideConsole .videoFrame {
-  height: 100%;
-  width: auto;
-}
-
-.sideConsole {
-  width: 360px;
-  height: auto;
-  max-height: 100cqh;
-  align-self: start;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow: auto;
-  background: var(--watch-deep);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.sideConsole .transportBar {
-  position: static;
-  padding: 0;
-  background: none;
-  border: 0;
-  border-radius: 0;
-}
-
-.sideConsole .controlsRow {
-  flex-wrap: wrap;
-  row-gap: 8px;
-}
-
-.sideConsole .playBtn {
-  flex: 1;
-}
-
-.sideConsole .statusMsg {
-  flex: 1 1 100%;
-  order: 3;
-}
-
-.sideConsole .consoleTransport {
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  flex: none;
-}
-
-.sideConsole .consolePeople {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.consolePeople h3,
-.contextDrawer h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: baseline;
-  color: var(--mantine-color-dark-0);
-}
-
-.consolePeople h3 span,
-.contextDrawer h3 span {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--watch-muted);
-}
-
-/* ==========================================================================
-   6. GAVETA DE PARTICIPANTES (Contextual, sob demanda)
-   ========================================================================== */
-.contextDrawer {
-  position: absolute;
-  z-index: 25;
-  top: 126px;
-  right: 16px;
-  bottom: auto;
-  max-height: calc(100% - 142px);
-  width: 330px;
-  border-radius: 16px;
-  background: var(--watch-deep);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  display: flex;
-  flex-direction: column;
-}
-
-.drawerBackdrop {
-  display: none;
-}
-
-.contextDrawer header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 14px 8px 18px;
-}
-
-.drawerBody {
-  overflow: auto;
-  padding: 0 16px 16px;
-}
 
 .peopleSelf {
   padding-bottom: 6px;
@@ -673,13 +171,13 @@
   font-size: 13px;
 
 
-  color: var(--watch-dim);
+  color: var(--mantine-color-dark-2);
   display: flex;
   gap: 6px;
 }
 
 .peopleGroup h4 span {
-  color: var(--watch-muted);
+  color: var(--mantine-color-dark-2);
 }
 
 .prow {
@@ -706,22 +204,22 @@
 .prow .pn em {
   font-style: normal;
   font-size: 13px;
-  color: var(--watch-muted);
+  color: var(--mantine-color-dark-2);
   font-weight: 500;
   padding: 1px 7px;
   border-radius: 9px;
-  background: var(--watch-elev);
+  background: var(--mantine-color-dark-6);
 }
 
 .prow .ps {
   font-size: 13px;
-  color: var(--watch-muted);
+  color: var(--mantine-color-dark-2);
   margin-top: 2px;
 }
 
-.prow .ps.ok { color: var(--watch-ok); }
-.prow .ps.warn { color: var(--watch-warn); }
-.prow .ps.bad { color: var(--watch-danger-t); }
+.prow .ps.ok { color: #86efac; }
+.prow .ps.warn { color: #f0c35b; }
+.prow .ps.bad { color: #fca5a5; }
 
 .avatar {
   width: 32px;
@@ -748,17 +246,17 @@
 
 .pend.ok {
   background: rgba(34, 197, 94, 0.15);
-  color: var(--watch-ok);
+  color: #86efac;
 }
 
 .pend.warn {
   background: rgba(240, 195, 91, 0.15);
-  color: var(--watch-warn);
+  color: #f0c35b;
 }
 
 .pend.bad {
   background: rgba(252, 165, 165, 0.15);
-  color: var(--watch-danger-t);
+  color: #fca5a5;
 }
 
 .wide {
@@ -778,114 +276,6 @@
 }
 
 
-
-
-/* ==========================================================================
-   7. TELAS DE PREPARAÇÃO E CONSENTIMENTO (Pick, Offer, Transfer)
-   ========================================================================== */
-.theaterCenter {
-  grid-template-columns: minmax(0, 1fr);
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  padding: 126px 24px 24px;
-  overflow: auto;
-}
-
-.stagecard {
-  min-width: 0;
-  width: min(520px, 100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  margin: auto;
-}
-
-.prepBox {
-  min-width: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  text-align: center;
-  padding: 24px;
-  border-radius: var(--mantine-radius-md);
-  background: var(--watch-surface);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-}
-
-.prepIcon {
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: var(--mantine-color-dark-7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--mantine-color-dark-2);
-  display: grid;
-  place-items: center;
-}
-
-.prepBox h2 {
-  margin: 4px 0 0;
-  font-size: 22px;
-  letter-spacing: -0.02em;
-  color: #fff;
-}
-
-.prepLede {
-  margin: 0;
-  color: var(--watch-muted);
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 44ch;
-}
-
-.prepActions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-top: 6px;
-}
-
-.picker {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  background: var(--watch-blue);
-  color: white;
-  border-radius: 8px;
-  padding: 12px 24px;
-  min-height: 48px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.picker:hover:not([data-disabled="true"]) {
-  background: var(--watch-blue-h);
-}
-
-.picker[data-disabled="true"] {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.picker input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: inherit;
-}
 
 
 
@@ -964,382 +354,22 @@
   flex-shrink: 0;
 }
 
-.crewHint {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--watch-muted);
-  font-size: 13px;
-  text-align: left;
-}
-
-.crewStack {
-  display: inline-flex;
-}
-
-.crewStack > span {
-  margin-left: -7px;
-}
-
-.crewStack > span:first-child {
-  margin-left: 0;
-}
-
-.crewStack .more {
-  margin-left: -7px;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 5px;
-  border-radius: 13px;
-  background: var(--watch-elev);
-  display: grid;
-  place-items: center;
-  font-size: 10.5px;
-  font-weight: 700;
-}
-
-/* Progresso de Transferência */
-.xferBlock {
-  width: min(440px, 100%);
-  margin-top: 4px;
-  text-align: left;
-}
-
-.xferLabel {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.xferLabel b {
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-  color: #22c55e;
-}
-
-.stepTrail {
-  list-style: none;
-  margin: 14px 0 0;
-  padding: 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--watch-dim);
-}
-
-.stepTrail li {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.stepTrail li::before {
-  content: '';
-  height: 3px;
-  border-radius: 2px;
-  background: var(--mantine-color-dark-5);
-}
-
-.stepTrail li.done {
-  color: var(--watch-muted);
-}
-
-.stepTrail li.done::before {
-  background: #22c55e;
-}
-
-.stepTrail li.on {
-  color: var(--watch-text);
-  font-weight: 600;
-}
-
-.stepTrail li.on::before {
-  background: var(--watch-focus);
-}
-
-/* ==========================================================================
-   8. TELA CHEIA (Fullscreen)
-   ========================================================================== */
-.watchStage.isFull .theaterStage {
-  inset: 0;
-}
-
-.watchStage.isFull .playerUnit,
-.watchStage.isFull .videoFrame {
-  border-radius: 0;
-}
-
-
-
-.watchStage.isFull .contextDrawer {
-  max-height: calc(100% - 146px);
-}
-
-/* ==========================================================================
-   9. RESPONSIVIDADE E ADAPTAÇÕES (Desktop, Tablet, Mobile 390px e 320px)
-   ========================================================================== */
-@media (max-width: 900px) {
-  .stageTopbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    top: 8px;
-    left: 8px;
-    right: 8px;
-    row-gap: 8px;
-  }
-
-  .topbarCenter {
-    grid-row: 1;
-    width: 100%;
-  }
-
-  .stageNav {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .stageTab {
-    flex: 1;
-    justify-content: center;
-    min-height: 44px;
-    padding: 0 10px;
-  }
-
-  .topbarLeft {
-    grid-row: 2;
-    max-width: 100%;
-  }
-
-  .topbarRight {
-    position: static;
-    grid-row: 2;
-    grid-column: 2;
-    gap: 6px;
-  }
-
-  .theaterStage {
-    inset: 144px 12px 12px;
-  }
-
-  .theaterStage.hasSideConsole {
-    grid-auto-flow: row;
-    grid-auto-columns: unset;
-    gap: 0;
-  }
-
-  .sideConsole {
-    display: none !important;
-  }
-
-  .playerUnit {
-    width: 100cqw;
-    align-items: center;
-  }
-
-  .videoFrame {
-    width: min(100%, calc((100cqh - 128px) * var(--ar, 1.7778)));
-    border-radius: 10px;
-  }
-
-  .transportBar {
-    position: static;
-    width: 100%;
-    padding: 8px 12px;
-    border-radius: var(--mantine-radius-md);
-    margin-top: 4px;
-  }
-
-  .controlsRow {
-    flex-wrap: wrap;
-    gap: 6px 8px;
-  }
-
-  .playBtn {
-    padding: 0 12px;
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
-  .playBtn .fe {
-    display: none;
-  }
-
-  .statusMsg {
-    order: 3;
-    flex: 1 1 100%;
-    font-size: 13px;
-  }
-
-  .localAudio small {
-    display: none;
-  }
-
-  .localAudio .vol {
-    width: 80px;
-  }
-
-  /* Gaveta como Bottom Sheet no mobile */
-  .contextDrawer {
-    top: auto;
-    right: 0;
-    left: 0;
-    bottom: 0;
-    width: auto;
-    max-height: min(75dvh, 100%);
-    border-radius: 18px 18px 0 0;
-    z-index: 50;
-  }
-
-  .contextDrawer::before {
-    content: '';
-    align-self: center;
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: #4a5465;
-    margin-top: 8px;
-  }
-
-  .drawerBackdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 24;
-  }
-
-  .theaterCenter {
-    padding: 118px 12px 16px;
-    place-items: start center;
-  }
-
-  .prepBox {
-    padding: 20px 16px;
-  }
-
-  .prepBox h2 {
-    font-size: 22px;
-  }
-}
-
-@media (max-width: 420px) {
-  .stageTab {
-    gap: 5px;
-    padding: 0 8px;
-    font-size: 13px;
-  }
-
-  .crewPill .w {
-    display: none;
-  }
-}
-
-@media (max-width: 330px) {
-  .stageTab {
-    font-size: 13px;
-    padding: 0 4px;
-  }
-
-  .videoMetaPill {
-    max-width: 160px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .livePip,
-  .stageTab,
-  .crewPill,
-  .bigPlayBtn {
-    transition: none !important;
-    animation: none !important;
-  }
-}
-
-/* Responsive labels retain complete accessible names without clipping words. */
-.shortLabel { display: none; }
-.ellip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stageTab svg { flex-shrink: 0; }
-.watchStage { scrollbar-width: thin; scrollbar-color: var(--watch-border) var(--watch-deep); }
-.picker:focus-within { outline: 2px solid var(--watch-focus); outline-offset: 3px; }
-.peopleEmpty { padding: 16px 0; font-size: 14px; line-height: 1.5; color: var(--watch-muted); }
-.endActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.endActions button { min-height: 44px; }
-@media (max-width: 1100px) {
-  .fullLabel { display: none; }
-  .shortLabel { display: inline; }
-  .stageTab { font-size: 13px; }
-}
-@media (max-width: 900px) {
-  .topbarRight .w { display: none; }
-  .topbarLeft { grid-column: 1; }
-  .videoMetaPill { padding: 4px 8px; }
-  .videoMetaPill small { overflow-wrap: anywhere; }
-  .glassBtn { padding: 0 10px; }
-  .crewAvatars { display: none; }
-  .crewPill { padding: 0 8px; }
-  .liveTc { display: none; }
-  .contextDrawer { max-height: min(75dvh, 100%); }
-}
-
-.endButton { color: var(--mantine-color-red-3); }
-.endButton:hover:not(:disabled) { background: var(--mantine-color-red-light); }
-.confirmEnd { background: var(--mantine-color-red-8); color: white; }
-.confirmEnd:hover:not(:disabled) { background: var(--mantine-color-red-9); }
-@media (min-width: 901px) {
-  .watchStage:has(:global(#room-chat-panel)) .theaterStage { right: 416px; }
-  .watchStage:has(:global(#room-chat-panel)) .stageTopbar { right: 404px; }
-  .watchStage:has(:global(#room-chat-panel)) .stageTab { padding: 0 10px; }
-  .watchStage:has(:global(#room-chat-panel)) .topbarRight .w { display: none; }
-  .watchStage:has(:global(#room-chat-panel)) .hasSideConsole {
-    gap: 16px;
-    grid-template-columns: minmax(0, 1fr) 280px;
-    grid-auto-columns: unset;
-  }
-  .watchStage:has(:global(#room-chat-panel)) .hasSideConsole .playerUnit { width: min(100%, calc(100cqh * var(--ar, 0.5625))); height: auto; }
-  .watchStage:has(:global(#room-chat-panel)) .sideConsole { width: 280px; }
-}
-@media (max-width: 900px) {
-  .videoMetaPill b { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .videoMetaPill small { font-size: 13px; }
-  .localAudio { margin-left: auto; }
-}
-
-/* The content selector owns the first row when returning to screen streams. */
-@media (max-width: 900px) {
-  .streamsSelectorHost { top: 8px; left: 8px; right: 8px; }
-  .streamsTools { top: 68px !important; }
-  :global(.stage-main-container):has(.streamsSelectorHost) :global(.stage-top-right),
-  :global(.stage-main-container):has(.streamsSelectorHost) :global(.stage-streamer-badge) { top: 72px !important; }
-  :global(.stage-main-container):has(.streamsSelectorHost):not(:global(.stage-comparing)) :global(.stage-view-controls) { top: 128px; }
-}
 
 .fileChip .ellip { flex: 1; }
 .fileChip em, .fileChip > svg { flex-shrink: 0; }
-@media (max-width: 900px) {
-  /* Native fullscreen adds room interaction controls: give metadata its own row. */
-  .watchStage.isFull .stageTopbar {
-    position: relative;
-    inset: auto;
-    margin: 8px;
-    flex-shrink: 0;
-  }
-  .watchStage.isFull .topbarLeft { grid-column: 1 / -1; grid-row: 2; }
-  .watchStage.isFull .topbarRight { grid-column: 1 / -1; grid-row: 3; }
-  .watchStage.isFull .theaterStage {
-    position: relative;
-    inset: auto;
-    margin: 8px;
-    flex: 1;
-    min-height: 0;
-  }
-}
 
-@media (max-width: 900px) {
-  /* Viewers have an authority row plus local audio; reserve both below portrait media. */
-  .theaterStage:has(.authorityBadge) .videoFrame { width: min(100%, calc((100cqh - 180px) * var(--ar, 1.7778))); }
-  .authorityBadge { min-width: 0; max-width: 100%; }
-  .authorityBadge > span { min-width: 0; overflow-wrap: anywhere; }
-}
+/* Keep the volume target compact after the shared range rules. */
+.vol { width: 88px; min-height: 44px; }
+@media (max-width: 900px) { .vol { width: 72px; } }
+/* The stream stage keeps its mesh/comparison layout; navigation joins its top edge. */
+:global(.stage-main-container) > .streamsSelectorHost { position: absolute; inset: 0 0 auto; height: 56px; pointer-events: none; }
+.streamsSelectorHost .stageNav { pointer-events: auto; }
+:global(.stage-main-container):has(> .streamsSelectorHost) > :global(.comparison-panel) { padding-top: 56px; }
+:global(.stage-main-container):has(> .streamsSelectorHost) :global(.stage-top-right),
+:global(.stage-main-container):has(> .streamsSelectorHost) :global(.comparison-header),
+:global(.stage-main-container):has(> .streamsSelectorHost) :global(.stage-streamer-badge) { top: 68px !important; }
+:global(.stage-main-container):has(> .streamsSelectorHost):not(:global(.stage-comparing)) :global(.stage-view-controls) { top: 124px; }
+
+.streamsTools { top: 68px !important; }
+
+.glassBtn :global(.mantine-Button-label), .crewPill :global(.mantine-Button-label), .playBtn :global(.mantine-Button-label) { gap: 6px; }
