@@ -154,6 +154,58 @@ test('F14: MP4 decode, decline/retry, spectator reconnect and explicit end', asy
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
 
+for (const accepted of [false, true]) test(`F14: socket replacement reinvites the same peer without a departure (${accepted ? 'complete' : 'pending'})`, async ({ browser }) => {
+  test.setTimeout(90000);
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  try {
+    const [a, b, replacement] = await Promise.all(contexts.map(c => c.newPage()));
+    for (const page of [a, b, replacement]) await page.addInitScript(() => {
+      const Native = WebSocket;
+      (window as any).watchEvents = [];
+      window.WebSocket = class extends Native {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          if (String(url).includes('/signal')) {
+            (window as any).watchSocket = this;
+            this.addEventListener('message', e => (window as any).watchEvents.push(JSON.parse(e.data)));
+            this.addEventListener('close', e => { (window as any).watchClose = e.code; });
+          }
+        }
+      };
+    });
+    await Promise.all([a, b].map(p => gotoRoom(p, '/room/f14-replacement')));
+    await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+    await Promise.all([a, b].map(mode));
+    const buffer = await videoFile(a);
+    await a.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'replacement.webm', mimeType: 'video/webm', buffer });
+    await expect(b.getByRole('button', { name: 'Aceitar vídeo', exact: true })).toBeVisible();
+    const previousId = await a.evaluate(() => (window as any).watchEvents.find((e: any) => e.type === 'file-event' && e.action === 'request').id);
+    if (accepted) await ready(b);
+    await a.getByLabel('Posição do vídeo').fill('3');
+    await a.getByLabel('Posição do vídeo').dispatchEvent('pointerup');
+    if (accepted) await expect.poll(() => b.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => Math.abs(v.currentTime - 3))).toBeLessThan(0.7);
+    const storage = await b.evaluate(() => Object.entries(sessionStorage));
+    await replacement.addInitScript(entries => { for (const [key, value] of entries) sessionStorage.setItem(key, value); }, storage);
+    await a.evaluate(() => { (window as any).watchEvents = []; });
+    // Keep b's actual socket open: the new page joins with its identity/token.
+    await replacement.goto(b.url());
+    await expect.poll(() => b.evaluate(() => (window as any).watchClose)).toBe(4000);
+    await mode(replacement);
+    await expect(replacement.getByRole('button', { name: 'Aceitar vídeo', exact: true })).toBeVisible();
+    await expect(replacement.getByTestId('watch-video')).toHaveCount(0);
+    const events = await a.evaluate(() => (window as any).watchEvents);
+    expect(events.filter((e: any) => e.type === 'peer-joined')).toHaveLength(1);
+    expect(events.filter((e: any) => e.type === 'peer-left')).toHaveLength(0);
+    const requests = events.filter((e: any) => e.type === 'file-event' && e.action === 'request');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].id).not.toBe(previousId);
+    if (!accepted) expect(events.some((e: any) => e.type === 'file-event' && e.id === previousId && e.action === 'cancel')).toBe(true);
+    await ready(replacement);
+    await expect.poll(() => replacement.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => Math.abs(v.currentTime - 3))).toBeLessThan(0.7);
+    expect(await a.evaluate(() => (window as any).watchEvents.filter((e: any) => e.type === 'file-event' && e.action === 'request').length)).toBe(1);
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
+
 test('F14: existing captures, local audio, output routing and stage modes coexist', async ({ browser }) => {
   test.setTimeout(90000);
   const contexts = await Promise.all([browser.newContext(), browser.newContext()]);

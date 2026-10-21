@@ -13,6 +13,10 @@ export function useWatchParty(roomId: string, files: FileTransferManager, delive
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false);
+  const attempts = useRef(new Set<string>());
+  const invitationInFlight = useRef(false);
+  const queuedInvitation = useRef(false);
+  const [connectionChange, setConnectionChange] = useState(0);
   const clock = useMemo(() => new ServerClock(), [roomId]);
   const current = useRef(snapshot); current.current = snapshot;
   const sender = useRef(send); sender.current = send;
@@ -35,7 +39,13 @@ export function useWatchParty(roomId: string, files: FileTransferManager, delive
     if (message.type === 'watch-snapshot' && current.current && message.roomId === roomId && message.revision > (current.current?.revision ?? -1)) {
       current.current = message; setSnapshot(message); setAvailability(Object.fromEntries((message.availability ?? []).map(p => [p.peerId, p.status])));
     }
+    // Signaling emits peer-joined for socket replacement too, without peer-left.
+    // Coalesce repeated announcements until the next invitation batch.
+    if (message.type === 'peer-joined' && attempts.current.delete(message.peerId)) {
+      setConnectionChange(value => value + 1);
+    }
     if (message.type === 'peer-left') {
+      attempts.current.delete(message.peerId);
       setAvailability(previous => { const next = { ...previous }; delete next[message.peerId]; return next; });
     }
     if (message.type === 'watch-readiness-updated' && current.current?.state?.sessionId === message.sessionId && message.roomId === roomId) {
@@ -93,28 +103,36 @@ export function useWatchParty(roomId: string, files: FileTransferManager, delive
   }
   for (const id of history.current.byPeer.keys()) if (!participants.some(p => p.peerId === id)) history.current.byPeer.delete(id);
   const [inviting, setInviting] = useState(false);
-  const attempts = useRef(new Set<string>());
   useEffect(() => { attempts.current.clear(); }, [state?.sessionId]);
   const invite = async (retry = false) => {
-    if (!state || !source || state.controllerId !== own || inviting) return;
+    if (!state || !source || state.controllerId !== own || invitationInFlight.current) return;
     const targets = participants.filter(p => !p.isLocal && !attempts.current.has(p.peerId));
     if (!targets.length && !retry) return;
     const recipients = (retry ? participants.filter(p => !p.isLocal && (!history.current.byPeer.has(p.peerId) || ['error', 'cancelled', 'rejected'].includes(history.current.byPeer.get(p.peerId)!.state))) : targets).slice(0, 8);
     if (!recipients.length) return;
+    invitationInFlight.current = true;
+    recipients.forEach(p => attempts.current.add(p.peerId));
     setInviting(true);
     try {
       await files.offer(source.blob, state.file.name, recipients.map(p => p.peerId), state.sessionId);
-      recipients.forEach(p => attempts.current.add(p.peerId)); setError('');
+      setError('');
     } catch (e) { setError((e as Error).message); }
-    finally { setInviting(false); }
+    finally { invitationInFlight.current = false; setInviting(false); }
   };
   // One batch on arrival; failures require an explicit retry, avoiding request/rate loops.
   const arrival = participants.map(p => p.peerId).join(',');
   useEffect(() => {
     const connected = new Set(participants.map(p => p.peerId));
     for (const id of attempts.current) if (!connected.has(id)) attempts.current.delete(id);
-    void invite();
-  }, [state?.sessionId, arrival]);
+    if (invitationInFlight.current) queuedInvitation.current = true;
+    else void invite();
+  }, [state?.sessionId, arrival, connectionChange]);
+  useEffect(() => {
+    if (!inviting && queuedInvitation.current) {
+      queuedInvitation.current = false;
+      void invite();
+    }
+  }, [inviting]);
   return { state, snapshot, clock, blob, incoming, availability, reportStatus, deliveries: [...history.current.byPeer.values()],
     controller: !!own && state?.controllerId === own, error, busy, pending, inviting,
     create, receive, reset, invite, command: (action: 'play' | 'pause' | 'seek' | 'end', position?: number) => state && operation({ sessionId: state.sessionId, action, ...(position !== undefined ? { position } : {}) }),

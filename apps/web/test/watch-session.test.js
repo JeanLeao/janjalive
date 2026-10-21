@@ -179,3 +179,35 @@ test('watch session: readiness is bounded to the current session and reset with 
   hook.current.reportStatus('ready'); assert.equal(sent.at(-1), last);
   hook.current.reset(); assert.deepEqual(hook.current.availability, {});
 });
+
+test('watch session: replacement announcements coalesce, serialize offers and do not retry failures', async t => {
+  const oldDocument = globalThis.document;
+  const video = { canPlayType: () => 'probably', duration: 60, videoWidth: 320, videoHeight: 180,
+    set src(_) { queueMicrotask(() => this.onloadeddata?.()); }, pause() {}, removeAttribute() {}, load() {} };
+  globalThis.document = { createElement: () => video };
+  t.after(() => { if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument; });
+  const offers = [];
+  let finish;
+  const files = { releaseWatch() {}, offer: (...args) => { offers.push(args); return new Promise(resolve => { finish = resolve; }); } };
+  const participants = [{ peerId: 'self', isLocal: true }, { peerId: 'viewer', isLocal: false }];
+  const hook = renderHook(() => useWatchParty('room', files, [], () => true, participants));
+  t.after(() => hook.unmount());
+  await hook.current.create(new File(['x'], 'x.webm', { type: 'video/webm' }));
+  hook.current.receive({ type: 'peers', watch: { revision: 1, state }, serverTime: 1000 });
+  assert.equal(offers.length, 1);
+  const joined = { type: 'peer-joined', peerId: 'viewer', count: 2 };
+  hook.current.receive(joined); hook.current.receive(joined);
+  assert.equal(offers.length, 1, 'no concurrent offer while preparation is pending');
+  finish(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offers.length, 2, 'one queued replacement offer for repeated announcements');
+  finish(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offers.length, 2, 'settling does not start another offer');
+  files.offer = async () => { offers.push('failed'); throw new Error('F15 busy'); };
+  hook.current.receive(joined);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offers.length, 3);
+  hook.rerender({});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offers.length, 3, 'F15 rejection requires explicit retry');
+  assert.equal(hook.current.error, 'F15 busy');
+});
