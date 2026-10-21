@@ -487,7 +487,7 @@ export function RoomStage({
             />
           </div>
         )}
-        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
+        <Box className={watch?.state ? watchStyles.streamsTools : undefined} style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -553,12 +553,14 @@ export function RoomStage({
               </Button>
             )}
 
-            {watch && (
+            {watch && !watch.state && (
               <Button
                 key="empty-watch"
                 variant="default"
                 data-control-id="empty-watch-entry"
                 data-testid="empty-watch-entry"
+                aria-label={watch.state ? 'Vídeo compartilhado' : 'Assistir vídeo com a sala'}
+                styles={{ label: { whiteSpace: 'normal', textAlign: 'center' } }}
                 leftSection={<IconCinema size={16} />}
                 onClick={() => setWatchMode(true)}
                 disabled={!watch.snapshot}
@@ -566,9 +568,10 @@ export function RoomStage({
                   backgroundColor: '#161b22',
                   borderColor: 'rgba(255, 255, 255, 0.12)',
                   color: '#e6edf3',
-                  height: '42px',
-                  padding: '0 1.25rem',
-                  flex: '1 1 160px',
+                  height: 'auto',
+                  minHeight: 44,
+                  padding: '10px 16px',
+                  flex: '1 1 240px',
                 }}
               >
                 {watch.state ? 'Vídeo compartilhado' : 'Assistir vídeo com a sala'}

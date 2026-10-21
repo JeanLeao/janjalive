@@ -121,8 +121,9 @@ test('F14: MP4 decode, decline/retry, spectator reconnect and explicit end', asy
     await b.getByTestId('watch-video').evaluate(video => video.dispatchEvent(new Event('error')));
     await expect(b.getByTestId('watch-video')).toHaveCount(0);
     await expect(b.getByRole('alert').filter({ hasText: /Codec/ })).toBeVisible();
-    await expect(a.getByRole('button', { name: 'Encerrar Watch Party' })).toBeVisible();
-    await a.getByRole('button', { name: 'Encerrar Watch Party' }).click();
+    await expect(a.getByRole('button', { name: 'Encerrar vídeo compartilhado' })).toBeVisible();
+    await a.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+    await a.getByRole('button', { name: 'Confirmar encerramento' }).click();
     for (const page of [a, b]) { await expect(page.getByLabel('Selecionar vídeo local')).toBeVisible(); await expect(page.getByTestId('watch-video')).toHaveCount(0); }
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
@@ -248,7 +249,8 @@ test('F14: existing captures, local audio, output routing and stage modes coexis
     await expect(a.locator('.comparison-panel')).toHaveCount(2);
     await a.getByRole('button', { name: 'Sair da comparação', exact: true }).click();
     await b.getByRole('button', { name: /Participantes da sessão/ }).click();
-    await b.getByRole('button', { name: 'Encerrar Watch Party' }).click();
+    await b.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+    await b.getByRole('button', { name: 'Confirmar encerramento' }).click();
     for (const page of [a, b]) expect(await page.evaluate(() => (window as any).watchCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'live'))).toBe(true);
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });

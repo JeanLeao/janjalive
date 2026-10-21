@@ -1,23 +1,25 @@
-/* Screen Room — F14 Watch Party: Conceito A revisado (Sala de cinema integrada ao palco) */
+/* F14: surfaces and typography follow the shared Screen Room theme. */
 
-.watchStage {
-  --watch-bg: #05070b;
-  --watch-surface: #161b22;
-  --watch-deep: #0d1117;
-  --watch-elev: #21262d;
-  --watch-border: #30363d;
-  --watch-text: #e6edf3;
-  --watch-muted: #a6b1bf;
-  --watch-dim: #8c959f;
-  --watch-blue: #2563eb;
-  --watch-blue-h: #1d4ed8;
-  --watch-focus: #58a6ff;
+.watchStage,
+.stageNav {
+  --watch-bg: var(--mantine-color-dark-9);
+  --watch-surface: var(--mantine-color-dark-7);
+  --watch-deep: var(--mantine-color-dark-8);
+  --watch-elev: var(--mantine-color-dark-6);
+  --watch-border: var(--mantine-color-dark-5);
+  --watch-text: var(--mantine-color-dark-0);
+  --watch-muted: var(--mantine-color-dark-2);
+  --watch-dim: var(--mantine-color-dark-2);
+  --watch-blue: var(--mantine-primary-color-filled);
+  --watch-blue-h: var(--mantine-primary-color-filled-hover);
+  --watch-focus: var(--mantine-color-blue-3);
   --watch-ok: #22c55e;
   --watch-warn: #f0c35b;
-  --watch-danger: #dc2626;
   --watch-danger-t: #fca5a5;
   --ease: cubic-bezier(.16, 1, .3, 1);
+}
 
+.watchStage {
   position: relative;
   flex: 1;
   min-height: 0;
@@ -40,49 +42,6 @@
   outline-offset: 2px;
 }
 
-/* ==========================================================================
-   1. ILUMINAÇÃO AMBIENTAL SUTIL
-   ========================================================================== */
-.ambWrapper {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  contain: strict;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.amb {
-  position: absolute;
-  inset: 0;
-  transform: scale(1.15);
-  contain: strict;
-  background: #14204a center / cover;
-  filter: blur(64px) saturate(1.1) brightness(0.26);
-  opacity: 0.45;
-  transition: opacity 0.4s var(--ease);
-  pointer-events: none;
-}
-
-.ambIdle {
-  background: radial-gradient(60% 50% at 50% 40%, rgba(22, 38, 74, 0.4) 0%, transparent 70%);
-  filter: none;
-  inset: 0;
-  opacity: 0.6;
-}
-
-.watchStage::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.65) 100%);
-  z-index: 1;
-}
-
-/* ==========================================================================
-   2. SELETOR DE CONTEÚDO DO PALCO (Compacto, integrado e consistente)
-   ========================================================================== */
 .streamsSelectorHost {
   position: absolute;
   top: 14px;
@@ -100,13 +59,11 @@
   align-items: center;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
-  background: rgba(13, 17, 23, 0.90);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
-  max-width: 90vw;
+  border-radius: var(--mantine-radius-md);
+  background: var(--watch-deep);
+  border: 1px solid var(--watch-border);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .stageTab {
@@ -119,7 +76,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  border-radius: 999px;
+  border-radius: var(--mantine-radius-md);
   font-size: 13px;
   font-weight: 600;
   color: var(--watch-muted);
@@ -134,9 +91,8 @@
 }
 
 .stageTab.selected {
-  color: #fff;
-  background: rgba(37, 99, 235, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.42);
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
 }
 
 .countTag {
@@ -145,7 +101,7 @@
   padding: 0 5px;
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.10);
-  font-size: 11px;
+  font-size: 13px;
   display: grid;
   place-items: center;
   color: var(--watch-text);
@@ -155,19 +111,13 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
-  animation: pulseDot 2s infinite ease-in-out;
+  background: var(--watch-ok);
 }
 
-@keyframes pulseDot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.85); }
-}
 
 .liveTc {
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
+  font-size: 13px;
   color: #22c55e;
   font-weight: 600;
   margin-left: 2px;
@@ -183,7 +133,7 @@
   right: 16px;
   z-index: 10;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   pointer-events: none;
@@ -199,7 +149,10 @@
 }
 
 .topbarCenter {
+  grid-column: 1 / -1;
+  grid-row: 1;
   justify-self: center;
+  min-width: 0;
 }
 
 .topbarRight {
@@ -215,14 +168,12 @@
   max-width: 100%;
   padding: 4px 12px;
   border-radius: 10px;
-  background: rgba(13, 17, 23, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--watch-deep);
   border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .videoMetaPill b {
-  font-size: 13.5px;
+  font-size: 14px;
   color: #fff;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -230,7 +181,7 @@
 }
 
 .videoMetaPill small {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--watch-muted);
 }
 
@@ -240,21 +191,19 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 3px 12px 3px 6px;
   border-radius: 18px;
-  background: rgba(13, 17, 23, 0.82);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: var(--watch-deep);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--watch-text);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   transition: background 0.15s ease;
 }
 
 .crewPill:hover {
-  background: rgba(33, 38, 45, 0.90);
+  background: var(--watch-elev);
 }
 
 .crewAvatars {
@@ -262,7 +211,6 @@
 }
 
 .crewAvatars > span {
-  box-shadow: 0 0 0 2px #0d1117;
   margin-left: -7px;
 }
 
@@ -284,17 +232,15 @@
 }
 
 .glassBtn {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border-radius: 18px;
-  background: rgba(13, 17, 23, 0.72);
+  background: var(--watch-deep);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--watch-text);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -302,12 +248,12 @@
 }
 
 .glassBtn:hover {
-  background: rgba(33, 38, 45, 0.85);
+  background: var(--watch-elev);
 }
 
 .iconbtn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border: 0;
@@ -328,7 +274,7 @@
 .theaterStage {
   position: absolute;
   z-index: 2;
-  inset: 68px 24px 92px;
+  inset: 140px 24px 24px;
   display: grid;
   place-items: center;
   container-type: size;
@@ -336,7 +282,7 @@
 
 .playerUnit {
   position: relative;
-  width: min(100cqw, calc(100cqh * var(--ar, 1.7778)));
+  width: min(100cqw, calc((100cqh - 108px) * var(--ar, 1.7778)));
   display: flex;
   flex-direction: column;
 }
@@ -348,7 +294,6 @@
   border-radius: 12px;
   overflow: hidden;
   background: #000 center / cover no-repeat;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .videoFrame video {
@@ -361,14 +306,15 @@
 
 /* Barra de Transporte Integrada */
 .transportBar {
-  position: absolute;
+  position: relative;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 4;
-  padding: 44px 18px 14px;
-  background: linear-gradient(0deg, rgba(5, 7, 11, 0.94) 0%, rgba(5, 7, 11, 0.65) 50%, transparent 100%);
-  border-radius: 0 0 12px 12px;
+  padding: 8px 16px;
+  background: var(--watch-deep);
+  border: 1px solid var(--watch-border);
+  border-radius: 0 0 var(--mantine-radius-md) var(--mantine-radius-md);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -381,7 +327,7 @@
 }
 
 .tVal {
-  font-size: 12.5px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   min-width: 36px;
   font-weight: 500;
@@ -418,7 +364,6 @@
   border-radius: 50%;
   background: #fff;
   border: 3px solid var(--watch-focus);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 .rng::-moz-range-track {
@@ -464,9 +409,9 @@
 }
 
 .playBtn {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 16px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   border-radius: 8px;
   background: var(--watch-blue);
@@ -492,7 +437,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 14px;
   border-radius: 19px;
   background: rgba(255, 255, 255, 0.08);
@@ -505,7 +450,7 @@
 .statusMsg {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--watch-dim);
   line-height: 1.4;
 }
@@ -541,7 +486,7 @@
 }
 
 .localAudio small {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--watch-muted);
   margin-left: 6px;
   padding-left: 8px;
@@ -556,8 +501,6 @@
   inset: 0;
   z-index: 6;
   background: rgba(5, 7, 11, 0.70);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -570,7 +513,7 @@
 .blockedVeil p {
   margin: 0;
   max-width: 32ch;
-  color: #e6edf3;
+  color: var(--mantine-color-dark-0);
   line-height: 1.5;
   font-size: 14px;
 }
@@ -584,7 +527,6 @@
   color: #fff;
   display: grid;
   place-items: center;
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.5);
   cursor: pointer;
   transition: transform 0.15s ease;
 }
@@ -617,14 +559,14 @@
 
 .sideConsole {
   width: 360px;
-  height: 100cqh;
+  height: auto;
+  max-height: 100cqh;
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: auto;
-  background: rgba(13, 17, 23, 0.85);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: var(--watch-deep);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 16px;
   padding: 16px;
@@ -634,6 +576,8 @@
   position: static;
   padding: 0;
   background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 .sideConsole .controlsRow {
@@ -665,18 +609,20 @@
 .consolePeople h3,
 .contextDrawer h3 {
   margin: 0 0 8px;
-  font-size: 13.5px;
+  font-size: 14px;
   display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  color: #e6edf3;
+  color: var(--mantine-color-dark-0);
 }
 
 .consolePeople h3 span,
 .contextDrawer h3 span {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--watch-ok);
+  color: var(--watch-muted);
 }
 
 /* ==========================================================================
@@ -685,16 +631,14 @@
 .contextDrawer {
   position: absolute;
   z-index: 25;
-  top: 68px;
+  top: 126px;
   right: 16px;
-  bottom: 92px;
+  bottom: auto;
+  max-height: calc(100% - 142px);
   width: 330px;
   border-radius: 16px;
-  background: rgba(13, 17, 23, 0.95);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--watch-deep);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
   display: flex;
   flex-direction: column;
 }
@@ -726,9 +670,9 @@
 
 .peopleGroup h4 {
   margin: 0 0 4px;
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 13px;
+
+
   color: var(--watch-dim);
   display: flex;
   gap: 6px;
@@ -761,7 +705,7 @@
 
 .prow .pn em {
   font-style: normal;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--watch-muted);
   font-weight: 500;
   padding: 1px 7px;
@@ -770,7 +714,7 @@
 }
 
 .prow .ps {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--watch-muted);
   margin-top: 2px;
 }
@@ -786,7 +730,7 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1;
 }
@@ -798,7 +742,7 @@
   display: grid;
   place-items: center;
   flex: none;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -833,47 +777,26 @@
   margin-top: auto;
 }
 
-.btnDanger {
-  background: rgba(220, 38, 38, 0.15);
-  border: 1px solid rgba(220, 38, 38, 0.35);
-  color: #fca5a5;
-  border-radius: 8px;
-  min-height: 40px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  width: 100%;
-  padding: 0 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 
-.btnDanger:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.25);
-  color: #fee2e2;
-}
 
-.btnDanger:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 
 /* ==========================================================================
    7. TELAS DE PREPARAÇÃO E CONSENTIMENTO (Pick, Offer, Transfer)
    ========================================================================== */
 .theaterCenter {
+  grid-template-columns: minmax(0, 1fr);
   position: absolute;
   inset: 0;
   z-index: 2;
   display: grid;
   place-items: center;
-  padding: 72px 20px 96px;
+  padding: 126px 24px 24px;
   overflow: auto;
 }
 
 .stagecard {
-  width: min(720px, 100%);
+  min-width: 0;
+  width: min(520px, 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -882,35 +805,33 @@
 }
 
 .prepBox {
+  min-width: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
   text-align: center;
-  padding: 40px 28px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(22, 27, 34, 0.85), rgba(13, 17, 23, 0.90));
+  padding: 24px;
+  border-radius: var(--mantine-radius-md);
+  background: var(--watch-surface);
   border: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .prepIcon {
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
   border-radius: 16px;
-  background: #161b22;
+  background: var(--mantine-color-dark-7);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #8c959f;
+  color: var(--mantine-color-dark-2);
   display: grid;
   place-items: center;
 }
 
 .prepBox h2 {
   margin: 4px 0 0;
-  font-size: 26px;
+  font-size: 22px;
   letter-spacing: -0.02em;
   color: #fff;
 }
@@ -918,7 +839,7 @@
 .prepLede {
   margin: 0;
   color: var(--watch-muted);
-  font-size: 14.5px;
+  font-size: 14px;
   line-height: 1.6;
   max-width: 44ch;
 }
@@ -942,7 +863,7 @@
   border-radius: 8px;
   padding: 12px 24px;
   min-height: 48px;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -966,23 +887,7 @@
   cursor: inherit;
 }
 
-.btnSubtle {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: var(--watch-muted);
-  min-height: 48px;
-  padding: 0 20px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
 
-.btnSubtle:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--watch-text);
-}
 
 .fileChip {
   display: flex;
@@ -993,7 +898,7 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.10);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -1002,7 +907,7 @@
   font-style: normal;
   font-weight: 500;
   color: var(--watch-muted);
-  font-size: 12.5px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -1032,13 +937,13 @@
   background: #321b20;
   border: 1px solid rgba(248, 81, 73, 0.25);
   color: #fecaca;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .fmtHint {
   color: var(--watch-muted);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .consentNotice {
@@ -1047,7 +952,7 @@
   gap: 10px;
   align-items: flex-start;
   color: var(--watch-muted);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
   max-width: 52ch;
   text-align: left;
@@ -1064,7 +969,7 @@
   align-items: center;
   gap: 10px;
   color: var(--watch-muted);
-  font-size: 12.5px;
+  font-size: 13px;
   text-align: left;
 }
 
@@ -1073,7 +978,6 @@
 }
 
 .crewStack > span {
-  box-shadow: 0 0 0 2px #0d1117;
   margin-left: -7px;
 }
 
@@ -1088,7 +992,6 @@
   padding: 0 5px;
   border-radius: 13px;
   background: var(--watch-elev);
-  box-shadow: 0 0 0 2px #0d1117;
   display: grid;
   place-items: center;
   font-size: 10.5px;
@@ -1107,7 +1010,7 @@
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 8px;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .xferLabel b {
@@ -1123,7 +1026,7 @@
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--watch-dim);
 }
 
@@ -1138,7 +1041,7 @@
   content: '';
   height: 3px;
   border-radius: 2px;
-  background: #30363d;
+  background: var(--mantine-color-dark-5);
 }
 
 .stepTrail li.done {
@@ -1170,12 +1073,10 @@
   border-radius: 0;
 }
 
-.watchStage.isFull .videoFrame {
-  box-shadow: none;
-}
+
 
 .watchStage.isFull .contextDrawer {
-  bottom: 20px;
+  max-height: calc(100% - 146px);
 }
 
 /* ==========================================================================
@@ -1183,7 +1084,7 @@
    ========================================================================== */
 @media (max-width: 900px) {
   .stageTopbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     top: 8px;
     left: 8px;
     right: 8px;
@@ -1209,17 +1110,18 @@
 
   .topbarLeft {
     grid-row: 2;
+    max-width: 100%;
   }
 
   .topbarRight {
-    position: absolute;
-    right: 0;
-    top: 54px;
+    position: static;
+    grid-row: 2;
+    grid-column: 2;
     gap: 6px;
   }
 
   .theaterStage {
-    inset: 118px 0 84px;
+    inset: 144px 12px 12px;
   }
 
   .theaterStage.hasSideConsole {
@@ -1245,19 +1147,19 @@
   .transportBar {
     position: static;
     width: 100%;
-    padding: 8px 12px 4px;
-    background: none;
-    border-radius: 0;
+    padding: 8px 12px;
+    border-radius: var(--mantine-radius-md);
     margin-top: 4px;
   }
 
   .controlsRow {
     flex-wrap: wrap;
-    row-gap: 6px;
+    gap: 6px 8px;
   }
 
   .playBtn {
-    flex: 1;
+    padding: 0 12px;
+    flex: 0 1 auto;
     min-width: 0;
   }
 
@@ -1268,7 +1170,7 @@
   .statusMsg {
     order: 3;
     flex: 1 1 100%;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .localAudio small {
@@ -1286,7 +1188,7 @@
     left: 0;
     bottom: 0;
     width: auto;
-    max-height: 75vh;
+    max-height: min(75dvh, 100%);
     border-radius: 18px 18px 0 0;
     z-index: 50;
   }
@@ -1307,17 +1209,15 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
     z-index: 24;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
   }
 
   .theaterCenter {
-    padding: 110px 12px 90px;
+    padding: 118px 12px 16px;
     place-items: start center;
   }
 
   .prepBox {
-    padding: 26px 18px;
+    padding: 20px 16px;
   }
 
   .prepBox h2 {
@@ -1329,7 +1229,7 @@
   .stageTab {
     gap: 5px;
     padding: 0 8px;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .crewPill .w {
@@ -1339,7 +1239,7 @@
 
 @media (max-width: 330px) {
   .stageTab {
-    font-size: 11px;
+    font-size: 13px;
     padding: 0 4px;
   }
 
@@ -1348,15 +1248,7 @@
   }
 }
 
-/* Adaptações do chat */
-:global(.stage.chatting) .watchStage,
-:global(#room-stage-root:has(#room-chat-panel)) .watchStage {
-  width: calc(100% - 392px);
-  margin-left: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .amb,
   .livePip,
   .stageTab,
   .crewPill,
@@ -1364,4 +1256,90 @@
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* Responsive labels retain complete accessible names without clipping words. */
+.shortLabel { display: none; }
+.ellip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stageTab svg { flex-shrink: 0; }
+.watchStage { scrollbar-width: thin; scrollbar-color: var(--watch-border) var(--watch-deep); }
+.picker:focus-within { outline: 2px solid var(--watch-focus); outline-offset: 3px; }
+.peopleEmpty { padding: 16px 0; font-size: 14px; line-height: 1.5; color: var(--watch-muted); }
+.endActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.endActions button { min-height: 44px; }
+@media (max-width: 1100px) {
+  .fullLabel { display: none; }
+  .shortLabel { display: inline; }
+  .stageTab { font-size: 13px; }
+}
+@media (max-width: 900px) {
+  .topbarRight .w { display: none; }
+  .topbarLeft { grid-column: 1; }
+  .videoMetaPill { padding: 4px 8px; }
+  .videoMetaPill small { overflow-wrap: anywhere; }
+  .glassBtn { padding: 0 10px; }
+  .crewAvatars { display: none; }
+  .crewPill { padding: 0 8px; }
+  .liveTc { display: none; }
+  .contextDrawer { max-height: min(75dvh, 100%); }
+}
+
+.endButton { color: var(--mantine-color-red-3); }
+.endButton:hover:not(:disabled) { background: var(--mantine-color-red-light); }
+.confirmEnd { background: var(--mantine-color-red-8); color: white; }
+.confirmEnd:hover:not(:disabled) { background: var(--mantine-color-red-9); }
+@media (min-width: 901px) {
+  .watchStage:has(:global(#room-chat-panel)) .theaterStage { right: 416px; }
+  .watchStage:has(:global(#room-chat-panel)) .stageTopbar { right: 404px; }
+  .watchStage:has(:global(#room-chat-panel)) .stageTab { padding: 0 10px; }
+  .watchStage:has(:global(#room-chat-panel)) .topbarRight .w { display: none; }
+  .watchStage:has(:global(#room-chat-panel)) .hasSideConsole {
+    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-auto-columns: unset;
+  }
+  .watchStage:has(:global(#room-chat-panel)) .hasSideConsole .playerUnit { width: min(100%, calc(100cqh * var(--ar, 0.5625))); height: auto; }
+  .watchStage:has(:global(#room-chat-panel)) .sideConsole { width: 280px; }
+}
+@media (max-width: 900px) {
+  .videoMetaPill b { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .videoMetaPill small { font-size: 13px; }
+  .localAudio { margin-left: auto; }
+}
+
+/* The content selector owns the first row when returning to screen streams. */
+@media (max-width: 900px) {
+  .streamsSelectorHost { top: 8px; left: 8px; right: 8px; }
+  .streamsTools { top: 68px !important; }
+  :global(.stage-main-container):has(.streamsSelectorHost) :global(.stage-top-right),
+  :global(.stage-main-container):has(.streamsSelectorHost) :global(.stage-streamer-badge) { top: 72px !important; }
+  :global(.stage-main-container):has(.streamsSelectorHost):not(:global(.stage-comparing)) :global(.stage-view-controls) { top: 128px; }
+}
+
+.fileChip .ellip { flex: 1; }
+.fileChip em, .fileChip > svg { flex-shrink: 0; }
+@media (max-width: 900px) {
+  /* Native fullscreen adds room interaction controls: give metadata its own row. */
+  .watchStage.isFull .stageTopbar {
+    position: relative;
+    inset: auto;
+    margin: 8px;
+    flex-shrink: 0;
+  }
+  .watchStage.isFull .topbarLeft { grid-column: 1 / -1; grid-row: 2; }
+  .watchStage.isFull .topbarRight { grid-column: 1 / -1; grid-row: 3; }
+  .watchStage.isFull .theaterStage {
+    position: relative;
+    inset: auto;
+    margin: 8px;
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Viewers have an authority row plus local audio; reserve both below portrait media. */
+  .theaterStage:has(.authorityBadge) .videoFrame { width: min(100%, calc((100cqh - 180px) * var(--ar, 1.7778))); }
+  .authorityBadge { min-width: 0; max-width: 100%; }
+  .authorityBadge > span { min-width: 0; overflow-wrap: anywhere; }
 }

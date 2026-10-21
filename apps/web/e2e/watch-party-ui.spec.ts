@@ -13,10 +13,27 @@ async function capture(page: Page, name: string) {
 async function noOverflow(page: Page) {
   await expect.poll(async () => {
     const docOk = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
-    const panel = page.getByRole('region', { name: 'Watch Party', exact: true });
-    const panelOk = await panel.evaluate(el => el.scrollWidth <= el.clientWidth);
+    const panel = page.locator('.stage-main-container, .stage-empty-container').first();
+    const panelOk = await panel.evaluate(el => {
+      const bounds = el.getBoundingClientRect();
+      return el.scrollWidth <= el.clientWidth && [...el.querySelectorAll('[class*=prepBox], [class*=stagecard], [aria-label="Controles de reprodução do vídeo"]')].every(card => {
+        const rect = card.getBoundingClientRect();
+        return rect.left >= bounds.left && rect.right <= bounds.right &&
+          (card.getAttribute('aria-label') !== 'Controles de reprodução do vídeo' || (rect.top >= bounds.top && rect.bottom <= bounds.bottom));
+      });
+    });
     return docOk && panelOk;
   }).toBe(true);
+}
+
+async function captureWidths(page: Page, name: string) {
+  const original = page.viewportSize()!;
+  for (const width of [1280, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+    await noOverflow(page);
+    await capture(page, `${name}-${width}`);
+  }
+  await page.setViewportSize(original);
 }
 
 test('F14 UI: responsive preparation, consent, player, availability and stage modes', async ({ browser }) => {
@@ -44,6 +61,10 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
       };
     });
     await Promise.all([a, b].map((p, i) => gotoRoom(p, `/room/f14-ui?name=${i ? 'Marina' : 'Rafael'}`)));
+    await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+    await expect(a.getByText(/entrou na sala\./)).toHaveCount(0);
+    await capture(a, 'incumbent-room-desktop');
+    await capture(b, 'incumbent-room-mobile');
     await Promise.all([a, b].map(p => p.getByRole('button', { name: /Assistir vídeo com a sala|Vídeo compartilhado/ }).click()));
     for (const width of [1280, 768, 390, 320]) {
       await a.setViewportSize({ width, height: width < 500 ? 844 : 900 });
@@ -55,11 +76,11 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     await a.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'Uma viagem pela costa.webm', mimeType: 'video/webm', buffer: horizontal });
     await expect(a.getByTestId('watch-video')).toBeVisible();
     await expect(b.getByRole('button', { name: 'Aceitar vídeo', exact: true })).toBeVisible();
-    await capture(b, 'invitation-mobile');
+    await captureWidths(b, 'invitation');
     await b.getByRole('button', { name: 'Aceitar vídeo', exact: true }).tap();
     await expect(b.getByRole('heading', { name: 'Transferindo' })).toBeVisible();
     await expect(b.getByTestId('watch-video')).toHaveCount(0);
-    await capture(b, 'transfer-mobile');
+    await captureWidths(b, 'transfer');
     await capture(a, 'transfer-controller');
     await a.evaluate(() => (window as any).releaseWatchFrames());
     await expect(b.getByTestId('watch-video')).toBeVisible();
@@ -73,6 +94,14 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     await b.touchscreen.tap(volume.x + volume.width * .3, volume.y + volume.height / 2);
     expect(await b.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.volume)).toBeLessThan(.8);
     await expect(b.getByRole('button', { name: 'Reproduzir para todos' })).toHaveCount(0);
+    await captureWidths(b, 'viewer');
+    await b.setViewportSize({ width: 320, height: 844 });
+    await b.getByRole('button', { name: 'Voltar às transmissões' }).tap();
+    await expect(b.getByRole('button', { name: 'Vídeo compartilhado', exact: true })).toHaveCount(1);
+    await capture(b, 'active-session-streams-320');
+    await b.getByRole('button', { name: 'Vídeo compartilhado', exact: true }).tap();
+    await expect(b.getByTestId('watch-video')).toBeVisible();
+    await b.setViewportSize({ width: 390, height: 844 });
     for (const width of [1280, 768, 390, 320]) {
       await a.setViewportSize({ width, height: width < 500 ? 844 : 900 });
       await noOverflow(a);
@@ -80,11 +109,10 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     }
     await a.setViewportSize({ width: 1280, height: 900 });
     await a.getByRole('button', { name: /Participantes da sessão/ }).click();
-    await expect(a.getByRole('complementary', { name: 'Participantes da Watch Party' })).toBeVisible();
-    await capture(a, 'participants-desktop');
-    await a.setViewportSize({ width: 320, height: 844 });
-    await capture(a, 'participants-320');
+    await expect(a.getByRole('complementary', { name: 'Participantes do vídeo compartilhado' })).toBeVisible();
+    await captureWidths(a, 'participants');
     await a.setViewportSize({ width: 1280, height: 900 });
+    await a.getByRole('button', { name: 'Fechar participantes' }).click();
     await a.getByRole('button', { name: 'Reproduzir para todos' }).focus();
     await a.keyboard.press('Enter');
     await expect.poll(() => a.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.5);
@@ -103,33 +131,62 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     await b.getByRole('button', { name: 'Ativar reprodução neste dispositivo' }).tap();
     await a.getByRole('button', { name: 'Pausar para todos' }).click();
     await a.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
-    await capture(a, 'cinema-desktop');
+    await captureWidths(a, 'cinema');
     await a.getByRole('button', { name: 'Sair do Modo Cinema' }).click();
-    await a.getByRole('button', { name: 'Tela cheia', exact: true }).click();
-    await expect.poll(() => a.evaluate(() => !!document.fullscreenElement)).toBe(true);
-    await capture(a, 'fullscreen-desktop');
-    await a.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+    // Chromium requires leaving native fullscreen before resizing its window.
+    for (const width of [1280, 768, 390, 320]) {
+      await a.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+      await a.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+      await expect.poll(() => a.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await noOverflow(a);
+      await capture(a, `fullscreen-${width}`);
+      await a.getByRole('button', { name: 'Sair da tela cheia', exact: true }).click();
+      await expect.poll(() => a.evaluate(() => !!document.fullscreenElement)).toBe(false);
+    }
+    await a.setViewportSize({ width: 1280, height: 900 });
     await a.getByRole('button', { name: 'Abrir chat', exact: true }).first().click();
-    await capture(a, 'chat-desktop');
+    await captureWidths(a, 'chat');
     await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
-    await a.getByRole('button', { name: 'Encerrar Watch Party' }).click();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
+    await a.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+    await a.getByRole('button', { name: 'Confirmar encerramento' }).click();
     const vertical = await videoFile(a, 'video/webm;codecs=vp8', false, true);
     await a.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'Uma viagem em retrato.webm', mimeType: 'video/webm', buffer: vertical });
     await expect(a.getByTestId('watch-video')).toBeVisible();
-    for (const width of [1280, 390, 320]) {
+    for (const width of [1280, 768, 390, 320]) {
       await a.setViewportSize({ width, height: width < 500 ? 844 : 900 });
       await noOverflow(a);
       const stage = (await a.locator('.stage-main-container').boundingBox())!;
-      for (const control of [a.getByRole('button', { name: 'Reproduzir para todos' }), a.getByRole('button', { name: 'Silenciar vídeo', exact: true }), a.getByLabel('Posição do vídeo'), a.getByLabel('Volume do vídeo')]) {
+      const metadata = (await a.locator('[class*=videoMetaPill]').boundingBox())!;
+      const media = (await a.getByTestId('watch-video').boundingBox())!;
+      expect(media.y).toBeGreaterThanOrEqual(metadata.y + metadata.height);
+      for (const control of [a.getByRole('button', { name: 'Reproduzir para todos' }), a.getByRole('button', { name: 'Silenciar vídeo', exact: true }), a.getByLabel('Posição do vídeo'), a.getByLabel('Volume do vídeo'), a.getByRole('status').filter({ hasText: 'Pausado para a sala' })]) {
         const bounds = (await control.boundingBox())!;
         expect(bounds.y).toBeGreaterThanOrEqual(stage.y);
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(stage.y + stage.height);
       }
       await capture(a, `vertical-${width}`);
+      if (width === 1280) {
+        await a.getByRole('button', { name: 'Abrir chat', exact: true }).first().click();
+        await expect.poll(async () => {
+          const chat = (await a.locator('#room-chat-panel').boundingBox())!;
+          const media = (await a.getByTestId('watch-video').boundingBox())!;
+          const console = (await a.getByRole('complementary', { name: 'Controles e participantes' }).boundingBox())!;
+          return media.y >= stage.y && media.y + media.height <= stage.y + stage.height && console.x + console.width <= chat.x;
+        }).toBe(true);
+        await capture(a, 'vertical-chat-desktop');
+        await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
+      }
     }
     await b.getByRole('button', { name: 'Recusar vídeo', exact: true }).tap();
     await capture(b, 'declined-mobile');
-    await a.getByRole('button', { name: 'Encerrar Watch Party' }).click();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
+    await a.getByRole('button', { name: 'Convidar participantes indisponíveis' }).click();
+    await b.getByRole('button', { name: 'Aceitar vídeo', exact: true }).tap();
+    await expect(b.getByTestId('watch-video')).toBeVisible();
+    await captureWidths(b, 'vertical-viewer');
+    await a.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+    await a.getByRole('button', { name: 'Confirmar encerramento' }).click();
     await a.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'incompatível.webm', mimeType: 'video/webm', buffer: Buffer.from('invalid') });
     await expect(a.getByRole('alert').filter({ hasText: /Codec|decodificar/ })).toBeVisible();
     await expect.poll(async () => {
@@ -140,6 +197,36 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     await capture(a, 'error-320');
     await a.getByRole('button', { name: 'Voltar às transmissões' }).click();
     await expect(a.getByRole('button', { name: /Assistir vídeo com a sala|Vídeo compartilhado/ })).toBeFocused();
-    await capture(a, 'return-320');
+    await captureWidths(a, 'return');
   } finally { await host.close(); await guest.close(); }
+});
+
+
+test('F14 UI: solo participants, compact labels and end confirmation', async ({ page }) => {
+  if (evidence) await mkdir(evidence, { recursive: true });
+  await gotoRoom(page, '/room/f14-solo-ui?name=Rafael');
+  await page.getByRole('button', { name: 'Assistir vídeo com a sala', exact: true }).click();
+  await page.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'Costa.webm', mimeType: 'video/webm', buffer: await videoFile(page) });
+  await expect(page.getByTestId('watch-video')).toBeVisible();
+  await page.getByRole('button', { name: /Participantes da sessão/ }).click();
+  const drawer = page.getByRole('complementary', { name: 'Participantes do vídeo compartilhado' });
+  await expect(drawer.getByText(/Só você por enquanto/)).toBeVisible();
+  await expect(drawer.getByText('0/0 prontos')).toHaveCount(0);
+  await capture(page, 'solo-participants-desktop');
+  await drawer.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+  await expect(drawer.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(drawer.getByRole('button', { name: 'Encerrar vídeo compartilhado' })).toBeFocused();
+  await drawer.getByRole('button', { name: 'Encerrar vídeo compartilhado' }).click();
+  await capture(page, 'end-confirmation-desktop');
+  await page.setViewportSize({ width: 320, height: 844 });
+  await noOverflow(page);
+  await capture(page, 'end-confirmation-320');
+  for (let index = 0; index < 4; index++) {
+    await page.keyboard.press('Tab');
+    expect(await drawer.evaluate(el => el.contains(document.activeElement))).toBe(true);
+  }
+  await drawer.getByRole('button', { name: 'Confirmar encerramento' }).click();
+  await expect(page.getByTestId('watch-video')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Assistir vídeo com a sala' })).toBeVisible();
 });

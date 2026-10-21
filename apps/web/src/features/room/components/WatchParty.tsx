@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
-import { Button, Progress, Text } from '@mantine/core';
+import { Button, FocusTrap, Progress, Text } from '@mantine/core';
 import type { WatchParty } from '../hooks/useWatchParty';
 import type { RoomParticipant } from '../types';
 import { useAudioOutput } from '../hooks/AudioOutput';
@@ -94,7 +94,8 @@ export function StageContentSelector({
         data-control-id="watch-party"
       >
         <IconCinema size={15} aria-hidden="true" />
-        <span>{watchLabel}</span>
+        <span className={styles.fullLabel}>{watchLabel}</span>
+        <span className={styles.shortLabel} aria-hidden="true">{hasSession ? 'Vídeo da sala' : 'Assistir vídeo'}</span>
         {hasSession && <span className={styles.livePip} title="Sessão de vídeo ativa" aria-hidden="true" />}
         {hasSession && streamsActive && <span className={styles.liveTc}>{time(watchPosition)}</span>}
       </button>
@@ -135,6 +136,19 @@ export function WatchPartyPanel({
   const [panelOpen, setPanelOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 900 : true));
   const errorRef = useRef<HTMLDivElement>(null);
+  const participantsTrigger = useRef<HTMLButtonElement>(null);
+  const wasPanelOpen = useRef(false);
+  useEffect(() => { setPanelOpen(false); }, [state?.sessionId]);
+  useEffect(() => {
+    if (!panelOpen && wasPanelOpen.current) participantsTrigger.current?.focus();
+    wasPanelOpen.current = panelOpen;
+    if (!panelOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setPanelOpen(false); }
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [panelOpen]);
 
   useEffect(() => {
     const handleResize = () => setIsDesktop(window.innerWidth > 900);
@@ -151,8 +165,9 @@ export function WatchPartyPanel({
   const controller = participants.find((p) => p.peerId === state?.controllerId);
   const controllerName = controller ? formatDisplayName(controller.nickname, controller.isLocal) : 'Participante';
   const others = participants.filter((p) => !p.isLocal);
-  const readyCount = others.filter((p) => watch.availability[p.peerId] === 'ready').length;
-  const unavailableCount = others.filter((p) => {
+  const audience = participants.filter((p) => p.peerId !== state?.controllerId);
+  const readyCount = audience.filter((p) => watch.availability[p.peerId] === 'ready').length;
+  const unavailableCount = audience.filter((p) => {
     const readiness = watch.availability[p.peerId];
     const delivery = [...watch.deliveries].reverse().find((d) => d.peerId === p.peerId);
     return readiness === 'error' || readiness === 'unavailable' || delivery?.state === 'rejected' || delivery?.state === 'error';
@@ -183,7 +198,7 @@ export function WatchPartyPanel({
       ref={stageContainerRef}
       tabIndex={-1}
       role="region"
-      aria-label="Watch Party"
+      aria-label="Vídeo compartilhado"
       data-session={!!state}
       className={`stage-main-container ${styles.watchStage} ${isFullscreen ? styles.isFull : ''}`}
       style={{
@@ -192,11 +207,6 @@ export function WatchPartyPanel({
     >
       {interactions}
 
-      {/* Iluminação ambiental sutil */}
-      <div className={styles.ambWrapper}>
-        <div className={`${styles.amb} ${!watch.blob ? styles.ambIdle : ''}`} />
-      </div>
-
       {/* Top Bar integrada */}
       <div className={styles.stageTopbar}>
         <div className={styles.topbarLeft}>
@@ -204,7 +214,7 @@ export function WatchPartyPanel({
             <div className={styles.videoMetaPill}>
               <b className={styles.ellip}>{state.file.name}</b>
               <small>
-                {watch.controller ? 'Você controla a reprodução' : `${controllerName} controla a reprodução`}
+                {watch.controller ? 'Você controla' : `${controllerName} controla`}
               </small>
             </div>
           )}
@@ -225,7 +235,8 @@ export function WatchPartyPanel({
             <button
               type="button"
               className={styles.crewPill}
-              aria-label={`Participantes da sessão: ${readyCount} de ${others.length} prontos`}
+              ref={participantsTrigger}
+              aria-label={audience.length ? `Participantes da sessão: ${readyCount} de ${audience.length} prontos` : 'Participantes da sessão: só você'}
               aria-expanded={panelOpen}
               onClick={() => setPanelOpen((v) => !v)}
             >
@@ -246,8 +257,8 @@ export function WatchPartyPanel({
                 })}
               </span>
               <span className={styles.crewLabel}>
-                {readyCount}/{others.length}
-                <span className={styles.w}> prontos</span>
+                {audience.length ? `${readyCount}/${audience.length}` : 'Só você'}
+                {audience.length > 0 && <span className={styles.w}> prontos</span>}
               </span>
               {unavailableCount > 0 && <i className={styles.warnDot} title={`${unavailableCount} indisponíveis`} />}
               <IconChevronDown size={13} aria-hidden="true" />
@@ -292,11 +303,9 @@ export function WatchPartyPanel({
               <div className={styles.prepIcon}>
                 <IconCinema size={34} aria-hidden="true" />
               </div>
-              <h2>Seu vídeo. A sala inteira.</h2>
+              <h2>Assistir vídeo com a sala</h2>
               <p className={styles.prepLede}>
-                Escolha um vídeo para assistir juntos.
-                <br />
-                Você dá o play e controla a reprodução da sala.
+                Escolha um vídeo local. Você controla a reprodução para todos.
               </p>
 
               {(watch.busy || watch.pending) && (
@@ -337,13 +346,6 @@ export function WatchPartyPanel({
                     }}
                   />
                 </label>
-                <button
-                  type="button"
-                  className={styles.btnSubtle}
-                  onClick={() => onSelectMode('streams')}
-                >
-                  Cancelar
-                </button>
               </div>
 
               <small className={styles.fmtHint}>MP4 ou WebM · até 20 MiB</small>
@@ -506,33 +508,36 @@ export function WatchPartyPanel({
             onClick={() => setPanelOpen(false)}
             aria-hidden="true"
           />
-          <aside
-            className={styles.contextDrawer}
-            aria-label="Participantes da Watch Party"
-          >
-            <header>
-              <h3>
-                Na sessão <span>{readyCount}/{others.length} prontos</span>
-              </h3>
-              <button
-                type="button"
-                className={styles.iconbtn}
-                aria-label="Fechar participantes"
-                onClick={() => setPanelOpen(false)}
-              >
-                <IconClose size={18} />
-              </button>
-            </header>
-            <div className={styles.drawerBody}>
-              <ParticipantsContent
-                watch={watch}
-                participants={participants}
-                controllerName={controllerName}
-                canInvite={canInvite}
-                withEnd={true}
-              />
-            </div>
-          </aside>
+          <FocusTrap active={!isDesktop}>
+            <aside
+              className={styles.contextDrawer}
+              aria-label="Participantes do vídeo compartilhado"
+            >
+              <header>
+                <h3>
+                  Participantes {audience.length > 0 && <span>{readyCount}/{audience.length} prontos</span>}
+                </h3>
+                <button
+                  type="button"
+                  className={styles.iconbtn}
+                  data-autofocus
+                  aria-label="Fechar participantes"
+                  onClick={() => setPanelOpen(false)}
+                >
+                  <IconClose size={18} />
+                </button>
+              </header>
+              <div className={styles.drawerBody}>
+                <ParticipantsContent
+                  watch={watch}
+                  participants={participants}
+                  controllerName={controllerName}
+                  canInvite={canInvite}
+                  withEnd={true}
+                />
+              </div>
+            </aside>
+          </FocusTrap>
         </>
       )}
     </section>
@@ -853,7 +858,7 @@ function WatchPlayer({
           <div className={styles.consoleTransport}>{transportControls}</div>
           <div className={styles.consolePeople}>
             <h3>
-              Na sessão <span>{readyCount}/{participants.filter((p) => !p.isLocal).length} prontos</span>
+              Participantes {participants.length > 1 && <span>{readyCount}/{participants.length - 1} prontos</span>}
             </h3>
             <ParticipantsContent
               watch={watch}
@@ -865,13 +870,7 @@ function WatchPlayer({
           </div>
           {watch.controller && (
             <div className={`${styles.endZone} ${styles.pinned}`}>
-              <Button
-                className={styles.btnDanger}
-                disabled={watch.pending}
-                onClick={() => watch.command('end')}
-              >
-                Encerrar Watch Party
-              </Button>
+              <EndWatchParty watch={watch} />
             </div>
           )}
         </aside>
@@ -903,8 +902,8 @@ function ParticipantsContent({
 }: ParticipantsContentProps) {
   const { state } = watch;
   const localParticipant = participants.find((p) => p.isLocal);
-  const localName = localParticipant ? formatDisplayName(localParticipant.nickname, true) : 'Você';
-  const others = participants.filter((p) => !p.isLocal);
+  const localName = localParticipant ? formatDisplayName(localParticipant.nickname, false) : 'Você';
+  const others = participants.filter((p) => !p.isLocal && p.peerId !== state?.controllerId);
 
   // Categorize participants into groups:
   // a: Assistindo (ready or playing)
@@ -1101,24 +1100,42 @@ function ParticipantsContent({
         </section>
       )}
 
-      {!others.length && (
-        <p className={styles.prepLede} style={{ padding: '16px 0', fontSize: '13px' }}>
-          Quando alguém entrar na sala, receberá um convite para assistir.
+      {watch.controller && !others.length && (
+        <p className={styles.peopleEmpty}>
+          Só você por enquanto. Quem entrar na sala receberá um convite para assistir.
         </p>
       )}
 
       {/* Botão de encerramento para o controlador */}
       {watch.controller && withEnd && (
         <div className={styles.endZone}>
-          <Button
-            className={styles.btnDanger}
-            disabled={watch.pending}
-            onClick={() => watch.command('end')}
-          >
-            Encerrar Watch Party
-          </Button>
+          <EndWatchParty watch={watch} />
         </div>
       )}
     </div>
   );
+}
+
+/** Same inline danger confirmation used by room moderation. */
+function EndWatchParty({ watch }: { watch: WatchParty }) {
+  const [confirming, setConfirming] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) cancel.current?.focus();
+    else if (wasConfirming.current) trigger.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
+  const dismiss = () => setConfirming(false);
+  return confirming ? (
+    <div onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); dismiss(); } }}>
+      <Text size="sm">Encerrar o vídeo para todos?</Text>
+      <Text size="sm" c="dimmed" mt={4}>O arquivo será removido desta sessão.</Text>
+      <div className={styles.endActions}>
+        <Button ref={cancel} variant="default" onClick={dismiss}>Cancelar</Button>
+        <Button color="red" className={styles.confirmEnd} disabled={watch.pending} onClick={() => watch.command('end')}>Confirmar encerramento</Button>
+      </div>
+    </div>
+  ) : <Button ref={trigger} className={styles.endButton} variant="subtle" color="red" fullWidth mih={44} disabled={watch.pending} onClick={() => setConfirming(true)}>Encerrar vídeo compartilhado</Button>;
 }
