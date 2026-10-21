@@ -3,7 +3,11 @@ import { gotoRoom } from './fixtures/rooms';
 
 import { videoFile } from './fixtures/watch-video';
 
-async function mode(page: Page) { const button = page.getByRole('button', { name: /^Watch Party/ }); if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await button.tap(); else await button.click(); }
+async function mode(page: Page) {
+  const button = page.locator('[data-control-id="empty-watch-entry"], [data-control-id="watch-party"]').first();
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await button.tap();
+  else await button.click();
+}
 async function ready(page: Page) {
   const accept = page.getByRole('button', { name: 'Aceitar vídeo', exact: true });
   await expect(accept).toBeVisible({ timeout: 15000 });
@@ -105,7 +109,7 @@ test('F14: MP4 decode, decline/retry, spectator reconnect and explicit end', asy
     const buffer = await videoFile(a, 'video/mp4;codecs=avc1.42001E');
     await a.getByLabel('Selecionar vídeo local').setInputFiles({ name: 'movie.mp4', mimeType: 'video/mp4', buffer });
     await b.getByRole('button', { name: 'Recusar vídeo' }).click();
-    await expect(a.locator('summary[aria-label="Disponibilidade dos participantes"]')).toBeVisible();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
     await expect(a.getByText('Recusado', { exact: true })).toBeVisible();
     await a.getByRole('button', { name: 'Convidar participantes indisponíveis' }).click(); await ready(b);
     await a.getByRole('button', { name: 'Reproduzir para todos' }).click();
@@ -243,6 +247,7 @@ test('F14: existing captures, local audio, output routing and stage modes coexis
     await a.getByRole('button', { name: 'Comparar', exact: true }).click();
     await expect(a.locator('.comparison-panel')).toHaveCount(2);
     await a.getByRole('button', { name: 'Sair da comparação', exact: true }).click();
+    await b.getByRole('button', { name: /Participantes da sessão/ }).click();
     await b.getByRole('button', { name: 'Encerrar Watch Party' }).click();
     for (const page of [a, b]) expect(await page.evaluate(() => (window as any).watchCapture.getTracks().every((t: MediaStreamTrack) => t.readyState === 'live'))).toBe(true);
   } finally { await Promise.all(contexts.map(c => c.close())); }

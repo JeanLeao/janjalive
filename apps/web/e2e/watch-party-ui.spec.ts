@@ -11,9 +11,12 @@ async function capture(page: Page, name: string) {
   await page.screenshot({ path, fullPage: true, animations: 'disabled' });
 }
 async function noOverflow(page: Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const panel = page.getByRole('region', { name: 'Watch Party', exact: true });
-  expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect.poll(async () => {
+    const docOk = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+    const panel = page.getByRole('region', { name: 'Watch Party', exact: true });
+    const panelOk = await panel.evaluate(el => el.scrollWidth <= el.clientWidth);
+    return docOk && panelOk;
+  }).toBe(true);
 }
 
 test('F14 UI: responsive preparation, consent, player, availability and stage modes', async ({ browser }) => {
@@ -41,7 +44,7 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
       };
     });
     await Promise.all([a, b].map((p, i) => gotoRoom(p, `/room/f14-ui?name=${i ? 'Marina' : 'Rafael'}`)));
-    await Promise.all([a, b].map(p => p.getByRole('button', { name: /^Watch Party/ }).click()));
+    await Promise.all([a, b].map(p => p.getByRole('button', { name: /Assistir vídeo com a sala|Vídeo compartilhado/ }).click()));
     for (const width of [1280, 768, 390, 320]) {
       await a.setViewportSize({ width, height: width < 500 ? 844 : 900 });
       await noOverflow(a);
@@ -76,10 +79,10 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
       await capture(a, `horizontal-paused-${width}`);
     }
     await a.setViewportSize({ width: 1280, height: 900 });
-    await a.locator('summary[aria-label="Disponibilidade dos participantes"]').scrollIntoViewIfNeeded();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
+    await expect(a.getByRole('complementary', { name: 'Participantes da Watch Party' })).toBeVisible();
     await capture(a, 'participants-desktop');
     await a.setViewportSize({ width: 320, height: 844 });
-    await a.locator('summary[aria-label="Disponibilidade dos participantes"]').scrollIntoViewIfNeeded();
     await capture(a, 'participants-320');
     await a.setViewportSize({ width: 1280, height: 900 });
     await a.getByRole('button', { name: 'Reproduzir para todos' }).focus();
@@ -136,7 +139,7 @@ test('F14 UI: responsive preparation, consent, player, availability and stage mo
     }).toBe(true);
     await capture(a, 'error-320');
     await a.getByRole('button', { name: 'Voltar às transmissões' }).click();
-    await expect(a.getByRole('button', { name: /^Watch Party/ })).toBeFocused();
+    await expect(a.getByRole('button', { name: /Assistir vídeo com a sala|Vídeo compartilhado/ })).toBeFocused();
     await capture(a, 'return-320');
   } finally { await host.close(); await guest.close(); }
 });
