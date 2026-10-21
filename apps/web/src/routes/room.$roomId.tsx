@@ -463,7 +463,14 @@ function RoomPageContent() {
       />
 
       {/* Right Drawer: Participants */}
+      {!isDemo && !isParticipantsOpen && session.fileDeliveries.some(d => d.incoming && d.state === 'offered') && <Box
+        role="status" style={{ position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)', zIndex: 210, maxWidth: 'calc(100vw - 24px)', background: '#161b22', padding: 12, borderRadius: 8, border: '1px solid #58a6ff' }}>
+        <Button mih={44} onClick={() => setIsParticipantsOpen(true)}>Arquivo recebido — revisar solicitação</Button>
+      </Box>}
       <ParticipantsDrawer
+        files={isDemo ? undefined : session.files}
+        fileDeliveries={session.fileDeliveries}
+        filesConnected={session.connectionStatus === 'connected' && session.participants.length > 0}
         roomState={isDemo ? undefined : session.roomState}
         isHost={session.isHost}
         moderationPending={session.moderationPending}

@@ -1,3 +1,4 @@
+import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
 import { useLocalClips } from './useLocalClips';
 import { readRoomSession, saveRoomSession, clearRoomSession } from '../signaling/room-session-storage';
 import type { RoomState } from '@screen-room/protocol';
@@ -177,6 +178,14 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const signalingRoomRef = useRef<string | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
   const statsCollectorRef = useRef<StatsCollector | null>(null);
+  const [fileDeliveries, setFileDeliveries] = useState<FileDelivery[]>([]);
+  const files = useMemo(() => new FileTransferManager({
+    send: message => signalingRef.current?.send(message) ?? false,
+    channel: id => peerManagerRef.current?.ensureDataChannel(id) ?? null,
+    maxMessageSize: id => peerManagerRef.current?.getPeer(id)?.pc.sctp?.maxMessageSize,
+    changed: setFileDeliveries,
+  }), [roomId]);
+
   const localStreamRef = useRef<MediaStream | null>(null);
   const qualityRef = useRef<QualitySelection>(DEFAULT_QUALITY);
   const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
@@ -252,6 +261,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       onSendSignal: (target, data) => {
         return signalingRef.current?.relaySignal(target, data) ?? false;
       },
+      onDataChannel: (id, channel) => files.bind(id, channel),
+      onDataDisconnect: id => files.disconnect(id),
       onPeerState: (id, state) => { cancelPendingRecovery(); statsCollectorRef.current?.resetAdaptation(); if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state })); },
       onRemoteStreamAdd: (remotePeerId, stream) => {
         setRemoteStreams((prev) => {
@@ -348,6 +359,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         if (isDisposed) return;
         setConnectionStatus(state);
         if (state !== 'connected') {
+          files.setReady(false);
           setModerationPending(false);
           moderationRequestRef.current = null;
           stageSelectionPublisher.cancel();
@@ -363,6 +375,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       },
       onMessage: (message) => {
         if (isDisposed) return;
+        if (message.type === 'file-event') files.receive(message, peerId);
         if (message.type === 'room-state') setRoomState(message.state);
         if (message.type === 'moderation-result' && message.requestId === moderationRequestRef.current) {
           setModerationFeedback(message.message);
@@ -375,6 +388,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
         }
         if (message.type === 'peers') {
+          files.setReady(true);
           setKeyStatus(null);
           if (message.roomState) setRoomState(message.roomState);
           serverClockOffsetRef.current = message.serverTime === undefined ? 0 : Date.now() - message.serverTime;
@@ -448,6 +462,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           if (message.peerId === peerId) stageSelectionPublisher.acknowledge(message.targetPeerId, message.seq);
           dispatchFollow({ type: 'selection', presenterId: message.peerId, targetPeerId: message.targetPeerId, seq: message.seq });
         } else if (message.type === 'peer-joined') {
+          files.disconnect(message.peerId);
           presenterBack(message.peerId);
           cancelPendingRecovery();
           statsCollector.resetAdaptation();
@@ -478,6 +493,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           }
 
         } else if (message.type === 'peer-left') {
+          files.disconnect(message.peerId);
           stageSelectionPublisher.invalidate(message.peerId);
           annotations.removePeer(message.peerId);
           presenterLeft(message.peerId, message.reconnectGraceMs);
@@ -540,6 +556,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             clearRoomSession(roomId);
             stopSharing();
             statsCollector.stop();
+            files.setReady(false);
             peerManager.dispose();
             collaborationReadyRef.current = false;
             annotations.reset();
@@ -615,13 +632,14 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       reconnectTokenRef.current = undefined;
       unsubscribeLogger();
       statsCollector.stop();
+      files.setReady(false);
       peerManager.dispose();
       // Route/effect teardown is a voluntary departure, just like leaveRoom.
       // Document reload and involuntary socket loss do not run this cleanup.
       clearRoomSession(roomId);
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery]);
+  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery, files]);
 
   const stopSharing = useCallback(() => {
     stageSelectionPublisher.cancel();
@@ -1148,6 +1166,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   };
 
   return {
+    files, fileDeliveries,
     roomState,
     sessionEnded,
     isHost: roomState.hostPeerId === localPeerRef.current && connectionStatus === 'connected',

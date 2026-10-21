@@ -374,7 +374,31 @@ export const ModerationResultSchema = z.object({
   type: z.literal('moderation-result'), requestId: z.string(), ok: z.boolean(), message: z.string(),
 }).strict();
 
+// F15: control only. File bytes never enter signaling.
+export const FILE_LIMITS = { maxBytes: 20 * 1024 * 1024, chunkBytes: 16 * 1024,
+  pending: 8, requestMs: 60_000, lifetimeMs: 600_000, idleMs: 30_000 } as const;
+export const FileMetadataSchema = z.object({
+  name: z.string().min(1).max(255).regex(/^[^\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069/\\]+$/u),
+  mime: z.string().max(127).regex(/^[\x20-\x7e]*$/),
+  size: z.number().int().min(0).max(FILE_LIMITS.maxBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type FileMetadata = z.infer<typeof FileMetadataSchema>;
+const fileIdentity = { id: z.string().uuid(), target: z.string().min(1).max(80) };
+export const FileRequestSchema = z.object({ type: z.literal('file-request'), ...fileIdentity, file: FileMetadataSchema }).strict();
+export const FileControlSchema = z.object({ type: z.literal('file-control'), ...fileIdentity,
+  action: z.enum(['accept', 'reject', 'cancel', 'complete']),
+}).strict();
+export type FileOperation = z.infer<typeof FileRequestSchema> | z.infer<typeof FileControlSchema>;
+export const FileEventSchema = z.object({ type: z.literal('file-event'), id: z.string().uuid(),
+  from: z.string().min(1).max(80), to: z.string().min(1).max(80),
+  action: z.enum(['request', 'accept', 'reject', 'cancel', 'complete', 'error']),
+  file: FileMetadataSchema.optional(),
+}).strict();
+export type FileEvent = z.infer<typeof FileEventSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  FileRequestSchema, FileControlSchema,
   ClipOperationSchema,
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
@@ -493,6 +517,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  FileEventSchema,
   ClipsSnapshotSchema, ClipResultSchema,
   RoomCreatedSchema, RoomStateMessageSchema, ModerationResultSchema,
   PollsSnapshotSchema, PollAcceptedSchema,

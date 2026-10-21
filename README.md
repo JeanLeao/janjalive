@@ -389,3 +389,7 @@ são verificadas com o áudio temporariamente suspenso. O navegador ou sistema p
 mudar a rota física antes de notificar a página; não há garantia absoluta contra
 redirecionamentos externos. Cancelamento ou rejeição do seletor nativo mantém a
 preferência anterior. A seleção não remove as restrições de autoplay do navegador.
+
+### Transferência de arquivos (F15)
+
+Envie arquivos de até 20 MiB a destinatários selecionados no painel Participantes, com aceitação individual e download explícito. Funciona também entre espectadores sem mídia. Veja [fluxo, limites e segurança](FILES.md).
