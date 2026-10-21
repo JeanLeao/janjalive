@@ -184,3 +184,113 @@ for (const width of [1280, 390, 320]) test(`F15 private chat cards and attachmen
     }
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
+
+for (const width of [1280, 390]) {
+  test(`F15 attachment draft lifecycle ${width}px`, async ({ browser }) => {
+    const sender = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500 });
+    const receiver = await browser.newContext();
+    try {
+      const a = await sender.newPage(), b = await receiver.newPage();
+      await gotoRoom(a, '/room/f15-draft-lifecycle');
+      await gotoRoom(b, '/room/f15-draft-lifecycle');
+      await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await open(a);
+      const input = a.getByLabel('Escolher arquivo');
+      const choose = (name: string) => input.setInputFiles({ name, mimeType: '', buffer: Buffer.from('private') });
+      const submit = a.getByRole('button', { name: /Solicitar envio/ });
+      const recipient = a.getByRole('checkbox').first();
+
+      await choose('removed.bin');
+      await recipient.check();
+      await a.getByRole('button', { name: 'Remover arquivo', exact: true }).click();
+      await expect(a.getByRole('button', { name: 'Anexar arquivo', exact: true })).toBeFocused();
+      await choose('first.bin');
+      await expect(recipient).not.toBeChecked();
+      await expect(submit).toBeDisabled();
+      await recipient.check();
+      await submit.click();
+      await expect(a.locator('[data-file-card]').filter({ hasText: 'first.bin' })).toBeVisible();
+
+      await choose('second.bin');
+      await expect(recipient).not.toBeChecked();
+      await expect(submit).toBeDisabled();
+      await a.screenshot({ animations: 'disabled', path: test.info().outputPath('fresh-draft.png') });
+      await recipient.check();
+      // A failed offer must preserve this draft and its explicit recipient selection.
+      await submit.click();
+      await expect(a.getByRole('alert')).toContainText('arquivo anterior');
+      await expect(recipient).toBeChecked();
+      await expect(submit).toBeEnabled();
+      await expect(a.getByLabel('Preparar arquivo')).toContainText('second.bin');
+      await a.locator('[data-file-card]').getByRole('button', { name: 'Cancelar entrega' }).click();
+      await submit.click();
+      await expect(a.getByLabel('Preparar arquivo')).toHaveCount(0);
+      await expect(a.locator('[data-file-card]').filter({ hasText: 'second.bin' })).toBeVisible();
+    } finally { await Promise.all([sender.close(), receiver.close()]); }
+  });
+
+  test(`F15 invalid attachment replacement ${width}px`, async ({ browser }) => {
+    const sender = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500 });
+    const receiver = await browser.newContext();
+    try {
+      const a = await sender.newPage(), b = await receiver.newPage();
+      await gotoRoom(a, '/room/f15-invalid-replacement');
+      await gotoRoom(b, '/room/f15-invalid-replacement');
+      await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await open(a); await open(b);
+      const input = a.getByLabel('Escolher arquivo');
+      for (const invalid of [
+        { name: 'too-big.bin', mimeType: '', buffer: Buffer.alloc(20 * 1048576 + 1), error: '20 MiB' },
+        { name: 'invalid\u202efile.bin', mimeType: '', buffer: Buffer.from('invalid'), error: 'inválido' },
+        { name: 'invalid-type.bin', mimeType: 'x'.repeat(128), buffer: Buffer.from('invalid'), error: 'inválido' },
+      ]) {
+        await input.setInputFiles({ name: 'previous.bin', mimeType: '', buffer: Buffer.from('previous') });
+        await a.getByRole('checkbox').first().check();
+        await a.getByRole('button', { name: 'Substituir', exact: true }).click();
+        await input.setInputFiles(invalid);
+        await expect(a.getByRole('alert')).toContainText(invalid.error);
+        await expect(a.getByLabel('Preparar arquivo')).toHaveCount(0);
+        await expect(a.getByText('previous.bin', { exact: true })).toHaveCount(0);
+        await expect(a.getByRole('button', { name: /Solicitar envio/ })).toHaveCount(0);
+        await expect(input).toHaveValue('');
+        await expect(a.getByRole('button', { name: 'Anexar arquivo', exact: true })).toBeFocused();
+        await expect(b.locator('[data-file-card]')).toHaveCount(0);
+        await a.screenshot({ animations: 'disabled', path: test.info().outputPath(`invalid-${invalid.name.length}.png`) });
+        await input.setInputFiles({ name: 'recovery.bin', mimeType: '', buffer: Buffer.from('recovery') });
+        await expect(a.getByRole('alert')).toHaveCount(0);
+        await expect(a.getByRole('checkbox').first()).not.toBeChecked();
+        await expect(a.getByRole('button', { name: /Solicitar envio/ })).toBeDisabled();
+        await a.getByRole('button', { name: 'Remover arquivo', exact: true }).click();
+      }
+    } finally { await Promise.all([sender.close(), receiver.close()]); }
+  });
+
+  test(`F15 same attachment editing preserves recipients ${width}px`, async ({ browser }) => {
+    const sender = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500 });
+    const receiver = await browser.newContext();
+    try {
+      const a = await sender.newPage(), b = await receiver.newPage();
+      await gotoRoom(a, '/room/f15-edit-draft');
+      await gotoRoom(b, '/room/f15-edit-draft');
+      await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+      await open(a);
+      const input = a.getByLabel('Escolher arquivo');
+      await input.setInputFiles({ name: 'draft.bin', mimeType: '', buffer: Buffer.from('draft') });
+      await a.getByRole('checkbox').first().check();
+      await a.getByRole('button', { name: '1 destinatário', exact: true }).click();
+      await a.getByRole('textbox', { name: 'Mensagem', exact: true }).fill('Texto independente');
+      await a.getByRole('button', { name: 'Enviar', exact: true }).click();
+      await expect(a.getByRole('log').getByText('Texto independente')).toBeVisible();
+      await a.getByRole('button', { name: '1 destinatário', exact: true }).click();
+      await expect(a.getByRole('checkbox').first()).toBeChecked();
+      // Cancelling the native picker (no new file) is not removing the attachment.
+      await input.setInputFiles([]);
+      await expect(a.getByLabel('Preparar arquivo')).toContainText('draft.bin');
+      await expect(a.getByRole('checkbox').first()).toBeChecked();
+      await input.setInputFiles({ name: 'revised.bin', mimeType: '', buffer: Buffer.from('revised') });
+      await expect(a.getByRole('checkbox').first()).toBeChecked();
+      await expect(a.getByRole('button', { name: /Solicitar envio/ })).toBeEnabled();
+      await a.screenshot({ animations: 'disabled', path: test.info().outputPath('edited-draft.png') });
+    } finally { await Promise.all([sender.close(), receiver.close()]); }
+  });
+}

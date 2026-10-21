@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
+import { FILE_LIMITS, FileMetadataSchema } from '@screen-room/protocol';
 import type { RoomParticipant } from '../types';
 import type { FileDelivery, FileTransferManager } from '../files/file-transfer-manager';
 import { IconClose } from './Icons';
 import classes from './FileTransfers.module.css';
 
+const attachmentMetadata = FileMetadataSchema.omit({ sha256: true });
 const labels = { waiting: 'Aguardando aceitação', offered: 'Solicitação recebida', queued: 'Aceito · conectando', transferring: 'Transferindo', verifying: 'Verificando integridade', complete: 'Concluído', rejected: 'Recusado', cancelled: 'Cancelado', error: 'Falha na transferência' };
 const size = (bytes: number) => bytes < 1048576 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / 1048576).toFixed(2)} MiB`;
 const name = (participants: RoomParticipant[], id: string) => participants.find(p => p.peerId === id)?.nickname || `Visitante (${id.slice(-6)})`;
@@ -18,11 +20,15 @@ export function FileAttachment({ manager, participants, connected }: { manager: 
   const trigger = useRef<HTMLButtonElement>(null);
   const peers = participants.filter(p => !p.isLocal);
   const targets = selected.filter(id => peers.some(p => p.peerId === id));
-  const clear = () => { setFile(null); setError(''); setChoosing(false); if (input.current) input.current.value = ''; requestAnimationFrame(() => trigger.current?.focus()); };
+  const clear = () => { setFile(null); setSelected([]); setError(''); setChoosing(false); if (input.current) input.current.value = ''; requestAnimationFrame(() => trigger.current?.focus()); };
   return <div className={classes.attachment}>
     <input ref={input} type="file" aria-label="Escolher arquivo" className={classes.hidden} disabled={!connected || busy} onChange={e => {
       const next = e.target.files?.[0]; if (!next) return;
-      if (next.size > 20 * 1048576) { setError('O arquivo excede 20 MiB. Escolha um menor.'); e.target.value = ''; return; }
+      if (!attachmentMetadata.safeParse({ name: next.name, mime: next.type, size: next.size }).success) {
+        clear();
+        setError(next.size > FILE_LIMITS.maxBytes ? 'O arquivo excede 20 MiB. Escolha um menor.' : 'Nome, tipo ou tamanho de arquivo inválido. Escolha outro arquivo.');
+        return;
+      }
       setFile(next); setError(''); setChoosing(true);
     }} />
     {!file ? <div className={classes.attachRow}><button ref={trigger} type="button" className={classes.attach} disabled={!connected || busy} onClick={() => input.current?.click()}><AttachmentIcon /> Anexar arquivo</button><span>Privado · até 20 MiB</span></div> : <div className={classes.draft} aria-label="Preparar arquivo">
