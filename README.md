@@ -390,6 +390,10 @@ mudar a rota física antes de notificar a página; não há garantia absoluta co
 redirecionamentos externos. Cancelamento ou rejeição do seletor nativo mantém a
 preferência anterior. A seleção não remove as restrições de autoplay do navegador.
 
+### Watch Party de vídeos locais (F14)
+
+No palco, abra **Watch Party** para compartilhar um MP4 ou WebM de até 20 MiB com consentimento individual via P2P. Quem inicia controla play, pause e posição; os demais mantêm volume e mudo locais. A sincronização é aproximada, com estado confirmado pelo servidor. Capturas existentes continuam disponíveis em **Voltar às transmissões**. Veja [autoridade, privacidade, limites e validação](F14.md).
+
 ### Transferência de arquivos (F15)
 
 Envie arquivos de até 20 MiB pelo compositor do Chat a destinatários selecionados, com cards privados, aceitação individual e download explícito. Funciona também entre espectadores sem mídia. Veja [fluxo, limites e segurança](FILES.md).

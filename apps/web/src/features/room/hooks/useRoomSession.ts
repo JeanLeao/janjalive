@@ -1,3 +1,4 @@
+import { useWatchParty } from './useWatchParty';
 import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
 import { useLocalClips } from './useLocalClips';
 import { readRoomSession, saveRoomSession, clearRoomSession } from '../signaling/room-session-storage';
@@ -186,6 +187,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     changed: setFileDeliveries,
   }), [roomId]);
 
+  const watch = useWatchParty(roomId, files, fileDeliveries, message => signalingRef.current?.send(message) ?? false, participants);
+  const watchRef = useRef(watch);
+  watchRef.current = watch;
+
   const localStreamRef = useRef<MediaStream | null>(null);
   const qualityRef = useRef<QualitySelection>(DEFAULT_QUALITY);
   const remoteStreamsRef = useRef<RemoteStreamEntry[]>([]);
@@ -364,6 +369,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           moderationRequestRef.current = null;
           stageSelectionPublisher.cancel();
           clipsRef.current.reset();
+          watchRef.current.reset();
           interactionsRef.current.resetConnection();
           collaborationReadyRef.current = false;
           annotations.reset();
@@ -383,6 +389,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           moderationRequestRef.current = null;
         }
         clipsRef.current.receive(message, signaling);
+        watchRef.current.receive(message);
         interactionsRef.current.receive(message);
         if (message.type === 'collaboration') {
           if (collaborationReadyRef.current && message.roomId === roomId) annotations.receive(message, Math.max(0, Date.now() - serverClockOffsetRef.current - message.timestamp));
@@ -596,6 +603,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     return () => {
       clipsRef.current.reset();
+      watchRef.current.reset();
       isDisposed = true;
       stageSelectionPublisher.cancel();
       for (const timer of followExpiryTimers.values()) clearTimeout(timer);
@@ -1166,7 +1174,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   };
 
   return {
-    files, fileDeliveries,
+    watch, files, fileDeliveries,
     roomState,
     sessionEnded,
     isHost: roomState.hostPeerId === localPeerRef.current && connectionStatus === 'connected',
@@ -1201,7 +1209,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setModerationPending(Boolean(sent));
       if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
     },
-    leaveRoom: () => { clipsRef.current.reset(); setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
+    leaveRoom: () => { clipsRef.current.reset(); watchRef.current.reset(); setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
     onVideoPresented: (peerId: string, stream: MediaStream) => {
       if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
         loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });

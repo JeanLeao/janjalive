@@ -1,3 +1,5 @@
+import { WatchPartyPanel } from './WatchParty';
+import type { WatchParty } from '../hooks/useWatchParty';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useId } from 'react';
@@ -38,6 +40,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  watch?: WatchParty;
   clipControls?: React.ReactNode;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
@@ -76,7 +79,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
-  clipControls,
+  watch,
+  clipControls: originalClipControls,
   onVideoPresented,
   annotations,
   onTogglePointingPermission,
@@ -102,6 +106,8 @@ export function RoomStage({
   shortcutsEnabled = false,
   onOpenQrCode,
 }: RoomStageProps) {
+  const [watchMode, setWatchMode] = useState(false);
+  const clipControls = <>{watch && <Button data-control-id="watch-party" disabled={!watch.snapshot} variant="default" style={{ minHeight: 44, pointerEvents: 'auto' }} onClick={() => setWatchMode(true)}>Watch Party{watch.state ? ' · ativa' : ''}</Button>}{originalClipControls}</>;
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
@@ -115,6 +121,13 @@ export function RoomStage({
   const qrBtnRef = useRef<HTMLButtonElement | null>(null);
   const wasInFullscreenRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const previousWatchMode = useRef(watchMode);
+  useEffect(() => {
+    if (previousWatchMode.current === watchMode) return;
+    previousWatchMode.current = watchMode;
+    const frame = requestAnimationFrame(() => stageContainerRef.current?.querySelector<HTMLElement>(watchMode ? '[data-control-id="watch-back"]' : '[data-control-id="watch-party"]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [watchMode]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -391,6 +404,19 @@ export function RoomStage({
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
+
+  if (watchMode && watch) {
+    return <Box ref={stageContainerRef} tabIndex={-1} className="stage-main-container" style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 'calc(100px + env(safe-area-inset-bottom, 0px))', background: '#080a0f', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+      {interactions}
+      <Box style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12, alignItems: 'center' }}>
+        <Button data-control-id="watch-back" variant="default" style={{ minHeight: 44 }} onClick={() => setWatchMode(false)}>Voltar às transmissões</Button>
+        <Button variant="subtle" style={{ minHeight: 44 }} onClick={onToggleCinema}>{isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}</Button>
+        <Button variant="subtle" style={{ minHeight: 44 }} onClick={toggleFullscreen}>{isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}</Button>
+        {showAccess && interactionAccess}
+      </Box>
+      <WatchPartyPanel watch={watch} participants={participants} />
+    </Box>;
+  }
 
   // Empty state if no stream is active
   if (!activeStream) {

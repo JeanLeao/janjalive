@@ -3,7 +3,7 @@ import { FILE_LIMITS, FileMetadataSchema, type FileMetadata, type FileEvent, typ
 export type TransferState = 'waiting' | 'offered' | 'queued' | 'transferring' | 'verifying' | 'complete' | 'rejected' | 'cancelled' | 'error';
 export interface FileDelivery {
   id: string; peerId: string; incoming: boolean; file: FileMetadata;
-  state: TransferState; bytes: number; download?: Blob;
+  watchSessionId?: string; state: TransferState; bytes: number; download?: Blob;
 }
 type Delivery = FileDelivery & { source?: Blob; buffer?: Uint8Array<ArrayBuffer>; timer?: ReturnType<typeof setTimeout>; controller: AbortController };
 const terminal = (d: FileDelivery) => ['complete', 'rejected', 'cancelled', 'error'].includes(d.state);
@@ -41,7 +41,7 @@ export class FileTransferManager {
     if (state !== 'complete') d.download = undefined;
     this.publish();
   }
-  async offer(source: Blob, name: string, recipients: string[]) {
+  async offer(source: Blob, name: string, recipients: string[], watchSessionId?: string) {
     if (!this.ready || this.preparing) throw new Error('Aguarde a conexão ou a preparação do arquivo.');
     const targets = [...new Set(recipients)];
     if (!targets.length || targets.length > FILE_LIMITS.pending || source.size > FILE_LIMITS.maxBytes) throw new Error('Selecione de 1 a 8 destinatários e um arquivo de até 20 MiB.');
@@ -58,9 +58,9 @@ export class FileTransferManager {
       for (const [id, d] of this.deliveries) if (terminal(d) && !d.download) this.deliveries.delete(id);
       for (const peerId of targets) {
         const d: Delivery = { id: crypto.randomUUID(), peerId, incoming: false, file, source,
-          state: 'waiting', bytes: 0, controller: new AbortController() };
+          watchSessionId, state: 'waiting', bytes: 0, controller: new AbortController() };
         this.deliveries.set(d.id, d); this.arm(d, FILE_LIMITS.requestMs);
-        if (!this.transport.send({ type: 'file-request', id: d.id, target: peerId, file })) this.finish(d, 'error');
+        if (!this.transport.send({ type: 'file-request', id: d.id, target: peerId, file, ...(watchSessionId ? { watchSessionId } : {}) })) this.finish(d, 'error');
       }
       this.publish();
     } finally { this.preparing = false; }
@@ -75,7 +75,7 @@ export class FileTransferManager {
         this.transport.send({ type: 'file-control', id: event.id, target: peerId, action: 'reject' }); return;
       }
       for (const [id, old] of this.deliveries) if (terminal(old) && !old.download) this.deliveries.delete(id);
-      d = { id: event.id, peerId, file: event.file, incoming: true, state: 'offered', bytes: 0, controller: new AbortController() };
+      d = { id: event.id, peerId, file: event.file, incoming: true, watchSessionId: event.watchSessionId, state: 'offered', bytes: 0, controller: new AbortController() };
       this.deliveries.set(d.id, d); this.arm(d, FILE_LIMITS.requestMs); this.publish(); return;
     }
     if (!d || d.peerId !== peerId || terminal(d)) return;
@@ -113,6 +113,16 @@ export class FileTransferManager {
     this.transport.send({ type: 'file-control', id, target: d.peerId, action: 'cancel' }); this.finish(d, state);
   }
   dismiss(id: string) { const d = this.deliveries.get(id); if (d && terminal(d)) { this.deliveries.delete(id); d.download = undefined; this.publish(); } }
+  /** Only consented, hash-verified and server-confirmed bytes may be consumed by F14. */
+  verifiedBlob(id: string): Blob | undefined {
+    const d = this.deliveries.get(id);
+    return d?.incoming && d.state === 'complete' ? d.download : undefined;
+  }
+  releaseWatch(sessionId: string) {
+    for (const d of [...this.deliveries.values()]) if (d.watchSessionId === sessionId) {
+      this.cancel(d.id); this.dismiss(d.id);
+    }
+  }
   bind(peerId: string, channel: RTCDataChannel) {
     this.channels.get(peerId)?.cleanup();
     channel.binaryType = 'arraybuffer'; channel.bufferedAmountLowThreshold = 64 * 1024;

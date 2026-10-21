@@ -1,3 +1,4 @@
+import { WatchParties } from './watch-party.js';
 import { FileTransfers } from './file-transfers.js';
 import { Clips } from './clips.js';
 import { KeyRateLimiter } from './key-rate-limiter.js';
@@ -314,6 +315,10 @@ export function createSignalServer({
 
   const files = new FileTransfers((room, peer, event) => { const socket = peerSocket(room, peer); if (socket) send(socket, event); });
 
+  const watch = new WatchParties(snapshot => broadcast(snapshot.roomId, snapshot), event => broadcast(event.roomId, event));
+  const watchRates = new WeakMap<SignalWebSocket, { start: number; count: number }>();
+  const watchReadinessRates = new WeakMap<SignalWebSocket, { start: number; count: number }>();
+
   const clips = new Clips(snapshot => broadcast(snapshot.roomId, snapshot));
 
   rooms.onRoomStateChanged = (roomId) => broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
@@ -328,11 +333,12 @@ export function createSignalServer({
     if (clients.get(key) === socket) {
       files.depart(roomId, peerId);
       clips.depart(roomId, peerId);
+      watch.depart(roomId, peerId);
       clients.delete(key);
       const clearedSelections = rooms.clearSelections(roomId, peerId, effectiveVoluntary);
       rooms.leave(roomId, peerId, effectiveVoluntary, recoveryGraceMs);
       const count = rooms.peers(roomId).length;
-      if (!count) clips.delete(roomId);
+      if (!count) { clips.delete(roomId); watch.delete(roomId); }
       signalLog('leave', { roomId, peerId, count, isVoluntary: effectiveVoluntary });
       broadcast(roomId, {
         type: 'peer-left', peerId, count,
@@ -669,6 +675,7 @@ export function createSignalServer({
             try {
               files.depart(normalizedRoom, normalizedPeer);
               clips.depart(normalizedRoom, normalizedPeer);
+              watch.depart(normalizedRoom, normalizedPeer);
               existingSocket.close(WS_CLOSE_CODES.SUPERSEDED, 'Superseded by new connection');
             } catch {
               existingSocket.terminate();
@@ -696,6 +703,7 @@ export function createSignalServer({
 
           send(socket, {
             type: 'peers',
+            watch: watch.snapshot(normalizedRoom),
             serverTime: Date.now(),
             peers,
             count,
@@ -970,9 +978,34 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'watch-operation' || message.type === 'watch-clock' || message.type === 'watch-readiness') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          const now = Date.now();
+          const rates = message.type === 'watch-readiness' ? watchReadinessRates : watchRates;
+          let rate = rates.get(socket);
+          if (!rate || now - rate.start > 10_000) { rate = { start: now, count: 0 }; rates.set(socket, rate); }
+          const limited = ++rate.count > 40;
+          if (message.type === 'watch-readiness') {
+            if (!limited) watch.readiness(meta.roomId, meta.peerId, message.sessionId, message.status);
+            return;
+          }
+          if (message.type === 'watch-clock') {
+            if (!limited) send(socket, { type: 'watch-clock-reply', sentAt: message.sentAt, serverTime: now });
+            return;
+          }
+          const error = limited && message.action !== 'end' ? 'Limite de comandos atingido. Aguarde.' : watch.apply(meta.roomId, meta.peerId, message);
+          send(socket, { type: 'watch-result', requestId: message.requestId, ok: !error, message: error ?? 'Confirmado.' });
+          if (error) send(socket, watch.snapshot(meta.roomId));
+          return;
+        }
+
         if (message.type === 'file-request' || message.type === 'file-control') {
           const meta = socket.meta;
           if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          if (!watch.authorizeFile(meta.roomId, meta.peerId, message)) {
+            send(socket, { type: 'file-event', id: message.id, from: meta.peerId, to: message.target, action: 'error' }); return;
+          }
           files.apply(meta.roomId, meta.peerId, message, id => peerSocket(meta.roomId, id)?.readyState === WebSocket.OPEN && rooms.hasPeer(meta.roomId, id));
           return;
         }
@@ -1091,6 +1124,7 @@ export function createSignalServer({
         clearInterval(heartbeatTimer);
         files.dispose();
         clips.dispose();
+        watch.dispose();
         rooms.clearAllRecovery();
         for (const socket of wss.clients) socket.terminate();
         wss.close(() => httpServer.close(() => resolve()));
