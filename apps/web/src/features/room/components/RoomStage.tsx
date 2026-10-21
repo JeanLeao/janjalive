@@ -1,4 +1,5 @@
 import { WatchPartyPanel } from './WatchParty';
+import watchStyles from './WatchParty.module.css';
 import type { WatchParty } from '../hooks/useWatchParty';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
@@ -107,7 +108,8 @@ export function RoomStage({
   onOpenQrCode,
 }: RoomStageProps) {
   const [watchMode, setWatchMode] = useState(false);
-  const clipControls = <>{watch && <Button data-control-id="watch-party" disabled={!watch.snapshot} variant="default" style={{ minHeight: 44, pointerEvents: 'auto' }} onClick={() => setWatchMode(true)}>Watch Party{watch.state ? ' · ativa' : ''}</Button>}{originalClipControls}</>;
+  const clipControls = originalClipControls;
+  const watchEntry = watch && <Button className={watchStyles.modeEntry} data-control-id="watch-party" disabled={!watch.snapshot} variant="default" leftSection={<IconCinema size={18} />} aria-pressed={false} onClick={() => setWatchMode(true)}>Watch Party{watch.state ? ' · ativa' : ''}</Button>;
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
@@ -406,14 +408,19 @@ export function RoomStage({
   const showAccess = isCinema || isFullscreen;
 
   if (watchMode && watch) {
-    return <Box ref={stageContainerRef} tabIndex={-1} className="stage-main-container" style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 'calc(100px + env(safe-area-inset-bottom, 0px))', background: '#080a0f', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+    return <Box ref={stageContainerRef} tabIndex={-1} className={`stage-main-container ${watchStyles.watchStage}`} style={{ flex: 1, minHeight: 0, overflow: 'auto', marginBottom: isFullscreen ? 0 : 'calc(88px + env(safe-area-inset-bottom, 0px))', background: '#080a0f', position: 'relative', display: 'flex', flexDirection: 'column' }}>
       {interactions}
-      <Box style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12, alignItems: 'center' }}>
-        <Button data-control-id="watch-back" variant="default" style={{ minHeight: 44 }} onClick={() => setWatchMode(false)}>Voltar às transmissões</Button>
-        <Button variant="subtle" style={{ minHeight: 44 }} onClick={onToggleCinema}>{isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}</Button>
-        <Button variant="subtle" style={{ minHeight: 44 }} onClick={toggleFullscreen}>{isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}</Button>
-        {showAccess && interactionAccess}
-      </Box>
+      <nav className={watchStyles.navigation} aria-label="Modos do palco">
+        <div className={watchStyles.modeTabs}>
+          <Button data-control-id="watch-back" variant="subtle" color="gray" leftSection={<IconScreen size={16} />} onClick={() => setWatchMode(false)} aria-label="Voltar às transmissões">Transmissões</Button>
+          <Button variant="light" leftSection={<IconCinema size={16} />} aria-pressed={true}>Watch Party</Button>
+        </div>
+        <div className={watchStyles.viewTools}>
+          <Button variant="subtle" color="gray" leftSection={<IconCinema size={16} />} onClick={onToggleCinema}>{isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}</Button>
+          <Button data-control-id="fullscreen-toggle" variant="subtle" color="gray" leftSection={isFullscreen ? <IconMinimize size={16} /> : <IconMaximize size={16} />} onClick={toggleFullscreen}>{isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}</Button>
+          {showAccess && interactionAccess}
+        </div>
+      </nav>
       <WatchPartyPanel watch={watch} participants={participants} />
     </Box>;
   }
@@ -462,6 +469,7 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
+        {watchEntry}
         <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
@@ -925,6 +933,7 @@ export function RoomStage({
           {showAccess && interactionAccess}
         </Box>
       </Box>
+      {watchEntry}
       {/* Main Spotlight Canvas */}
       <Box
         ref={primaryPlayerContainerRef}
