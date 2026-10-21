@@ -164,6 +164,7 @@ test('clip session: server denial is explicit and no local recorder starts', t =
 });
 
 test('clip session: source A stays identifiable through request, recording, finalization and preview after selecting B', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { hook, sent, client, target, source } = setup(t);
   class Track extends EventTarget {
     kind = 'video'; readyState = 'live'; enabled = true; muted = false; sourceId = 'A';
@@ -199,6 +200,10 @@ test('clip session: source A stays identifiable through request, recording, fina
   hook.current.validate([a, b], null, [{ peerId: 'p', stream: streamA }, { peerId: 'b', stream: source }], 'idle', { p: 'connected', b: 'connected' });
   assert.deepEqual(hook.current.source, expected);
   assert.equal(encoder.stream.getVideoTracks()[0].sourceId, 'A');
+  t.mock.timers.tick(8000);
+  assert.equal(hook.current.notice, '');
+  assert.equal(hook.current.status, 'recording');
+  assert.deepEqual(hook.current.source, expected);
   hook.current.stop();
   assert.equal(hook.current.status, 'finishing');
   assert.deepEqual(hook.current.source, expected);
@@ -207,6 +212,44 @@ test('clip session: source A stays identifiable through request, recording, fina
   assert.equal(hook.current.status, 'idle');
   assert.deepEqual(hook.current.source, expected);
   assert.ok(hook.current.file);
+  assert.ok(hook.current.notice);
   hook.current.discard();
+  assert.equal(hook.current.notice, '');
   assert.equal(hook.current.source, null);
+});
+
+test('clip feedback expires, renews its deadline, and preserves room recording state', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { hook, client, snapshot } = setup(t);
+  const recording = { recordingId: 'r', recorderId: 'other', presenterId: 'p', streamId: 'capture' };
+  hook.current.receive({ ...snapshot, revision: 2, recordings: [recording] }, client);
+  assert.match(hook.current.notice, /iniciou/);
+  t.mock.timers.tick(7000);
+  hook.current.receive({ ...snapshot, revision: 3, recordings: [] }, client);
+  t.mock.timers.tick(1000);
+  assert.match(hook.current.notice, /encerrou/);
+  t.mock.timers.tick(7000);
+  assert.equal(hook.current.notice, '');
+  hook.current.receive({ ...snapshot, revision: 4, recordings: [recording] }, client);
+  t.mock.timers.tick(8000);
+  assert.equal(hook.current.notice, '');
+  assert.deepEqual(hook.current.snapshot.recordings, [recording]);
+});
+
+test('clip feedback clears on discard and new operations', t => {
+  const { hook, sent, client, snapshot, target, source } = setup(t);
+  hook.current.start(target, source, false);
+  hook.current.receive({ type: 'clip-result', recordingId: sent.at(-1).recordingId, ok: false, message: 'Recusado.' }, client);
+  assert.equal(hook.current.notice, 'Recusado.');
+  hook.current.discard();
+  assert.equal(hook.current.notice, '');
+  hook.current.receive({ ...snapshot, revision: 2, recordings: [{ recordingId: 'r', recorderId: 'other', presenterId: 'p' }] }, client);
+  hook.current.permission('p', true);
+  assert.equal(hook.current.notice, '');
+  hook.current.receive({ type: 'clip-result', recordingId: sent.at(-1).recordingId, ok: true }, client);
+  assert.ok(hook.current.notice);
+  hook.current.start(target, source, false);
+  assert.equal(hook.current.notice, '');
+  assert.equal(hook.current.status, 'pending');
+  assert.equal(hook.current.source.presenterId, 'p');
 });

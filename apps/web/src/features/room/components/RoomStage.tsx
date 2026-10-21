@@ -436,7 +436,7 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
-        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{clipControls}{showAccess && interactionAccess}</Box>
+        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -576,7 +576,6 @@ export function RoomStage({
         {announceMessage}
       </Box>
       {interactions}
-      <Box style={{ position: 'absolute', top: 56, right: 14, zIndex: 30 }}>{clipControls}</Box>
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
         .comparison-panel { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; background: #000; display: flex; flex-direction: column; }
@@ -586,12 +585,15 @@ export function RoomStage({
           top: 12px;
           left: 12px;
           right: 12px;
-          z-index: 18;
+          z-index: 26;
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           justify-content: space-between;
           gap: 8px;
           pointer-events: none;
+        }
+        .comparison-panel:has([data-clip-controls] [aria-expanded="true"]) {
+          z-index: 30;
         }
         .comparison-selector-pill {
           pointer-events: auto;
@@ -662,7 +664,16 @@ export function RoomStage({
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .stage-comparing .stage-top-right { display: none !important; }
+        .stage-top-right {
+          position: absolute;
+          top: 14px;
+          right: 14px;
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          z-index: 28;
+          pointer-events: none;
+        }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
         .stage-view-controls {
           position: absolute;
@@ -809,9 +820,12 @@ export function RoomStage({
             display: none !important;
           }
         }
-        @media (max-width: 560px) {
-          .stage-quality-pill-compact { display: none !important; }
-          .stage-top-right-access { top: 56px !important; }
+        @media (max-width: 640px) {
+          .stage-quality-pill { display: none !important; }
+          .comparison-meta-badge { display: none !important; }
+          .stage-top-right-access { top: 52px !important; }
+          .stage-streamer-badge { max-width: calc(100% - 148px); }
+          .stage-main-container:not(.stage-comparing) .stage-view-controls { top: 108px; }
         }
         @media (max-width: 440px) {
           .comparison-header {
@@ -819,35 +833,72 @@ export function RoomStage({
             left: 8px;
             right: 8px;
           }
+          .stage-top-right {
+            right: 8px;
+            gap: 6px;
+          }
           .comparison-selector-pill select {
-            max-width: 112px;
+            max-width: 96px;
+          }
+          .comparison-role-tag {
+            font-size: 0;
+            gap: 0;
+          }
+          .stage-streamer-badge {
+            left: 8px;
+            max-width: calc(100% - 128px);
           }
         }
       `}</style>
       <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined}>
-      {comparing && <Box className="comparison-header">
-        <Box className="comparison-selector-pill">
-          <span className="comparison-role-tag" data-role="primary">
-            <span style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
-            }} />
-            Principal
-          </span>
-          <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => selectPrimary(event.target.value)}>
-            {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
-          </select>
-        </Box>
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          <span className="comparison-meta-badge">
-            <IconSignal size={12} style={{ color: '#22c55e' }} />
-            {activeStream.hasAudio ? 'Com áudio' : 'Tela'}
-          </span>
+      <Box className={comparing ? 'comparison-header' : (showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right')}>
+        {comparing && (
+          <Box className="comparison-selector-pill">
+            <span className="comparison-role-tag" data-role="primary">
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
+              }} />
+              Principal
+            </span>
+            <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => selectPrimary(event.target.value)}>
+              {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+            </select>
+          </Box>
+        )}
+        <Box style={{ display: 'flex', alignItems: 'flex-start', gap: comparing ? 6 : 8, pointerEvents: 'auto' }}>
+          {comparing ? (
+            <span className="comparison-meta-badge">
+              <IconSignal size={12} style={{ color: '#22c55e' }} />
+              {activeStream.hasAudio ? 'Com áudio' : 'Tela'}
+            </span>
+          ) : (
+            <Box
+              className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                minHeight: 'var(--stage-control-size, 36px)',
+                backgroundColor: 'rgba(13, 17, 23, 0.85)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '4px 10px',
+                borderRadius: '999px',
+              }}
+            >
+              <IconSignal size={13} style={{ color: '#22c55e' }} />
+              <Text size="xs" fw={500} c="#8c959f">
+                {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
+              </Text>
+            </Box>
+          )}
+          {clipControls}
           {showAccess && interactionAccess}
         </Box>
-      </Box>}
+      </Box>
       {/* Main Spotlight Canvas */}
       <Box
         ref={primaryPlayerContainerRef}
@@ -913,6 +964,7 @@ export function RoomStage({
         {/* Top-Left Streamer Badge (Traditional stage only; in comparison mode the compact selector pill identifies the presenter) */}
         {!comparing && (
           <Box
+            className="stage-streamer-badge"
             style={{
               position: 'absolute',
               top: 14,
@@ -927,6 +979,7 @@ export function RoomStage({
               borderRadius: '20px',
               zIndex: 10,
               pointerEvents: 'auto',
+              minWidth: 0,
             }}
           >
             <Box
@@ -941,11 +994,12 @@ export function RoomStage({
                 justifyContent: 'center',
                 fontSize: '10px',
                 fontWeight: 700,
+                flexShrink: 0,
               }}
             >
               {getInitials(activeStream.displayName)}
             </Box>
-            <Text size="xs" fw={600} c="#fff">
+            <Text size="xs" fw={600} c="#fff" truncate>
               {activeStream.displayName} · {activeStream.paused ? 'Pausado' : 'Transmitindo'}
             </Text>
             <Box
@@ -954,44 +1008,11 @@ export function RoomStage({
                 height: 6,
                 borderRadius: '50%',
                 backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
+                flexShrink: 0,
               }}
             />
           </Box>
         )}
-
-        {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
-        <Box
-          className={showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right'}
-          style={{
-            position: 'absolute',
-            top: 14,
-            right: 14,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            zIndex: 26,
-          }}
-        >
-          {showAccess && !comparing && interactionAccess}
-          <Box
-            className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: 'rgba(13, 17, 23, 0.85)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              padding: '4px 10px',
-              borderRadius: '16px',
-            }}
-          >
-            <IconSignal size={13} style={{ color: '#22c55e' }} />
-            <Text size="xs" fw={500} c="#8c959f">
-              {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
-            </Text>
-          </Box>
-        </Box>
       </Box>
 
       </Box>
