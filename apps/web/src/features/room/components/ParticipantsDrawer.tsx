@@ -1,5 +1,3 @@
-import { FileSendForm, FileTransferList } from './FileTransfers';
-import type { FileTransferManager, FileDelivery } from '../files/file-transfer-manager';
 import type { RoomState } from '@screen-room/protocol';
 import React, { useRef, useEffect, useState } from 'react';
 import {
@@ -31,9 +29,6 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface ParticipantsDrawerProps {
-  files?: FileTransferManager;
-  fileDeliveries?: FileDelivery[];
-  filesConnected?: boolean;
   roomState?: RoomState;
   isHost?: boolean;
   moderationPending?: boolean;
@@ -52,7 +47,6 @@ export interface ParticipantsDrawerProps {
 }
 
 export function ParticipantsDrawer({
-  files, fileDeliveries = [], filesConnected = false,
   roomState, isHost = false, moderationPending = false, moderationFeedback, onModerate,
   opened,
   onClose,
@@ -200,10 +194,6 @@ export function ParticipantsDrawer({
           {roomState.locked ? 'Desbloquear entradas' : 'Bloquear entradas'}
         </Button>}
         {moderationFeedback && <Text ref={moderationStatusRef} tabIndex={-1} size="sm" mt="sm" role="status">{moderationFeedback}</Text>}
-      </Box>}
-      {files && <Box style={{ maxHeight: '55%', overflowY: 'auto', flexShrink: 0 }}>
-        {fileDeliveries.length > 0 && <FileTransferList manager={files} deliveries={fileDeliveries} participants={participants} />}
-        <FileSendForm manager={files} participants={participants} connected={filesConnected} />
       </Box>}
       {/* Participants List */}
       <Box style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem' }}>

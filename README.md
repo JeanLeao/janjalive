@@ -392,4 +392,4 @@ preferência anterior. A seleção não remove as restrições de autoplay do na
 
 ### Transferência de arquivos (F15)
 
-Envie arquivos de até 20 MiB a destinatários selecionados no painel Participantes, com aceitação individual e download explícito. Funciona também entre espectadores sem mídia. Veja [fluxo, limites e segurança](FILES.md).
+Envie arquivos de até 20 MiB pelo compositor do Chat a destinatários selecionados, com cards privados, aceitação individual e download explícito. Funciona também entre espectadores sem mídia. Veja [fluxo, limites e segurança](FILES.md).

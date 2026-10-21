@@ -1,3 +1,6 @@
+import { FileAttachment, FileTransferCard, groupDeliveries } from './FileTransfers';
+import type { FileDelivery, FileTransferManager } from '../files/file-transfer-manager';
+import type { RoomParticipant } from '../types';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu, Popover } from '@mantine/core';
 import {
@@ -36,6 +39,9 @@ const GROUP_WINDOW_MS = 5 * 60 * 1000;
 export type InteractionTab = 'chat' | 'qa' | 'polls';
 
 interface InteractionsStateInput {
+  files?: FileTransferManager;
+  fileDeliveries?: FileDelivery[];
+  participants?: RoomParticipant[];
   roomId: string;
   messages: ChatMessage[];
   error: string | null;
@@ -55,6 +61,7 @@ interface InteractionsStateInput {
  * sobrevivem a mudanças de modo (normal, Cinema e tela cheia) sem remontar a sessão.
  */
 export function useInteractionsUi({
+  files, fileDeliveries = [], participants = [],
   roomId,
   messages,
   error,
@@ -99,6 +106,11 @@ export function useInteractionsUi({
     wasQaSubmitPending.current = qaSubmitPending;
   }, [qaSubmitPending, qaError]);
 
+  const pendingFiles = fileDeliveries.filter(d => d.incoming && d.state === 'offered').length;
+  const fileTimes = useRef(new Map<string, number>());
+  for (const id of fileTimes.current.keys()) if (!fileDeliveries.some(d => d.id === id)) fileTimes.current.delete(id);
+  for (const d of fileDeliveries) if (!fileTimes.current.has(d.id)) fileTimes.current.set(d.id, Date.now());
+  const newestFile = fileDeliveries.at(-1)?.id;
   const newest = messages.at(-1)?.id;
   const unread = newest && newest !== lastRead
     ? (lastRead ? messages.length - messages.findIndex(m => m.id === lastRead) - 1 : messages.length)
@@ -110,7 +122,7 @@ export function useInteractionsUi({
       scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
       setLastRead(newest);
     }
-  }, [newest, opened, tab, atBottom]);
+  }, [newest, newestFile, opened, tab, atBottom]);
   useEffect(() => { if (!connected) setPicker(false); }, [connected]);
 
   const lastTriggerRef = useRef<HTMLElement | null>(null);
@@ -144,6 +156,7 @@ export function useInteractionsUi({
   const toggleChat = useCallback(() => { if (opened) closeChat(); else openChat(); }, [opened, openChat, closeChat]);
   const closePicker = useCallback(() => setPicker(false), []);
   return {
+    files, fileDeliveries, participants, pendingFiles, fileTimes,
     opened,
     tab,
     setTab,
@@ -176,7 +189,7 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
   handRaised?: boolean; handReady?: boolean; onToggleHand?: () => void;
   ui: InteractionsUi; connected: boolean; onSendReaction: (reaction: Reaction) => void; variant: 'header' | 'floating';
 }) {
-  const { unread, openQuestionsCount, opened, picker } = ui;
+  const { unread, openQuestionsCount, opened, picker, pendingFiles } = ui;
   const badge = unread > 99 ? '99+' : String(unread);
   const qaBadge = openQuestionsCount > 99 ? '99+' : String(openQuestionsCount);
   const onPickerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -199,11 +212,11 @@ export function InteractionActions({ ui, connected, onSendReaction, variant, han
     <button type="button" className={classes.action} data-chat-trigger data-poll-open={ui.hasOpenPoll || undefined} data-qa-open={openQuestionsCount || undefined}
       aria-expanded={opened} aria-controls="room-chat-panel"
       title={ui.hasOpenPoll ? 'Enquete aberta · Chat e perguntas (I)' : openQuestionsCount > 0 ? `Chat e perguntas (${openQuestionsCount} em aberto) (I)` : 'Chat e perguntas (I)'}
-      aria-label={unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={ui.toggleChat}
+      aria-label={pendingFiles ? `Abrir chat, ${pendingFiles} solicitações de arquivo` : unread ? `Abrir chat, ${unread} mensagens não lidas` : 'Abrir chat'} onClick={() => { if (pendingFiles) { ui.setTab('chat'); ui.openChat(); } else ui.toggleChat(); }}
       data-active={opened || undefined}>
       <IconChat size={18} aria-hidden />
       {ui.hasOpenPoll && <span className={classes.pollDot} data-testid="poll-open-indicator" aria-label="Enquete aberta" />}
-      {unread > 0 && <span className={classes.badge} aria-hidden="true">{badge}</span>}
+      {(unread + pendingFiles) > 0 && <span className={classes.badge} aria-hidden="true">{pendingFiles ? unread + pendingFiles : badge}</span>}
       {openQuestionsCount > 0 && <span className={`${classes.qaBadge} ${unread > 0 ? classes.qaBadgeOffset : ''}`} data-testid="qa-open-badge" aria-hidden="true">?{qaBadge}</span>}
     </button>
     <button type="button" className={`${classes.action} ${classes.handAction}`} disabled={!connected || !handReady}
@@ -378,7 +391,7 @@ function InteractionsPanel({
           data-active={tab === 'chat' || undefined}
           onClick={() => setTab('chat')}
         >
-          <span>Chat</span>
+          <span>Chat</span>{ui.pendingFiles > 0 && <span className={classes.tabBadge} aria-label={`${ui.pendingFiles} arquivos pendentes`}>{ui.pendingFiles}</span>}
           {unread > 0 && <span className={classes.tabBadge} aria-label={`${unread} não lidas`}>{unread > 99 ? '99+' : unread}</span>}
         </button>
         <button
@@ -435,7 +448,14 @@ function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
 }) {
   const { draft, setDraft, scroll, atBottom, setAtBottom, unread } = ui;
   const field = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => { scroll.current?.scrollTo({ top: scroll.current.scrollHeight }); }, [scroll]);
+  useLayoutEffect(() => {
+    const pending = scroll.current?.querySelector<HTMLElement>('[data-pending-file]');
+    const frame = requestAnimationFrame(() => {
+      if (pending) pending.scrollIntoView({ block: 'nearest' });
+      else scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scroll]);
   useLayoutEffect(() => {
     const node = field.current;
     if (!node) return;
@@ -449,12 +469,14 @@ function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
     <div className={classes.logWrap}>
       <div className={classes.log} ref={scroll} role="log" aria-label="Mensagens da sala" aria-live="polite" tabIndex={0}
         onScroll={event => { const node = event.currentTarget; setAtBottom(node.scrollHeight - node.scrollTop - node.clientHeight < 48); }}>
-        {messages.length === 0 && <div className={classes.empty}>
+        {messages.length === 0 && ui.fileDeliveries.length === 0 && <div className={classes.empty}>
           <span className={classes.emptyIcon} aria-hidden="true"><IconChat size={22} /></span>
           <strong>A conversa começa aqui</strong>
-          <span>Envie uma mensagem para a sala. Quem entrar depois não verá mensagens anteriores.</span>
+          <span>Converse com a sala ou anexe um arquivo privado. Quem entrar depois não verá o histórico.</span>
         </div>}
-        {messages.map((item, index) => {
+        {[...messages.map((item, index) => ({ kind: 'text' as const, item, index, time: item.timestamp })), ...groupDeliveries(ui.fileDeliveries).map(group => ({ kind: 'file' as const, group, time: ui.fileTimes.current.get(group[0].id) ?? 0 }))].sort((a, b) => a.time - b.time).map(entry => {
+          if (entry.kind === 'file') return ui.files && <FileTransferCard key={entry.group[0].id} manager={ui.files} deliveries={entry.group} participants={ui.participants} />;
+          const { item, index } = entry;
           const previous = messages[index - 1];
           const own = Boolean(localPeerId) && item.peerId === localPeerId;
           const continued = Boolean(previous) && previous.peerId === item.peerId && item.timestamp - previous.timestamp < GROUP_WINDOW_MS;
@@ -475,7 +497,8 @@ function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
           </article>;
         })}
       </div>
-      {!atBottom && unread > 0 && <button type="button" className={classes.jump} onClick={() => setAtBottom(true)}>
+      {!atBottom && ui.pendingFiles > 0 && <button type="button" className={classes.jump} onClick={() => scroll.current?.querySelector<HTMLElement>('[data-pending-file]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })}>Ver solicitação de arquivo</button>}
+      {!atBottom && !ui.pendingFiles && unread > 0 && <button type="button" className={classes.jump} onClick={() => setAtBottom(true)}>
         <IconSend size={14} aria-hidden style={{ transform: 'rotate(180deg)' }} /> {unread} {unread === 1 ? 'nova mensagem' : 'novas mensagens'}
       </button>}
     </div>
@@ -483,6 +506,7 @@ function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
       <div role="status" className={`${classes.status} ${error ? classes.statusError : ''}`}>
         {status}
       </div>
+      {ui.files && <FileAttachment manager={ui.files} participants={ui.participants} connected={connected} />}
       <div className={classes.field} data-disabled={!connected || undefined}>
         <textarea ref={field} aria-label="Mensagem" aria-describedby="room-chat-hint" placeholder="Escreva para a sala" value={draft} readOnly={pending}
           rows={1} maxLength={INTERACTION_LIMITS.textLength} onChange={event => setDraft(event.currentTarget.value)}
