@@ -22,6 +22,7 @@ export interface ManagedPeer {
   negotiationTimer?: ReturnType<typeof setTimeout>;
   recoveryAttempts: number;
   recovering: boolean;
+  dataChannel?: RTCDataChannel;
   remoteStream?: MediaStream;
   recoveryTimer?: ReturnType<typeof setTimeout>;
 }
@@ -35,6 +36,8 @@ export interface PeerManagerOptions {
   onRemoteStreamAdd: (peerId: string, stream: MediaStream) => void;
   onPeerState?: (peerId: string, state: RTCPeerConnectionState) => void;
   onRemoteStreamRemove: (peerId: string) => void;
+  onDataChannel?: (peerId: string, channel: RTCDataChannel) => void;
+  onDataDisconnect?: (peerId: string) => void;
   logger?: DiagnosticsLogger;
 }
 
@@ -214,6 +217,7 @@ export class PeerManager {
       }
       if (peer.recoveryTimer) clearTimeout(peer.recoveryTimer);
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        this.options.onDataDisconnect?.(peerId);
         peer.recoveryTimer = setTimeout(() => {
           if (this.peers.get(peerId) !== peer) return;
           this.recoverPeer(peerId);
@@ -222,6 +226,20 @@ export class PeerManager {
     };
 
     return peer;
+  }
+
+  // Negotiated channel ID makes simultaneous requests reuse one ordered channel.
+  ensureDataChannel(id: string): RTCDataChannel | null {
+    if (!this.participants.has(id) || this.disposed) return null;
+    const peer = this.getOrCreatePeer(id);
+    if (!peer) return null;
+    if (peer.dataChannel && peer.dataChannel.readyState !== 'closed') return peer.dataChannel;
+    const channel = peer.pc.createDataChannel('screen-room-files-v1', { negotiated: true, id: 0, ordered: true });
+    peer.dataChannel = channel;
+    this.options.onDataChannel?.(id, channel);
+    peer.negotiationPending = true;
+    void this.createAndSendOffer(id);
+    return channel;
   }
 
   async handleSignal(from: string, data: any): Promise<void> {
@@ -300,7 +318,15 @@ export class PeerManager {
     peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
       try {
         if (this.peers.get(peerId) !== peer) return;
-        if ((!this.localStream && !peer.pc.remoteDescription && !this.sharing.get(peerId)) || peer.pc.signalingState !== 'stable') {
+        // Data-only peers use a deterministic initial offerer. This avoids
+        // rolling back the very first SCTP offer and retiring its gathered ICE.
+        // Media negotiations continue to use the existing perfect-negotiation path.
+        if (peer.dataChannel && !this.localStream && !this.sharing.get(peerId) && !peer.pc.remoteDescription &&
+            this.options.localPeerId && this.options.localPeerId > peerId) {
+          peer.negotiationPending = false;
+          return;
+        }
+        if ((!this.localStream && !peer.pc.remoteDescription && !this.sharing.get(peerId) && !peer.dataChannel) || peer.pc.signalingState !== 'stable') {
           this.options.logger?.log('offer-skip', { peer: peerId, signalingState: peer.pc.signalingState });
           return;
         }
@@ -588,7 +614,9 @@ export class PeerManager {
     this.peerVersions.set(peerId, (this.peerVersions.get(peerId) || 0) + 1);
     this.participants.delete(peerId);
     this.sharing.delete(peerId);
+    this.options.onDataDisconnect?.(peerId);
     if (!peer) return;
+    if (peer.dataChannel) { peer.dataChannel.close(); peer.dataChannel = undefined; }
 
     if (peer.remoteGeneration) this.retiredGenerations.add(peer.remoteGeneration);
     this.peers.delete(peerId);

@@ -1,3 +1,4 @@
+import { FileTransfers } from './file-transfers.js';
 import { Clips } from './clips.js';
 import { KeyRateLimiter } from './key-rate-limiter.js';
 import http from 'node:http';
@@ -311,6 +312,8 @@ export function createSignalServer({
     }
   }
 
+  const files = new FileTransfers((room, peer, event) => { const socket = peerSocket(room, peer); if (socket) send(socket, event); });
+
   const clips = new Clips(snapshot => broadcast(snapshot.roomId, snapshot));
 
   rooms.onRoomStateChanged = (roomId) => broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
@@ -323,6 +326,7 @@ export function createSignalServer({
 
     // Deterministic check: only remove if THIS socket is the active one (BUG-01)
     if (clients.get(key) === socket) {
+      files.depart(roomId, peerId);
       clips.depart(roomId, peerId);
       clients.delete(key);
       const clearedSelections = rooms.clearSelections(roomId, peerId, effectiveVoluntary);
@@ -663,6 +667,7 @@ export function createSignalServer({
             // Disassociate previous socket so its close event will not clean up the new session (BUG-01)
             existingSocket.meta = null;
             try {
+              files.depart(normalizedRoom, normalizedPeer);
               clips.depart(normalizedRoom, normalizedPeer);
               existingSocket.close(WS_CLOSE_CODES.SUPERSEDED, 'Superseded by new connection');
             } catch {
@@ -965,6 +970,13 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'file-request' || message.type === 'file-control') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket || !rooms.hasPeer(meta.roomId, meta.peerId)) return;
+          files.apply(meta.roomId, meta.peerId, message, id => peerSocket(meta.roomId, id)?.readyState === WebSocket.OPEN && rooms.hasPeer(meta.roomId, id));
+          return;
+        }
+
         if (message.type === 'clip-operation') {
           const meta = socket.meta;
           if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
@@ -1077,6 +1089,7 @@ export function createSignalServer({
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(heartbeatTimer);
+        files.dispose();
         clips.dispose();
         rooms.clearAllRecovery();
         for (const socket of wss.clients) socket.terminate();
