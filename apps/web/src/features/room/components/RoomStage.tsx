@@ -1,3 +1,6 @@
+import { WatchPartyPanel, StageContentSelector } from './WatchParty';
+import watchStyles from './WatchParty.module.css';
+import type { WatchParty } from '../hooks/useWatchParty';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useId } from 'react';
@@ -38,6 +41,7 @@ import {
 } from './Icons';
 
 export interface RoomStageProps {
+  watch?: WatchParty;
   clipControls?: React.ReactNode;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
@@ -76,7 +80,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
-  clipControls,
+  watch,
+  clipControls: originalClipControls,
   onVideoPresented,
   annotations,
   onTogglePointingPermission,
@@ -102,6 +107,8 @@ export function RoomStage({
   shortcutsEnabled = false,
   onOpenQrCode,
 }: RoomStageProps) {
+  const [watchMode, setWatchMode] = useState(false);
+  const clipControls = originalClipControls;
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
@@ -115,6 +122,19 @@ export function RoomStage({
   const qrBtnRef = useRef<HTMLButtonElement | null>(null);
   const wasInFullscreenRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const previousWatchMode = useRef(watchMode);
+  useEffect(() => {
+    if (previousWatchMode.current === watchMode) return;
+    previousWatchMode.current = watchMode;
+    const frame = requestAnimationFrame(() =>
+      stageContainerRef.current?.querySelector<HTMLElement>(
+        watchMode
+          ? '[data-control-id="watch-back"]'
+          : '[data-control-id="watch-party"], [data-control-id="empty-watch-entry"]'
+      )?.focus()
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [watchMode]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -392,6 +412,25 @@ export function RoomStage({
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
 
+  if (watchMode && watch) {
+    return (
+      <WatchPartyPanel
+        watch={watch}
+        participants={participants}
+        streamCount={streamItems.length}
+        onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+        isCinema={isCinema}
+        onToggleCinema={onToggleCinema}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        showAccess={showAccess}
+        interactionAccess={interactionAccess}
+        interactions={interactions}
+        stageContainerRef={stageContainerRef}
+      />
+    );
+  }
+
   // Empty state if no stream is active
   if (!activeStream) {
     return (
@@ -436,7 +475,17 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
-        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
+        {watch && (watch.state || streamItems.length > 0) && (
+          <div className={watchStyles.streamsSelectorHost}>
+            <StageContentSelector
+              watchMode={false}
+              hasSession={!!watch.state}
+              streamCount={streamItems.length}
+              onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+            />
+          </div>
+        )}
+        <Box className={watch?.state ? watchStyles.streamsTools : undefined} style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -487,6 +536,7 @@ export function RoomStage({
           >
             {canShareScreen === true && (
               <Button
+                key="empty-share"
                 leftSection={<IconScreen size={16} />}
                 onClick={onStartSharing}
                 style={{
@@ -501,7 +551,32 @@ export function RoomStage({
               </Button>
             )}
 
+            {watch && !watch.state && (
+              <Button
+                key="empty-watch"
+                variant="default"
+                data-control-id="empty-watch-entry"
+                data-testid="empty-watch-entry"
+                aria-label={watch.state ? 'Vídeo compartilhado' : 'Assistir vídeo com a sala'}
+                styles={{ label: { whiteSpace: 'normal', textAlign: 'center' } }}
+                leftSection={<IconCinema size={16} />}
+                onClick={() => setWatchMode(true)}
+                disabled={!watch.snapshot}
+                style={{
+                  backgroundColor: '#161b22',
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  color: '#e6edf3',
+                  height: '42px',
+                  padding: '0 1.25rem',
+                  flex: '1 1 160px',
+                }}
+              >
+                Vídeo compartilhado
+              </Button>
+            )}
+
             <Button
+              key="empty-invite"
               variant="default"
               leftSection={<IconLink size={16} />}
               onClick={onCopyInvite}
@@ -823,8 +898,9 @@ export function RoomStage({
         @media (max-width: 640px) {
           .stage-quality-pill { display: none !important; }
           .comparison-meta-badge { display: none !important; }
+          .stage-top-right { top: 52px !important; }
           .stage-top-right-access { top: 52px !important; }
-          .stage-streamer-badge { max-width: calc(100% - 148px); }
+          .stage-streamer-badge { top: 52px !important; max-width: calc(100% - 148px); }
           .stage-main-container:not(.stage-comparing) .stage-view-controls { top: 108px; }
         }
         @media (max-width: 440px) {
@@ -850,6 +926,16 @@ export function RoomStage({
           }
         }
       `}</style>
+      {watch && (
+        <div className={watchStyles.streamsSelectorHost}>
+          <StageContentSelector
+            watchMode={false}
+            hasSession={!!watch.state}
+            streamCount={streamItems.length}
+            onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+          />
+        </div>
+      )}
       <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined}>
       <Box className={comparing ? 'comparison-header' : (showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right')}>
         {comparing && (

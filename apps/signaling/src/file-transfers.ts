@@ -24,7 +24,7 @@ export class FileTransfers {
       const d: Delivery = { room, from, to: message.target, accepted: false,
         timer: setTimeout(() => this.finish(key, 'cancel'), FILE_LIMITS.requestMs) };
       this.deliveries.set(key, d);
-      this.notify(d, { type: 'file-event', id: message.id, from, to: message.target, action: 'request', file: message.file });
+      this.notify(d, { type: 'file-event', id: message.id, from, to: message.target, action: 'request', file: message.file, ...(message.watchSessionId ? { watchSessionId: message.watchSessionId } : {}) });
       return;
     }
     const d = this.deliveries.get(key);

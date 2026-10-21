@@ -385,7 +385,7 @@ export const FileMetadataSchema = z.object({
 }).strict();
 export type FileMetadata = z.infer<typeof FileMetadataSchema>;
 const fileIdentity = { id: z.string().uuid(), target: z.string().min(1).max(80) };
-export const FileRequestSchema = z.object({ type: z.literal('file-request'), ...fileIdentity, file: FileMetadataSchema }).strict();
+export const FileRequestSchema = z.object({ type: z.literal('file-request'), ...fileIdentity, file: FileMetadataSchema, watchSessionId: z.string().uuid().optional() }).strict();
 export const FileControlSchema = z.object({ type: z.literal('file-control'), ...fileIdentity,
   action: z.enum(['accept', 'reject', 'cancel', 'complete']),
 }).strict();
@@ -393,11 +393,50 @@ export type FileOperation = z.infer<typeof FileRequestSchema> | z.infer<typeof F
 export const FileEventSchema = z.object({ type: z.literal('file-event'), id: z.string().uuid(),
   from: z.string().min(1).max(80), to: z.string().min(1).max(80),
   action: z.enum(['request', 'accept', 'reject', 'cancel', 'complete', 'error']),
-  file: FileMetadataSchema.optional(),
+  file: FileMetadataSchema.optional(), watchSessionId: z.string().uuid().optional(),
 }).strict();
 export type FileEvent = z.infer<typeof FileEventSchema>;
 
+// F14: metadata and authoritative playback only; media uses F15 consent.
+export const WatchStateSchema = z.object({
+  sessionId: z.string().uuid(), controllerId: z.string().min(1).max(80),
+  file: FileMetadataSchema, duration: z.number().finite().positive().max(Number.MAX_SAFE_INTEGER),
+  position: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER), playing: z.boolean(),
+  referenceTime: z.number().int().nonnegative(),
+}).strict();
+export type WatchState = z.infer<typeof WatchStateSchema>;
+export const WatchOperationSchema = z.object({
+  type: z.literal('watch-operation'), requestId: z.string().uuid(), sessionId: z.string().uuid(),
+  revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  action: z.enum(['create', 'play', 'pause', 'seek', 'end']),
+  position: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  file: FileMetadataSchema.optional(), duration: z.number().finite().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+}).strict();
+export type WatchOperation = z.infer<typeof WatchOperationSchema>;
+export const WatchAvailabilitySchema = z.enum(['ready', 'buffering', 'blocked', 'error', 'unavailable']);
+export type WatchAvailability = z.infer<typeof WatchAvailabilitySchema>;
+export const WatchReadinessSchema = z.object({
+  type: z.literal('watch-readiness'), sessionId: z.string().uuid(), status: WatchAvailabilitySchema,
+}).strict();
+export const WatchReadinessEventSchema = z.object({
+  type: z.literal('watch-readiness-updated'), roomId: z.string(), sessionId: z.string().uuid(),
+  peerId: z.string().min(1).max(80), status: WatchAvailabilitySchema,
+}).strict();
+export type WatchReadinessEvent = z.infer<typeof WatchReadinessEventSchema>;
+export const WatchSnapshotSchema = z.object({
+  type: z.literal('watch-snapshot'), roomId: z.string(), revision: z.number().int().nonnegative(),
+  serverTime: z.number().int().nonnegative(), state: WatchStateSchema.nullable(),
+  availability: z.array(z.object({ peerId: z.string().min(1).max(80), status: WatchAvailabilitySchema }).strict()).max(1000).optional(),
+}).strict();
+export type WatchSnapshot = z.infer<typeof WatchSnapshotSchema>;
+export const WatchResultSchema = z.object({
+  type: z.literal('watch-result'), requestId: z.string().uuid(), ok: z.boolean(), message: z.string(),
+}).strict();
+export const WatchClockSchema = z.object({ type: z.literal('watch-clock'), sentAt: z.number().finite().nonnegative() }).strict();
+export const WatchClockReplySchema = WatchClockSchema.extend({ type: z.literal('watch-clock-reply'), serverTime: z.number().int().nonnegative() });
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  WatchOperationSchema, WatchClockSchema, WatchReadinessSchema,
   FileRequestSchema, FileControlSchema,
   ClipOperationSchema,
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
@@ -437,6 +476,7 @@ export type ReservedPeerInfo = z.infer<typeof ReservedPeerInfoSchema>;
 export const PeersMessageSchema = z.object({
   type: z.literal('peers'),
   serverTime: z.number().int().nonnegative().optional(),
+  watch: WatchSnapshotSchema.optional(),
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
@@ -517,6 +557,7 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  WatchSnapshotSchema, WatchResultSchema, WatchClockReplySchema, WatchReadinessEventSchema,
   FileEventSchema,
   ClipsSnapshotSchema, ClipResultSchema,
   RoomCreatedSchema, RoomStateMessageSchema, ModerationResultSchema,

@@ -122,3 +122,19 @@ test('files: a connecting sender times out independently from the longer accepte
   manager.receive({ type: 'file-event', id, from: 'peer', to: 'self', action: 'accept' }, 'self');
   t.mock.timers.tick(30_001); assert.equal(current().state, 'error'); assert.equal(channel.sent.length, 0);
 });
+
+test('watch files: verified Blob requires consent, hash and server completion; release affects only its session', async t => {
+  const { manager, channel, id, file, sent, blob } = await setup(t, false);
+  const sessionId = crypto.randomUUID();
+  manager.receive({ type: 'file-event', id, from: 'peer', to: 'self', action: 'request', file, watchSessionId: sessionId }, 'self');
+  assert.equal(manager.verifiedBlob(id), undefined);
+  manager.accept(id);
+  data(channel, frame(id, 0, [0, 255, 13, 10]));
+  data(channel, JSON.stringify({ type: 'end', id })); await tick();
+  assert.equal(sent.at(-1).action, 'complete');
+  assert.equal(manager.verifiedBlob(id), undefined);
+  manager.receive({ type: 'file-event', id, from: 'self', to: 'peer', action: 'complete' }, 'self');
+  assert.equal(await sha256(manager.verifiedBlob(id)), await sha256(blob));
+  manager.releaseWatch('different'); assert.ok(manager.verifiedBlob(id));
+  manager.releaseWatch(sessionId); assert.equal(manager.verifiedBlob(id), undefined);
+});

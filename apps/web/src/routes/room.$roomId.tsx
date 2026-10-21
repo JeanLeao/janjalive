@@ -197,7 +197,7 @@ function RoomPageContent() {
     connected,
     onSendChat: session.sendChat,
     files: isDemo ? undefined : session.files,
-    fileDeliveries: session.fileDeliveries,
+    fileDeliveries: session.fileDeliveries.filter(delivery => !delivery.watchSessionId),
     participants: session.participants,
     polls: session.polls,
     questions: session.questions,
@@ -380,6 +380,7 @@ function RoomPageContent() {
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        watch={isDemo ? undefined : session.watch}
         clipControls={<ClipControls clips={session.clips} participants={session.participants} localStream={session.localStream} remoteStreams={session.remoteStreams} featuredStreamId={session.featuredStreamId} />}
         onVideoPresented={session.onVideoPresented}
         annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
