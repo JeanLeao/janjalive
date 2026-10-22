@@ -147,7 +147,7 @@ export function useLocalClips(roomId: string) {
     discard() { setNotice(''); setFile(null); setSource(null); },
     save() {
       if (!file || !url) return;
-      try { const a = document.createElement('a'); a.href = url; a.download = `screen-room-${Date.now()}.${file.extension}`; document.body.append(a); a.click(); a.remove(); setNotice('Download solicitado. Confira os arquivos salvos pelo navegador.'); }
+      try { const a = document.createElement('a'); a.href = url; a.download = `janjalive-${Date.now()}.${file.extension}`; document.body.append(a); a.click(); a.remove(); setNotice('Download solicitado. Confira os arquivos salvos pelo navegador.'); }
       catch { setNotice('Não foi possível exportar o clipe. Tente salvar novamente.'); }
     },
   };

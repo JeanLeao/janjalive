@@ -53,14 +53,14 @@ function nextMessage(socket, timeoutMs = 1000) {
 // ---------------------------------------------------------------------------
 
 test('SEC-01: origin validation rejects forged Host header bypass', async () => {
-  const allowed = ['http://trusted.local:3000', 'https://app.screenroom.com'];
+  const allowed = ['http://trusted.local:3000', 'https://app.janjalive.com'];
 
   // Attacker attempts to forge Host: evil.attacker.com matching Origin: http://evil.attacker.com
   const isAllowed = isAllowedOrigin('http://evil.attacker.com', 'evil.attacker.com', allowed);
   assert.equal(isAllowed, false, 'Forged Host header must NOT bypass origin validation');
 
-  // Attacker attempts to forge Host: app.screenroom.com while sending untrusted Origin
-  const isAllowed2 = isAllowedOrigin('http://evil.attacker.com', 'app.screenroom.com', allowed);
+  // Attacker attempts to forge Host: app.janjalive.com while sending untrusted Origin
+  const isAllowed2 = isAllowedOrigin('http://evil.attacker.com', 'app.janjalive.com', allowed);
   assert.equal(isAllowed2, false, 'Legitimate Host header must NOT authorize untrusted origin');
 });
 
@@ -144,17 +144,17 @@ test('CFG-01: returns STUN-only mode when TURN secret is not configured', () => 
 test('CFG-01: generates valid TURN credentials when host and secret are provided', () => {
   const config = loadTurnConfig({
     TURN_SECRET: 'testsecret123',
-    TURN_HOST: 'turn.screenroom.example',
+    TURN_HOST: 'turn.janjalive.example',
   });
   assert.equal(config.enabled, true);
-  assert.equal(config.host, 'turn.screenroom.example');
+  assert.equal(config.host, 'turn.janjalive.example');
 
   const provider = createTurnCredentialsProvider(config);
   const creds = provider();
   assert.equal(creds.iceServers.length, 2);
   const turnServer = creds.iceServers[1];
   assert.ok(Array.isArray(turnServer.urls));
-  assert.ok(turnServer.urls[0].includes('turn.screenroom.example'));
+  assert.ok(turnServer.urls[0].includes('turn.janjalive.example'));
   assert.ok(turnServer.username);
   assert.ok(turnServer.credential);
 });

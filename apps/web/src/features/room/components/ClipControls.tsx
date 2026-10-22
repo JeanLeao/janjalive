@@ -57,7 +57,7 @@ export function ClipControls({
     setConfirmation(null);
     const abort = new AbortController();
     preparation.current = abort;
-    const video = new File([file.blob], `screen-room-${Date.now()}.${file.extension}`, {
+    const video = new File([file.blob], `janjalive-${Date.now()}.${file.extension}`, {
       type: file.blob.type || `video/${file.extension}`,
     });
     void watch.create(video, {
@@ -195,7 +195,7 @@ export function ClipControls({
               </div>
               <p className={classes.lead}>
                 Somente a transmissão original selecionada. O consentimento vale para o gravador do
-                Screen Room; ferramentas externas não são controladas.
+                Janjalive; ferramentas externas não são controladas.
               </p>
             </div>
 

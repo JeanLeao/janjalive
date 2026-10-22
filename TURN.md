@@ -1,6 +1,6 @@
 # Conectividade WebRTC com TURN
 
-Este documento descreve a integração com servidores TURN no Screen Room, a emissão de credenciais temporárias no serviço de sinalização, os requisitos de firewall e o comportamento de contingência (fallback).
+Este documento descreve a integração com servidores TURN no Janjalive, a emissão de credenciais temporárias no serviço de sinalização, os requisitos de firewall e o comportamento de contingência (fallback).
 
 ---
 

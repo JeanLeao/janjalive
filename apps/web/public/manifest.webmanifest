@@ -1,6 +1,6 @@
 {
-  "name": "Screen Room",
-  "short_name": "Screen Room",
+  "name": "Janjalive",
+  "short_name": "Janjalive",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -8,7 +8,7 @@
   "theme_color": "#080a0f",
   "background_color": "#080a0f",
   "lang": "pt-BR",
-  "description": "Compartilhamento de tela em tempo real em salas efêmeras",
+  "description": "Compartilhe tela e áudio, converse, troque arquivos e assista a vídeos locais em salas efêmeras, sem cadastro.",
   "icons": [
     {
       "src": "/icon-192.png",

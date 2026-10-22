@@ -7,14 +7,14 @@ import {
 } from '../src/features/room/utils/invite-url.ts';
 
 test('getRoomInviteUrl sanitizes query parameters and fragments', () => {
-  const urlWithParams = 'https://screenroom.live/room/abc-123?token=reconnect-secret&tab=chat#heading';
+  const urlWithParams = 'https://janjalive.live/room/abc-123?token=reconnect-secret&tab=chat#heading';
   const clean = getRoomInviteUrl(urlWithParams);
-  assert.equal(clean, 'https://screenroom.live/room/abc-123');
+  assert.equal(clean, 'https://janjalive.live/room/abc-123');
 });
 
 test('F12: getRoomInviteUrl guarantees room key and access tokens are omitted from copied invite URLs', () => {
-  const urlWithKey = 'https://screenroom.live/room/protected-123?key=abc123xyz&accessKey=secret&roomKey=token#dialog';
-  assert.equal(getRoomInviteUrl(urlWithKey), 'https://screenroom.live/room/protected-123');
+  const urlWithKey = 'https://janjalive.live/room/protected-123?key=abc123xyz&accessKey=secret&roomKey=token#dialog';
+  assert.equal(getRoomInviteUrl(urlWithKey), 'https://janjalive.live/room/protected-123');
 });
 
 test('getRoomInviteUrl preserves origin, port, and room path without private tokens', () => {
@@ -30,20 +30,20 @@ test('getRoomInviteUrl returns empty string for invalid URLs or empty strings', 
 
 test('getRoomInviteUrl strips username and password credentials from URLs', () => {
   assert.equal(
-    getRoomInviteUrl('https://user:secret123@screenroom.live/room/abc-123'),
-    'https://screenroom.live/room/abc-123'
+    getRoomInviteUrl('https://user:secret123@janjalive.live/room/abc-123'),
+    'https://janjalive.live/room/abc-123'
   );
   assert.equal(
     getRoomInviteUrl('http://admin:pass@192.168.1.50:3000/room/team-alpha?token=secret#stage'),
     'http://192.168.1.50:3000/room/team-alpha'
   );
   assert.equal(
-    getRoomInviteUrl('https://username_only@screenroom.live/room/test'),
-    'https://screenroom.live/room/test'
+    getRoomInviteUrl('https://username_only@janjalive.live/room/test'),
+    'https://janjalive.live/room/test'
   );
   assert.equal(
-    getRoomInviteUrl('https://:password_only@screenroom.live/room/test'),
-    'https://screenroom.live/room/test'
+    getRoomInviteUrl('https://:password_only@janjalive.live/room/test'),
+    'https://janjalive.live/room/test'
   );
 });
 
@@ -51,10 +51,10 @@ test('getRoomInviteUrl rejects non-HTTP and non-HTTPS schemes', () => {
   assert.equal(getRoomInviteUrl('javascript:alert(1)'), '');
   assert.equal(getRoomInviteUrl('file:///etc/passwd'), '');
   assert.equal(getRoomInviteUrl('data:text/html,<script>alert(1)</script>'), '');
-  assert.equal(getRoomInviteUrl('ftp://user:pass@ftp.screenroom.live/room/abc'), '');
-  assert.equal(getRoomInviteUrl('ws://screenroom.live/room/abc'), '');
-  assert.equal(getRoomInviteUrl('wss://screenroom.live/room/abc'), '');
-  assert.equal(getRoomInviteUrl('mailto:user@screenroom.live'), '');
+  assert.equal(getRoomInviteUrl('ftp://user:pass@ftp.janjalive.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('ws://janjalive.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('wss://janjalive.live/room/abc'), '');
+  assert.equal(getRoomInviteUrl('mailto:user@janjalive.live'), '');
 });
 
 test('getRoomInviteUrl uses window.location.href when in browser environment', () => {
@@ -62,11 +62,11 @@ test('getRoomInviteUrl uses window.location.href when in browser environment', (
   try {
     globalThis.window = {
       location: {
-        href: 'https://test.screenroom.app/room/test-room?demo=single#video',
-        origin: 'https://test.screenroom.app',
+        href: 'https://test.janjalive.app/room/test-room?demo=single#video',
+        origin: 'https://test.janjalive.app',
       },
     };
-    assert.equal(getRoomInviteUrl(), 'https://test.screenroom.app/room/test-room');
+    assert.equal(getRoomInviteUrl(), 'https://test.janjalive.app/room/test-room');
   } finally {
     globalThis.window = originalWindow;
   }
@@ -82,7 +82,7 @@ test('isLocalAddress detects loopback and local hosts correctly', () => {
 });
 
 test('isLocalAddress returns false for public domains and invalid URLs', () => {
-  assert.equal(isLocalAddress('https://screenroom.live/room/abc'), false);
+  assert.equal(isLocalAddress('https://janjalive.live/room/abc'), false);
   assert.equal(isLocalAddress('https://example.com/room/abc'), false);
   assert.equal(isLocalAddress('https://meet.google.com/xyz'), false);
   assert.equal(isLocalAddress('ftp://localhost:21/room/abc'), false);
@@ -106,9 +106,9 @@ test('copyRoomInviteUrl copies cleaned URL to navigator.clipboard, strips creden
       writable: true,
     });
 
-    const success = await copyRoomInviteUrl('https://user:secret@screenroom.live/room/f10-room?query=123#hash');
+    const success = await copyRoomInviteUrl('https://user:secret@janjalive.live/room/f10-room?query=123#hash');
     assert.equal(success, true);
-    assert.equal(copiedText, 'https://screenroom.live/room/f10-room');
+    assert.equal(copiedText, 'https://janjalive.live/room/f10-room');
 
     // Test rejection of non-http/https schemes
     copiedText = '';
@@ -126,7 +126,7 @@ test('copyRoomInviteUrl copies cleaned URL to navigator.clipboard, strips creden
       configurable: true,
       writable: true,
     });
-    const failSuccess = await copyRoomInviteUrl('https://screenroom.live/room/f10-room');
+    const failSuccess = await copyRoomInviteUrl('https://janjalive.live/room/f10-room');
     assert.equal(failSuccess, false);
   } finally {
     if (originalDescriptor) {

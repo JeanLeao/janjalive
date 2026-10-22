@@ -488,7 +488,7 @@ export function SettingsDrawer({
           <Stack gap="md">
             <div>
               <Text fw={600} size="sm" c="#fff" mb={4}>
-                Sobre o Screen Room
+                Sobre o Janjalive
               </Text>
               <Text size="xs" c="#8c959f">
                 Alternativa rápida e focada para visualização de telas em tempo real.

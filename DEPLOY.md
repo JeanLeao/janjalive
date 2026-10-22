@@ -1,12 +1,12 @@
 # Guia de Implantação e Operação em Servidor VPS (Linux)
 
-Este documento estabelece o procedimento genérico para implantação, configuração e operação do **Screen Room** em qualquer servidor VPS Linux (Ubuntu, Debian ou distribuição compatível), sem dependência de plataformas proprietárias ou provedores de hospedagem específicos.
+Este documento estabelece o procedimento genérico para implantação, configuração e operação do **Janjalive** em qualquer servidor VPS Linux (Ubuntu, Debian ou distribuição compatível), sem dependência de plataformas proprietárias ou provedores de hospedagem específicos.
 
 ---
 
 ## 1. Visão Geral da Arquitetura de Produção
 
-O Screen Room é composto por dois serviços desacoplados projetados para executar lado a lado no mesmo servidor, unificados sob o mesmo domínio público através de um **proxy reverso**:
+O Janjalive é composto por dois serviços desacoplados projetados para executar lado a lado no mesmo servidor, unificados sob o mesmo domínio público através de um **proxy reverso**:
 
 ```mermaid
 flowchart TD
@@ -382,7 +382,7 @@ Crie duas unidades de serviço no systemd para gerenciar a inicialização e o r
 **Serviço do Signaling (`/etc/systemd/system/screen-room-signaling.service`):**
 ```ini
 [Unit]
-Description=Screen Room - Signaling Service
+Description=Janjalive - Signaling Service
 After=network.target
 
 [Service]
@@ -409,7 +409,7 @@ WantedBy=multi-user.target
 **Serviço Web (`/etc/systemd/system/screen-room-web.service`):**
 ```ini
 [Unit]
-Description=Screen Room - Web SSR Application
+Description=Janjalive - Web SSR Application
 After=network.target screen-room-signaling.service
 
 [Service]
@@ -490,10 +490,10 @@ docker run -d \
 
 ## 7. Integração com Servidor TURN / Coturn
 
-O Screen Room opera primariamente em conexões P2P diretas via STUN público do Google. Contudo, em redes com NAT simétrico ou firewalls restritivos, um servidor TURN é indispensável para evitar falhas de conexão ICE.
+O Janjalive opera primariamente em conexões P2P diretas via STUN público do Google. Contudo, em redes com NAT simétrico ou firewalls restritivos, um servidor TURN é indispensável para evitar falhas de conexão ICE.
 
 ### Independência de Hospedagem
-O servidor `coturn` **não precisa estar na mesma VPS** do Screen Room:
+O servidor `coturn` **não precisa estar na mesma VPS** do Janjalive:
 - Pode ser instalado na mesma VPS Linux;
 - Pode estar hospedado em uma VPS dedicada;
 - Pode ser um serviço gerenciado de relay compatível com o mecanismo de credenciais efêmeras baseadas em timestamp (`use-auth-secret`).

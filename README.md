@@ -1,8 +1,8 @@
-# Screen Room
+# Janjalive
 
 Aplicação WebRTC streaming-first projetada especificamente para **compartilhamento de tela e áudio da aba/sistema em tempo real**.
 
-O Screen Room foi construído com foco em simplicidade, privacidade e desempenho: não exige cadastro, não armazena dados em contas de usuário e opera em salas efêmeras acessadas diretamente por link ou código.
+O Janjalive foi construído com foco em simplicidade, privacidade e desempenho: não exige cadastro, não armazena dados em contas de usuário e opera em salas efêmeras acessadas diretamente por link ou código.
 
 ---
 
@@ -22,7 +22,7 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 
 ## Instalação como aplicativo (F33)
 
-Em um navegador compatível, acesse o Screen Room por HTTPS (ou localhost para
+Em um navegador compatível, acesse o Janjalive por HTTPS (ou localhost para
 testes) e use a opção nativa **Instalar aplicativo** do menu do navegador. Em
 dispositivos Apple compatíveis, use **Adicionar à Tela de Início** ou **Adicionar
 ao Dock**, conforme as opções disponíveis. O aplicativo instalado abre no lobby.

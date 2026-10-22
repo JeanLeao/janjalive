@@ -1,4 +1,4 @@
-/* Interações sociais: chat e reações. Paleta alinhada ao header, dock e palco do Screen Room. */
+/* Interações sociais: chat e reações. Paleta alinhada ao header, dock e palco do Janjalive. */
 .srOnly { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---- Acesso compacto (header e contextual) ---- */
