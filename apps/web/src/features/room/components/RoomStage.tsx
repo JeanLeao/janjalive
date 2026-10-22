@@ -109,6 +109,9 @@ export function RoomStage({
 }: RoomStageProps) {
   const [watchMode, setWatchMode] = useState(false);
   const clipControls = originalClipControls;
+  useEffect(() => {
+    if (watch?.createdSessionId) setWatchMode(true);
+  }, [watch?.createdSessionId]);
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);

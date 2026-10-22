@@ -2819,6 +2819,7 @@ test('F16 viewer consent, late join, revocation, pause and mobile keyboard contr
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Assistir juntos', exact: true })).toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
     await viewer.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
@@ -2832,6 +2833,7 @@ test('F16 viewer consent, late join, revocation, pause and mobile keyboard contr
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Assistir juntos', exact: true })).toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).focus();
     await viewer.keyboard.press('Escape');
@@ -2931,6 +2933,7 @@ for (const width of [1280, 390, 320]) test(`F16 recording source A stays identif
     await a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Assistir juntos', exact: true })).toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true })).toHaveCount(1);
     const downloadPromise = viewer.waitForEvent('download');
@@ -3095,7 +3098,7 @@ for (const width of [1280, 390, 320]) test(`F16 → F15 own clip, explicit conse
   } finally { await sender.close(); await receiver.close(); }
 });
 
-for (const bytes of [20 * 1048576, 20 * 1048576 + 1]) test(`F16 → F15 preview size limit ${bytes}`, async ({ page }) => {
+for (const bytes of [20 * 1048576 - 1, 20 * 1048576, 20 * 1048576 + 1]) test(`F16 → F15 preview size limit ${bytes}`, async ({ page }) => {
   await syntheticCapture(page);
   // Synthetic encoder output isolates the boundary without recording 20 MiB of video.
   await page.addInitScript(bytes => {
@@ -3121,6 +3124,9 @@ for (const bytes of [20 * 1048576, 20 * 1048576 + 1]) test(`F16 → F15 preview 
   await expect(page.getByRole('button', { name: /● Gravando/ })).toBeVisible();
   await page.getByRole('button', { name: 'Parar gravação', exact: true }).click();
   const forward = page.getByRole('button', { name: 'Enviar no Chat', exact: true });
+  const together = page.getByRole('button', { name: 'Assistir juntos', exact: true });
+  if (bytes > 20 * 1048576) await expect(together).toBeDisabled();
+  else await expect(together).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Descartar clipe', exact: true })).toBeEnabled();
   if (bytes > 20 * 1048576) {
@@ -3131,4 +3137,174 @@ for (const bytes of [20 * 1048576, 20 * 1048576 + 1]) test(`F16 → F15 preview 
     await expect(page.getByLabel('Preparar arquivo')).toContainText('20.00 MiB');
     await expect(page.getByRole('button', { name: /Solicitar envio/ })).toBeDisabled();
   }
+});
+
+for (const { width, mp4 } of [{ width: 1280, mp4: false }, { width: 390, mp4: false }, { width: 320, mp4: false }, { width: 1280, mp4: true }]) test(`F16 → F14 original MediaRecorder ${mp4 ? 'MP4' : 'WebM'}, consent and synchronized seek ${width}px`, async ({ browser }) => {
+  test.setTimeout(120000);
+  const contexts = await Promise.all([0, 1, 2].map(() => browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500 })));
+  try {
+    const [a, b, late] = await Promise.all(contexts.map(c => c.newPage()));
+    await Promise.all([a, b, late].map(p => syntheticCapture(p)));
+    if (mp4) {
+      test.skip(!await a.evaluate(() => MediaRecorder.isTypeSupported('video/mp4')), 'MediaRecorder MP4 indisponível.');
+      await a.addInitScript(() => {
+        const supported = MediaRecorder.isTypeSupported.bind(MediaRecorder);
+        MediaRecorder.isTypeSupported = mime => mime.startsWith('video/mp4') && supported(mime);
+      });
+    }
+    for (const page of [a, b, late]) await page.addInitScript(() => {
+      const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+      (window as any).clipWatchUrls = new Set<string>();
+      URL.createObjectURL = blob => { const url = create(blob); (window as any).clipWatchUrls.add(url); return url; };
+      URL.revokeObjectURL = url => { (window as any).clipWatchUrls.delete(url); revoke(url); };
+    });
+    await Promise.all([a, b].map(p => gotoRoom(p, `/room/clip-watch-${width}`)));
+    await startLive(a);
+    if (width === 390) await a.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    if (width === 320) await a.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await a.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(a.getByText(/Gravação ativa: (?:[4-9]|[1-5]\d) de 60 segundos\./)).toBeVisible({ timeout: 10000 });
+    await a.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+    const preview = a.getByLabel('Prévia local do clipe');
+    await expect(preview).toBeVisible();
+    await expect.poll(() => preview.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
+    // Real MediaRecorder chunks from LocalClip.start(250), with no EBML patch or remux.
+    if (!mp4) expect(await preview.evaluate((v: HTMLVideoElement) => v.duration)).toBe(Infinity);
+    else expect(await preview.evaluate((v: HTMLVideoElement) => Number.isFinite(v.duration) && v.duration > 0)).toBe(true);
+    const original = await preview.evaluate(async (v: HTMLVideoElement) => Array.from(new Uint8Array(await (await fetch(v.src)).arrayBuffer())));
+    if (width === 1280 && !mp4) {
+      await a.keyboard.press('Escape');
+      await startLive(b);
+      await a.getByRole('button', { name: 'Comparar', exact: true }).click();
+      await expect(a.locator('.comparison-panel')).toHaveCount(2);
+      await a.getByRole('button', { name: /^Clipes/ }).click();
+    }
+    const together = a.getByRole('button', { name: 'Assistir juntos', exact: true });
+    await together.scrollIntoViewIfNeeded();
+    expect(await together.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    if (width < 500) await together.tap(); else { await together.focus(); await a.keyboard.press('Enter'); }
+    const dialog = a.getByRole('dialog', { name: 'Assistir juntos?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused();
+    expect(await a.evaluate(() => (window as any).testMessages.some((m: any) => m.type === 'watch-snapshot' && m.state))).toBe(false);
+    await a.screenshot({ path: test.info().outputPath(`clip-watch-confirm-${width}.png`), animations: 'disabled' });
+    for (let i = 0; i < 5; i++) {
+      await a.keyboard.press('Tab');
+      expect(await dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
+    }
+    await a.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(together).toBeFocused();
+    await together.click();
+    const confirm = dialog.getByRole('button', { name: 'Confirmar e iniciar', exact: true });
+    if (width < 500) await confirm.tap(); else { await confirm.focus(); await a.keyboard.press('Enter'); }
+    // Stage selection changes only after a server snapshot confirms our creation.
+    await expect(a.getByTestId('watch-video')).toBeVisible();
+    await expect.poll(() => a.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => Number.isFinite(v.duration) && !v.seeking)).toBe(true);
+    await b.locator('[data-control-id="watch-party"]').click();
+    await expect(b.getByRole('button', { name: 'Aceitar vídeo', exact: true })).toBeVisible();
+    expect(await b.getByTestId('watch-video').count()).toBe(0);
+    await b.getByRole('button', { name: 'Recusar vídeo', exact: true }).click();
+    await expect(b.getByText('Recusado', { exact: true })).toBeVisible();
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
+    await a.getByRole('button', { name: 'Convidar participantes indisponíveis', exact: true }).click();
+    await a.getByRole('button', { name: 'Fechar participantes', exact: true }).click();
+    await b.getByRole('button', { name: 'Aceitar vídeo', exact: true }).click();
+    const ready = async (page: Page) => {
+      await expect(page.getByTestId('watch-video')).toBeVisible({ timeout: 25000 });
+      await expect.poll(() => page.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => Number.isFinite(v.duration) && !v.seeking && v.readyState >= 2 && v.currentTime < 0.2)).toBe(true);
+      const received = await page.getByTestId('watch-video').evaluate(async (v: HTMLVideoElement) => Array.from(new Uint8Array(await (await fetch(v.src)).arrayBuffer())));
+      expect(received).toEqual(original);
+    };
+    await ready(b);
+    const state = await a.evaluate(() => (window as any).testMessages.filter((m: any) => m.type === 'watch-snapshot' && m.state).at(-1).state);
+    // Canvas frame scheduling can produce less media time than wall-clock recording time.
+    expect(state.duration).toBeGreaterThan(1);
+    const seekPosition = Math.min(2, Math.round(state.duration / 2 * 10) / 10);
+    expect(await a.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.duration)).toBeCloseTo(state.duration, 1);
+    expect(state.duration).toBeLessThan(6);
+    expect(state.file.size).toBe(original.length);
+    expect(state.file.mime).toBe(mp4 ? 'video/mp4' : 'video/webm');
+    const { createHash } = await import('node:crypto');
+    expect(state.file.sha256).toBe(createHash('sha256').update(Buffer.from(original)).digest('hex'));
+    await a.getByRole('button', { name: 'Reproduzir para todos', exact: true }).click();
+    for (const page of [a, b]) {
+      const unblock = page.getByRole('button', { name: 'Ativar reprodução neste dispositivo', exact: true });
+      if (await unblock.isVisible()) await unblock.click();
+      await expect.poll(() => page.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
+    }
+    await a.getByRole('button', { name: 'Pausar para todos', exact: true }).click();
+    await expect.poll(() => b.getByTestId('watch-video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+    await a.getByLabel('Posição do vídeo').fill(String(seekPosition));
+    await a.getByLabel('Posição do vídeo').dispatchEvent('pointerup');
+    await expect.poll(() => b.getByTestId('watch-video').evaluate((v: HTMLVideoElement, target: number) => !v.seeking && Math.abs(v.currentTime - target) < 0.2, seekPosition)).toBe(true);
+    await a.screenshot({ path: test.info().outputPath(`clip-watch-player-${width}.png`) });
+    // The confirmed session owns the Blob independently of the F16 preview.
+    await a.getByRole('button', { name: 'Voltar às transmissões', exact: true }).click();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await expect(together).toBeDisabled();
+    await a.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await a.keyboard.press('Escape');
+    await a.locator('[data-control-id="watch-party"]').click();
+    await expect(a.getByTestId('watch-video')).toBeVisible();
+    if (width === 1280) {
+      await gotoRoom(late, `/room/clip-watch-${width}`);
+      await late.locator('[data-control-id="watch-party"]').click();
+      await late.getByRole('button', { name: 'Aceitar vídeo', exact: true }).click();
+      await expect.poll(() => late.getByTestId('watch-video').evaluate((v: HTMLVideoElement, target: number) => Number.isFinite(v.duration) && !v.seeking && Math.abs(v.currentTime - target) < 0.2, seekPosition), { timeout: 25000 }).toBe(true);
+      await b.evaluate(() => (window as any).testSockets.filter((s: WebSocket) => s.url.includes('/signal')).at(-1).close(4101));
+      await b.getByRole('button', { name: 'Aceitar vídeo', exact: true }).click({ timeout: 25000 });
+      await expect.poll(() => b.getByTestId('watch-video').evaluate((v: HTMLVideoElement, target: number) => Number.isFinite(v.duration) && !v.seeking && Math.abs(v.currentTime - target) < 0.2, seekPosition), { timeout: 25000 }).toBe(true);
+    }
+    await a.getByRole('button', { name: /Participantes da sessão/ }).click();
+    await a.getByRole('button', { name: 'Encerrar vídeo compartilhado', exact: true }).click();
+    await a.getByRole('button', { name: 'Confirmar encerramento', exact: true }).click();
+    for (const page of [a, b]) {
+      await expect(page.getByTestId('watch-video')).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => (window as any).clipWatchUrls.size)).toBe(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+  } finally { await Promise.all(contexts.map(c => c.close())); }
+});
+
+test('F16 → F14 failed creation keeps preview; discard cancels preparation without a session', async ({ page }) => {
+  await syntheticCapture(page);
+  await gotoRoom(page, '/room/clip-watch-failure');
+  await startLive(page);
+  await page.getByRole('button', { name: /^Clipes/ }).click();
+  await page.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+  await expect(page.getByText('Gravação ativa: 1 de 60 segundos.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+  await expect(page.getByLabel('Prévia local do clipe')).toBeVisible();
+  // Exercise a real signaling rejection rather than replacing the creation hook.
+  await page.evaluate(() => {
+    const native = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data: any) {
+      const message = typeof data === 'string' ? JSON.parse(data) : null;
+      if (message?.type === 'watch-operation' && message.action === 'create') message.revision = 999;
+      return native.call(this, message ? JSON.stringify(message) : data);
+    };
+  });
+  await page.getByRole('button', { name: 'Assistir juntos', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar e iniciar', exact: true }).click();
+  await expect(page.getByText(/Estado desatualizado/, { exact: false }).last()).toBeVisible();
+  await expect(page.getByLabel('Prévia local do clipe')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Enviar no Chat', exact: true })).toBeEnabled();
+  // Hold decoded-data events on the next temporary preparation element.
+  await page.evaluate(() => {
+    const create = document.createElement.bind(document);
+    document.createElement = ((tag: string, options?: ElementCreationOptions) => {
+      const element = create(tag, options);
+      if (tag === 'video') Object.defineProperty(element, 'onloadeddata', { configurable: true, set() {}, get() { return null; } });
+      return element;
+    }) as typeof document.createElement;
+  });
+  await page.getByRole('button', { name: 'Assistir juntos', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar e iniciar', exact: true }).click();
+  await expect(page.getByText('Verificando e preparando vídeo…', { exact: true }).last()).toBeVisible();
+  await page.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+  await expect(page.getByLabel('Prévia local do clipe')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).testMessages.some((m: any) => m.type === 'watch-snapshot' && m.state))).toBe(false);
 });

@@ -4,6 +4,7 @@ import { Button, Drawer, FileButton, Progress, Text } from '@mantine/core';
 import type { WatchParty } from '../hooks/useWatchParty';
 import type { RoomParticipant } from '../types';
 import { useAudioOutput } from '../hooks/AudioOutput';
+import { videoReadiness } from '../watch/video-readiness';
 import { expectedPosition } from '../watch/timeline';
 import {
   IconCinema,
@@ -448,6 +449,7 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
   const playPending = useRef(false);
   const generation = useRef(0);
   const mediaFailed = useRef(false);
+  const mediaReady = useRef(false);
   const audio = useRef({ muted, volume, output });
   audio.current = { muted, volume, output };
   const syncRef = useRef<() => void>(() => {});
@@ -455,7 +457,7 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
 
   const play = () => {
     const element = video.current;
-    if (!element || playPending.current) return;
+    if (!element || !mediaReady.current || playPending.current) return;
     const epoch = generation.current;
     playPending.current = true;
     element.muted = audio.current.muted || (!!audio.current.output && !audio.current.output.router.allowed(element));
@@ -485,7 +487,25 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
     if (!element || !watch.blob || !watch.state) return;
     const url = URL.createObjectURL(watch.blob.slice(0, watch.blob.size, watch.state.file.mime));
     mediaFailed.current = false;
+    mediaReady.current = false;
+    const abort = new AbortController();
+    const readiness = videoReadiness(element, abort.signal, {
+      recoverWebmDuration: watch.state.file.mime === 'video/webm',
+      expectedDuration: watch.state.duration,
+    });
     element.src = url;
+    void readiness.then(() => {
+      if (abort.signal.aborted) return;
+      mediaReady.current = true;
+      setBuffering(false);
+      latest.current.reportStatus('ready');
+      syncRef.current();
+    }, () => {
+      if (abort.signal.aborted || mediaFailed.current) return;
+      mediaFailed.current = true;
+      setFailed(true);
+      latest.current.playbackError();
+    });
 
     const cleanup = output?.router.register(element, () => {
       element.muted = audio.current.muted || !output.router.allowed(element);
@@ -493,6 +513,8 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
     });
 
     return () => {
+      abort.abort();
+      mediaReady.current = false;
       if (!mediaFailed.current) latest.current.reportStatus('unavailable');
       generation.current++;
       playPending.current = false;
@@ -518,7 +540,7 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
     const sync = () => {
       const element = video.current;
       const current = latest.current;
-      if (disposed || !element || !current.state || element.readyState < 1 || failed) return;
+      if (disposed || !mediaReady.current || !element || !current.state || element.readyState < 1 || failed) return;
       const target = expectedPosition(current.state, current.clock.now());
       if (Math.abs(element.currentTime - target) > 0.65) {
         element.currentTime = target;
@@ -657,16 +679,14 @@ function WatchPlayer({ watch, controllerName }: WatchPlayerProps) {
             playsInline
             preload="auto"
             disablePictureInPicture
-            onLoadedData={() => {
-              latest.current.reportStatus('ready');
-              syncRef.current();
-            }}
             onCanPlay={() => {
+              if (!mediaReady.current) return;
               setBuffering(false);
               latest.current.reportStatus('ready');
               syncRef.current();
             }}
             onWaiting={() => {
+              if (!mediaReady.current) return;
               setBuffering(true);
               latest.current.reportStatus('buffering');
             }}

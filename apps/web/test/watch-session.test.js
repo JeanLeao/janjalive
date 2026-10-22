@@ -211,3 +211,74 @@ test('watch session: replacement announcements coalesce, serialize offers and do
   assert.equal(offers.length, 3, 'F15 rejection requires explicit retry');
   assert.equal(hook.current.error, 'F15 busy');
 });
+
+function preparing(t) {
+  const oldDocument = globalThis.document;
+  const video = { canPlayType: () => 'probably', duration: 4, videoWidth: 320, videoHeight: 180,
+    pause() {}, removeAttribute() {}, load() {} };
+  globalThis.document = { createElement: () => video };
+  t.after(() => { globalThis.document = oldDocument; });
+  const sent = [];
+  const files = { releaseWatch() {} };
+  const hook = renderHook(props => useWatchParty(props.roomId, files, [], m => { sent.push(m); return true; }, []), { roomId: 'room' });
+  t.after(() => hook.unmount());
+  hook.current.receive({ type: 'peers', serverTime: 1000, watch: { revision: 1, state: null } });
+  sent.length = 0;
+  return { hook, video, sent, file: new File(['original'], 'clip.webm', { type: 'video/webm' }) };
+}
+test('clip preparation: repeated clicks serialize; pending creation rejects new preparations', async t => {
+  const { hook, video, sent, file } = preparing(t);
+  const pending = hook.current.create(file);
+  await hook.current.create(file);
+  video.onloadeddata(); await pending;
+  assert.equal(sent.length, 1); assert.equal(sent[0].action, 'create');
+  await hook.current.create(file); assert.equal(sent.length, 1);
+});
+test('clip preparation: discard, stale origin, disconnect, room switch and unmount prevent creation', async t => {
+  for (const reason of ['discard', 'stale', 'disconnect', 'room', 'unmount']) {
+    await t.test(reason, async t => {
+      const { hook, video, sent, file } = preparing(t);
+      const abort = new AbortController(); let valid = true;
+      const pending = hook.current.create(file, { signal: abort.signal, isValid: () => valid });
+      const loaded = video.onloadeddata;
+      if (reason === 'discard') abort.abort();
+      if (reason === 'stale') valid = false;
+      if (reason === 'disconnect') hook.current.reset();
+      if (reason === 'room') hook.rerender({ roomId: 'another' });
+      if (reason === 'unmount') hook.unmount();
+      loaded(); await pending;
+      assert.equal(sent.filter(m => m.action === 'create').length, 0);
+    });
+  }
+});
+test('clip preparation: another session arriving during decode cannot be overwritten', async t => {
+  const { hook, video, sent, file } = preparing(t);
+  const pending = hook.current.create(file);
+  hook.current.receive({ type: 'watch-snapshot', roomId: 'room', revision: 2, serverTime: 1000, state });
+  video.onloadeddata(); await pending;
+  assert.equal(sent.filter(m => m.action === 'create').length, 0);
+  assert.equal(hook.current.state.sessionId, state.sessionId);
+});
+test('clip preparation: abort after send preserves the independently confirmed session', async t => {
+  const { hook, video, sent, file } = preparing(t);
+  const abort = new AbortController(); const pending = hook.current.create(file, { signal: abort.signal });
+  video.onloadeddata(); await pending;
+  const op = sent[0]; abort.abort();
+  hook.current.receive({ type: 'watch-snapshot', roomId: 'room', revision: 2, serverTime: 1000, state: { ...state, sessionId: op.sessionId } });
+  hook.current.receive({ type: 'watch-result', requestId: op.requestId, ok: true });
+  assert.equal(hook.current.createdSessionId, op.sessionId); assert.equal(await hook.current.blob.text(), 'original');
+});
+
+test('clip creation: server rejection and timeout release only the unconfirmed candidate', async t => {
+  for (const timeout of [false, true]) await t.test(timeout ? 'timeout' : 'rejection', async t => {
+    const { hook, video, sent, file } = preparing(t);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pending = hook.current.create(file); video.onloadeddata(); await pending;
+    const op = sent[0];
+    if (timeout) t.mock.timers.tick(10000);
+    else hook.current.receive({ type: 'watch-result', requestId: op.requestId, ok: false, message: 'Rejeitado.' });
+    assert.equal(hook.current.pending, false); assert.equal(hook.current.state, null); assert.equal(hook.current.blob, undefined);
+    assert.match(hook.current.error, timeout ? /Sem confirmação/ : /Rejeitado/);
+    assert.equal(await file.text(), 'original');
+  });
+});

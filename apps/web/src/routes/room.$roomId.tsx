@@ -384,6 +384,7 @@ function RoomPageContent() {
         watch={isDemo ? undefined : session.watch}
         clipControls={<ClipControls
           clips={session.clips}
+          watch={isDemo ? undefined : session.watch}
           participants={session.participants}
           localStream={session.localStream}
           remoteStreams={session.remoteStreams}

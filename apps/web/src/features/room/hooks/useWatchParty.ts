@@ -70,17 +70,19 @@ export function useWatchParty(roomId: string, files: FileTransferManager, delive
     }
     return true;
   };
-  const create = async (file: File) => {
-    if (preparation.current || current.current?.state) return;
+  const create = async (file: File, options: { signal?: AbortSignal; recoverClipDuration?: boolean; isValid?: () => boolean } = {}) => {
+    if (preparation.current || request.current || current.current?.state || options.signal?.aborted) return;
     const abort = new AbortController(); preparation.current = abort; setBusy(true); setError('');
+    const cancel = () => abort.abort();
+    options.signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const prepared = await prepareVideo(file, abort.signal);
-      if (abort.signal.aborted || preparation.current !== abort) return;
+      const prepared = await prepareVideo(file, abort.signal, options.recoverClipDuration);
+      if (abort.signal.aborted || preparation.current !== abort || current.current?.state || request.current || options.isValid?.() === false) return;
       const sessionId = crypto.randomUUID();
       setSource({ sessionId, blob: prepared.source });
       if (!operation({ action: 'create', sessionId, file: prepared.metadata, duration: prepared.duration })) setSource(null);
     } catch (e) { if (!abort.signal.aborted) setError((e as Error).message); }
-    finally { if (preparation.current === abort) { preparation.current = null; setBusy(false); } }
+    finally { options.signal?.removeEventListener('abort', cancel); if (preparation.current === abort) { preparation.current = null; setBusy(false); } }
   };
   useEffect(() => {
     const timer = setInterval(() => { if (current.current) sender.current({ type: 'watch-clock', sentAt: performance.now() }); }, 15_000);
@@ -134,6 +136,7 @@ export function useWatchParty(roomId: string, files: FileTransferManager, delive
     }
   }, [inviting]);
   return { state, snapshot, clock, blob, incoming, availability, reportStatus, deliveries: [...history.current.byPeer.values()],
+    createdSessionId: source?.sessionId === state?.sessionId ? state?.sessionId : undefined,
     controller: !!own && state?.controllerId === own, error, busy, pending, inviting,
     create, receive, reset, invite, command: (action: 'play' | 'pause' | 'seek' | 'end', position?: number) => state && operation({ sessionId: state.sessionId, action, ...(position !== undefined ? { position } : {}) }),
     accept: () => { try { if (incoming) files.accept(incoming.id); } catch (e) { setError((e as Error).message); } },
