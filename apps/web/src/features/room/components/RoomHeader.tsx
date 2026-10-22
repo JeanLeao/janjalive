@@ -173,7 +173,7 @@ export function RoomHeader({
             size="sm"
             className="room-header-brand-title"
           >
-            Screen Room
+            Janjalive
           </Text>
         </Group>
 

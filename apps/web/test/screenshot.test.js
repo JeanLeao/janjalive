@@ -230,15 +230,15 @@ function setupControlledDomEnvironment() {
 test('formatScreenshotFilename formats predictable filename with zero-padding', () => {
   const fixedDate = new Date(2026, 9, 17, 14, 30, 0); // Month is 0-indexed: 9 = October
   const filename = formatScreenshotFilename(fixedDate);
-  assert.equal(filename, 'screen-room-2026-10-17_14-30-00.png');
+  assert.equal(filename, 'janjalive-2026-10-17_14-30-00.png');
 
   // Test single-digit month, day, hour, min, sec
   const earlyDate = new Date(2027, 0, 5, 4, 3, 2); // 2027-01-05 04:03:02
-  assert.equal(formatScreenshotFilename(earlyDate), 'screen-room-2027-01-05_04-03-02.png');
+  assert.equal(formatScreenshotFilename(earlyDate), 'janjalive-2027-01-05_04-03-02.png');
 
   // Test default parameter uses current time and matches regex pattern
   const currentFilename = formatScreenshotFilename();
-  assert.match(currentFilename, /^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+  assert.match(currentFilename, /^janjalive-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
 });
 
 test('isScreenshotAvailable validates video element, stream, and ready state', () => {
@@ -445,7 +445,7 @@ test('downloadBlob manages object URL lifecycle and triggers anchor download', a
 
   try {
     const blob = new Blob(['test content'], { type: 'image/png' });
-    const filename = 'screen-room-2026-10-17_14-30-00.png';
+    const filename = 'janjalive-2026-10-17_14-30-00.png';
 
     downloadBlob(blob, filename);
 
@@ -690,7 +690,7 @@ test('useVideoScreenshot: uninterrupted capture downloads PNG and valid capture 
     env.pendingEncodings[0].resolve();
     assert.equal(await validPromise1, true);
     assert.equal(env.downloads.length, 1);
-    assert.match(env.downloads[0].download, /^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+    assert.match(env.downloads[0].download, /^janjalive-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
     assert.equal(hook.current.isCapturing, false);
     assert.equal(hook.current.feedback, 'success');
     assert.equal(hook.current.feedbackMessage, 'Download da imagem iniciado');

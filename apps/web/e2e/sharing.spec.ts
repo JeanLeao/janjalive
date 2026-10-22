@@ -50,7 +50,7 @@ async function syntheticCapture(page: Page, representative: boolean | 'browser' 
             ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, 640, 360);
             ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, 640, 32); ctx.fillRect(0, 250, 640, 110);
             ctx.font = '14px monospace'; ctx.fillStyle = '#8c959f';
-            ctx.fillText('Screen Room  /  peer-manager.ts', 18, 22);
+            ctx.fillText('Janjalive  /  peer-manager.ts', 18, 22);
             const lines = ['export async function shareScreen() {', '  const stream = await captureDisplay();', '  await peers.attachTracks(stream);', '  publishSharingState({ active: true });', '}', '', '// Keep connections reusable after capture stops'];
             lines.forEach((line, i) => { ctx.fillStyle = i === 6 ? '#8c959f' : '#79c0ff'; ctx.fillText(line, 24, 64 + i * 23); });
             ctx.fillStyle = '#7ee787'; ctx.fillText('$ pnpm test', 18, 277);
@@ -63,7 +63,7 @@ async function syntheticCapture(page: Page, representative: boolean | 'browser' 
             ctx.font = '13px monospace'; ctx.fillStyle = '#24292f';
             ctx.fillText('←  →   localhost:3000 / overview', 20, 24);
             ctx.fillStyle = '#0969da'; ctx.fillRect(0, 38, 140, 442);
-            ctx.fillStyle = '#ffffff'; ctx.fillText('SCREEN ROOM', 16, 74);
+            ctx.fillStyle = '#ffffff'; ctx.fillText('JANJALIVE', 16, 74);
             ['Overview', 'Sessions', 'Reports', 'Settings'].forEach((label, i) => ctx.fillText(label, 16, 130 + i * 44));
             ctx.fillStyle = '#24292f'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('Session overview', 168, 88);
             ctx.font = '14px sans-serif'; ctx.fillText('Live transmission quality', 168, 124);
@@ -2123,7 +2123,7 @@ test('F30 screenshot captures unzoomed frame in PNG, disables on pause, and work
     const viewerDownloadPromise = viewer.waitForEvent('download');
     await viewerBtn.click();
     const viewerDownload = await viewerDownloadPromise;
-    expect(viewerDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+    expect(viewerDownload.suggestedFilename()).toMatch(/^janjalive-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
 
     const viewerFilePath = test.info().outputPath('viewer-screenshot.png');
     await viewerDownload.saveAs(viewerFilePath);
@@ -2145,7 +2145,7 @@ test('F30 screenshot captures unzoomed frame in PNG, disables on pause, and work
     const hostDownloadPromise = host.waitForEvent('download');
     await hostBtn.click();
     const hostDownload = await hostDownloadPromise;
-    expect(hostDownload.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+    expect(hostDownload.suggestedFilename()).toMatch(/^janjalive-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
 
     const hostFilePath = test.info().outputPath('host-screenshot.png');
     await hostDownload.saveAs(hostFilePath);
@@ -2230,7 +2230,7 @@ for (const width of [390, 320]) {
       const downloadPromise = viewer.waitForEvent('download');
       await btn.tap();
       const download = await downloadPromise;
-      expect(download.suggestedFilename()).toMatch(/^screen-room-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+      expect(download.suggestedFilename()).toMatch(/^janjalive-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
 
       await host.getByRole('button', { name: 'Parar compartilhamento de tela', exact: true }).click();
     } finally {
@@ -3056,7 +3056,7 @@ for (const width of [1280, 390, 320]) test(`F16 → F15 own clip, explicit conse
     expect(await forward.evaluate(n => n.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
     if (width < 500) await forward.tap(); else { await forward.focus(); await a.keyboard.press('Enter'); }
     await expect(preview).toHaveCount(0);
-    await expect(a.getByLabel('Preparar arquivo')).toContainText(/screen-room-.*\.webm/);
+    await expect(a.getByLabel('Preparar arquivo')).toContainText(/janjalive-.*\.webm/);
     await expect(a.getByRole('button', { name: /Solicitar envio/ })).toBeDisabled();
     await expect(a.getByRole('button', { name: 'Remover arquivo', exact: true })).toBeFocused();
     await expect(b.locator('[data-file-card]')).toHaveCount(0);

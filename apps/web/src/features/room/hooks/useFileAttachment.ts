@@ -40,7 +40,7 @@ export function useFileAttachment(roomId: string, connected: boolean, manager?: 
     file, selected, setSelected, busy, error, setError, choosing, setChoosing, clear, prepare,
     prepareClip(next: ClipFile, own: boolean) {
       if (!own || current.current || preparing.current) return false;
-      return prepare({ blob: next.blob, name: `screen-room-${Date.now()}.${next.extension}`, clip: next });
+      return prepare({ blob: next.blob, name: `janjalive-${Date.now()}.${next.extension}`, clip: next });
     },
     async offer(targets: string[]) {
       const next = current.current;

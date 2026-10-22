@@ -98,7 +98,7 @@ function RoomPageContent() {
         ctx1.fillText('Firminha — Apresentação de Arquitetura', 120, 180);
         ctx1.fillStyle = '#94a3b8';
         ctx1.font = '28px system-ui, -apple-system, sans-serif';
-        ctx1.fillText('Screen Room • Nitidez · Equilibrado (até 1080p) • Áudio da aba ativo', 120, 240);
+        ctx1.fillText('Janjalive • Nitidez · Equilibrado (até 1080p) • Áudio da aba ativo', 120, 240);
 
         // Simulated IDE code window
         ctx1.fillStyle = '#161b22';
@@ -111,7 +111,7 @@ function RoomPageContent() {
         ctx1.font = '28px monospace';
         ctx1.fillText('// WebRTC Direct P2P Screen Sharing', 160, 370);
         ctx1.fillStyle = '#e6edf3';
-        ctx1.fillText('export async function connectScreenRoom(roomId: string) {', 160, 430);
+        ctx1.fillText('export async function connectJanjalive(roomId: string) {', 160, 430);
         ctx1.fillStyle = '#7ee787';
         ctx1.fillText('  const peerManager = new PeerManager({ rtcConfig });', 160, 490);
         ctx1.fillStyle = '#79c0ff';

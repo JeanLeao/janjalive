@@ -8,7 +8,7 @@ web
 
 ## Product Purpose
 
-Screen Room oferece salas efêmeras sem cadastro para compartilhar tela e áudio da aba/sistema. A Watch Party permite assistir juntos a um vídeo local, com reprodução compartilhada.
+Janjalive oferece salas efêmeras sem cadastro para compartilhar tela e áudio da aba/sistema. A Watch Party permite assistir juntos a um vídeo local, com reprodução compartilhada.
 
 ## Capabilities and Constraints
 
@@ -16,4 +16,4 @@ Confirmado pelo handoff F14: distribuição P2P, consentimento individual, integ
 
 ## Brand Commitments
 
-Manter a linguagem visual, tipografia, componentes e padrões do Screen Room. Vídeo como prioridade; controles acessíveis em desktop e mobile. A aprovação visual do proprietário precede qualquer merge.
+Manter a linguagem visual, tipografia, componentes e padrões do Janjalive. Vídeo como prioridade; controles acessíveis em desktop e mobile. A aprovação visual do proprietário precede qualquer merge.

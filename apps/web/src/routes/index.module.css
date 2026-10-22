@@ -1,0 +1,121 @@
+.lobby {
+  --muted: #afb8c1;
+  --border: #30363d;
+  --accent: #79b4ff;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  isolation: isolate;
+  background: #080a0f;
+  color: #e6edf3;
+  min-height: 100vh;
+  overflow-x: clip;
+  scrollbar-color: #484f58 #080a0f;
+}
+/* Luz ambiente discreta atrás do hero; não se move. */
+.lobby::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 900px; pointer-events: none; background: radial-gradient(60% 55% at 78% 22%, #2563eb1c, transparent 70%), radial-gradient(45% 40% at 12% 8%, #79b4ff0d, transparent 70%); }
+.lobby ::selection { background: #1d4ed8; color: #fff; }
+.lobby input { caret-color: var(--accent); }
+.lobby :focus-visible, .modal :focus-visible { outline: 2px solid #79b4ff; outline-offset: 4px; }
+.skipLink { position: fixed; top: 8px; left: 8px; transform: translateY(-150%); z-index: 300; padding: 10px 16px; background: #2563eb; color: #fff; border-radius: 8px; }
+.skipLink:focus { transform: none; }
+.header { border-bottom: 1px solid #21262d; }
+.headerInner { display: flex; justify-content: space-between; align-items: center; min-height: 80px; gap: 12px; }
+.brand { display: flex; gap: 10px; align-items: center; color: #fff; font-size: 18px; font-weight: 700; border-radius: 8px; min-height: 44px; }
+.brandIcon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #2563eb; box-shadow: 0 6px 16px -6px #2563eb99; }
+.header nav { display: flex; }
+.header nav button { min-height: 44px; color: var(--muted); padding-inline: 14px; transition: color 150ms ease, background-color 150ms ease; }
+.header nav button:hover { color: #f0f3f6; }
+
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 64px; align-items: center; padding-block: 72px 80px; }
+.intro { min-width: 0; }
+.intro .title { font-size: clamp(38px, 4.4vw, 56px); font-weight: 700; line-height: 1.08; letter-spacing: -0.038em; color: #f0f3f6; text-wrap: balance; }
+.title span { color: var(--accent); }
+.intro .description { font-size: 18px; line-height: 1.65; color: #d0d7de; max-width: 42ch; margin-top: 24px; }
+.intro .inviteHint { display: flex; align-items: center; gap: 10px; margin-top: 28px; font-size: 14px; color: var(--muted); }
+.intro .inviteHint::before { content: ''; width: 24px; height: 1px; background: #484f58; }
+.createArea { position: relative; min-width: 0; padding: 28px; border: 1px solid var(--border); border-radius: 16px; background: #10151d; scroll-margin-top: 24px; box-shadow: 0 1px 0 #ffffff0d inset, 0 28px 60px -30px #000000e6; transition: border-color 200ms ease, box-shadow 200ms ease; }
+.createArea:focus-within { border-color: #3b5784; box-shadow: 0 1px 0 #ffffff0d inset, 0 28px 60px -30px #000000e6, 0 0 0 4px #2563eb14; }
+.createArea .formTitle { font-size: 22px; line-height: 1.3; letter-spacing: -0.02em; margin-bottom: 24px; font-weight: 600; }
+.createArea input:not([type='checkbox']) { min-height: 48px; background: #080a0f; border-color: #484f58; color: #fff; font-size: 16px; transition: border-color 150ms ease; }
+.createArea input:not([type='checkbox']):hover { border-color: #6e7781; }
+.createArea input:not([type='checkbox']):focus { border-color: #3b82f6; }
+.createArea input::placeholder { color: var(--muted); }
+.createArea label { font-size: 14px; }
+.protection { margin-block: 16px 24px; }
+.protection :global(.mantine-Checkbox-body) { min-height: 44px; align-items: center; }
+.protection :global(.mantine-Checkbox-labelWrapper) { flex: 1; }
+.protection :global(.mantine-Checkbox-label) { display: flex; align-items: center; min-height: 44px; padding-block: 5px; cursor: pointer; }
+.protection :global(.mantine-Checkbox-description) { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.actions { display: grid; gap: 10px; margin-top: 16px; }
+.actions button { min-height: 48px; padding-inline: 16px; transition: background-color 150ms ease, border-color 150ms ease, transform 120ms var(--ease-out), box-shadow 200ms ease; }
+.actions button:active:not(:disabled) { transform: translateY(1px); }
+.actions button:first-child { background: #2563eb; box-shadow: 0 10px 24px -14px #2563eb; }
+.actions button:first-child:hover { background: #1d4ed8; box-shadow: 0 12px 28px -12px #2563ebcc; }
+.actions button:last-child:hover { border-color: #6e7781; }
+
+/* Entrada coordenada do hero: título, descrição, convite e formulário. O formulário permanece utilizável durante todo o movimento. */
+@media (prefers-reduced-motion: no-preference) {
+  .header { animation: heroFade 500ms ease-out both; }
+  .intro .title { animation: heroTitle 820ms var(--ease-out) both; }
+  .intro .description { animation: heroRise 700ms var(--ease-out) 140ms both; }
+  .intro .inviteHint { animation: heroRise 700ms var(--ease-out) 240ms both; }
+  .createArea { animation: heroPanel 760ms var(--ease-out) 90ms both; }
+}
+@keyframes heroFade { from { opacity: 0; } }
+@keyframes heroTitle { from { opacity: 0; transform: translateY(18px); filter: blur(8px); } 60% { filter: blur(0); } }
+@keyframes heroRise { from { opacity: 0; transform: translateY(14px); } }
+@keyframes heroPanel { from { opacity: 0; transform: translateY(20px); } }
+
+.features { position: relative; padding-block: 56px 64px; border-top: 1px solid #21262d; }
+.sectionHeading { display: flex; flex-direction: column; gap: 10px; }
+.sectionHeading h2 { font-size: 34px; line-height: 1.15; letter-spacing: -0.03em; font-weight: 600; color: #f0f3f6; }
+.sectionHeading p { font-size: 15px; line-height: 1.6; color: var(--muted); max-width: 30ch; }
+
+.notes { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; padding-block: 24px 32px; border-top: 1px solid #21262d; }
+.notes p { font-size: 13px; color: var(--muted); line-height: 1.65; }
+.privacyNote { display: flex; gap: 12px; align-items: flex-start; }
+.privacyNote svg { flex-shrink: 0; color: var(--accent); margin-top: 2px; }
+.footer { border-top: 1px solid #21262d; padding-block: 16px; color: var(--muted); }
+.footerInner { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.footer a { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: #afb8c1; font-size: 13px; text-underline-offset: 4px; transition: color 150ms ease; }
+.footer a:hover { color: #fff; }
+.modal { scrollbar-color: #484f58 #161b22; }
+.modal p { line-height: 1.65; }
+.modal input:not([type='checkbox']) { min-height: 44px; font-size: 16px; }
+.modal input::placeholder { color: #afb8c1; }
+.modal button { min-height: 44px; }
+.modalClose { min-width: 44px; min-height: 44px; }
+@media (max-width: 62em) {
+  .hero { gap: 32px; padding-block: 48px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .desktopBreak { display: none; }
+  .intro .title { font-size: 38px; }
+  .intro .description { font-size: 15px; }
+  .createArea { padding: 24px; }
+  .createArea .formTitle { font-size: 20px; }
+  .features { padding-block: 44px 48px; }
+  .sectionHeading p { max-width: none; }
+  .notes { gap: 32px; }
+}
+@media (max-width: 43em) {
+  .headerInner { min-height: 72px; gap: 4px; }
+  .brand { font-size: 16px; gap: 8px; }
+  .brandIcon { width: 28px; height: 28px; border-radius: 7px; }
+  .header nav button { padding-inline: 10px; font-size: 13px; }
+  .hero { grid-template-columns: 1fr; padding-block: 32px; gap: 26px; }
+  .intro .title { font-size: 38px; max-width: 17ch; }
+  .intro .description { margin-top: 18px; font-size: 15px; line-height: 1.65; }
+  .intro .inviteHint { margin-top: 14px; font-size: 13px; }
+  .createArea { padding: 22px; border-radius: 12px; }
+  .createArea .formTitle { font-size: 20px; margin-bottom: 20px; }
+  .protection { margin-block: 12px 20px; }
+  .features { padding-block: 36px; }
+  .sectionHeading h2 { font-size: 28px; }
+  .sectionHeading p { font-size: 14px; }
+  .notes { grid-template-columns: 1fr; gap: 16px; padding-block: 24px; }
+  .footerInner { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+@media (max-width: 23em) {
+  .intro .title { font-size: 32px; }
+  .createArea { padding: 18px; }
+  .createArea label { font-size: 13px; }
+}
