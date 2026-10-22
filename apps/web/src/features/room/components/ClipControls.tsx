@@ -1,11 +1,14 @@
 import { FILE_LIMITS } from '@screen-room/protocol';
 import { useEffect, useRef, useState } from 'react';
-import { Popover } from '@mantine/core';
+import { Button, Group, Modal, Popover, Text } from '@mantine/core';
+import type { WatchParty } from '../hooks/useWatchParty';
+import type { ClipFile } from '../media/local-clip';
 import type { useLocalClips } from '../hooks/useLocalClips';
 import type { RoomParticipant, RemoteStreamEntry } from '../types';
 import classes from './ClipControls.module.css';
 
 type Props = {
+  watch?: WatchParty;
   onSendClip: () => boolean;
   attachmentBusy: boolean;
   attachmentPrepared: boolean;
@@ -18,7 +21,7 @@ type Props = {
 };
 
 export function ClipControls({
-  clips, onSendClip, attachmentBusy, attachmentPrepared, connected,
+  clips, watch, onSendClip, attachmentBusy, attachmentPrepared, connected,
   participants,
   localStream,
   remoteStreams,
@@ -28,18 +31,54 @@ export function ClipControls({
   const [audio, setAudio] = useState(false);
   const [opened, setOpened] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [confirmation, setConfirmation] = useState<ClipFile | null>(null);
+  const preparation = useRef<AbortController | null>(null);
+  const watchButton = useRef<HTMLButtonElement>(null);
+  const latest = useRef({ file: clips.file, own: clips.source?.own, connected });
+  latest.current = { file: clips.file, own: clips.source?.own, connected };
+  const watchUnavailable = !connected || !watch?.snapshot ? 'Aguarde a conexão com a sala.'
+    : watch.state ? 'Já existe um vídeo compartilhado nesta sala.'
+    : watch.busy ? 'Verificando e preparando vídeo…'
+    : watch.pending ? 'Aguardando confirmação da sala…'
+    : !clips.file?.blob.size ? 'O clipe está vazio.'
+    : clips.file.blob.size > FILE_LIMITS.maxBytes ? 'Assistir juntos aceita clipes de até 20 MiB. Você ainda pode salvar ou descartar.' : '';
+
+  useEffect(() => {
+    setConfirmation(null);
+    return () => { preparation.current?.abort(); preparation.current = null; };
+  }, [clips.file, connected]);
+
+  const closeConfirmation = () => {
+    setConfirmation(null);
+  };
+  const confirmWatch = () => {
+    const file = confirmation;
+    if (!file || preparation.current || watchUnavailable || !clips.source?.own || file !== clips.file || !watch) return;
+    setConfirmation(null);
+    const abort = new AbortController();
+    preparation.current = abort;
+    const video = new File([file.blob], `screen-room-${Date.now()}.${file.extension}`, {
+      type: file.blob.type || `video/${file.extension}`,
+    });
+    void watch.create(video, {
+      signal: abort.signal, recoverClipDuration: true,
+      isValid: () => latest.current.file === file && latest.current.own === true && latest.current.connected,
+    }).finally(() => {
+      if (preparation.current === abort) preparation.current = null;
+    });
+  };
 
   useEffect(() => {
     if (!opened) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || confirmation) return;
       event.stopPropagation();
       setOpened(false);
       triggerRef.current?.focus();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [opened]);
+  }, [opened, confirmation]);
 
   const own = participants.find(p => p.isLocal);
   const target =
@@ -91,7 +130,7 @@ export function ClipControls({
   return (
     <div className={classes.root} data-clip-controls>
       <p role="status" aria-live="polite" className={classes.announcement}>
-        {[statusLine, clips.status !== 'idle' ? clips.notice : '', ...recordings.map(r =>
+        {[statusLine, clips.file && clips.source?.own && opened ? (watchUnavailable || watch?.error) : '', clips.status !== 'idle' ? clips.notice : '', ...recordings.map(r =>
           `${name(r.recorderId)} está gravando ${name(r.presenterId)}.`,
         )].filter(Boolean).join(' ')}
       </p>
@@ -101,7 +140,9 @@ export function ClipControls({
         position="bottom-end"
         offset={8}
         withinPortal={false}
-        trapFocus
+        closeOnClickOutside={!confirmation}
+        closeOnEscape={!confirmation}
+        trapFocus={!confirmation}
         returnFocus={returnFocus}
         middlewares={{ flip: false, shift: { padding: 10 } }}
         classNames={{ dropdown: classes.dropdown }}
@@ -264,6 +305,9 @@ export function ClipControls({
                     : attachmentPrepared ? 'Já há um anexo preparado no Chat. Remova-o para preparar este clipe.'
                     : 'Envio privado de até 20 MiB. Selecione os destinatários e confirme no Chat.'}
                 </p>}
+                {clips.source?.own && watch && <p className={classes.hint} id="clip-watch-hint">
+                  {watchUnavailable || watch.error || 'Assista com a sala. Cada participante poderá aceitar ou recusar o clipe.'}
+                </p>}
                 <div className={classes.previewActions}>
                   <button type="button" className={classes.actionBtn} onClick={clips.save}>
                     Salvar clipe
@@ -273,10 +317,15 @@ export function ClipControls({
                     onClick={() => { if (onSendClip()) { setReturnFocus(false); setOpened(false); } }}>
                     Enviar no Chat
                   </button>}
+                  {clips.source?.own && watch && <button type="button" ref={watchButton} className={classes.actionBtn}
+                    aria-describedby="clip-watch-hint" disabled={Boolean(watchUnavailable)}
+                    onClick={() => setConfirmation(clips.file)}>
+                    Assistir juntos
+                  </button>}
                   <button
                     type="button"
                     className={`${classes.actionBtn} ${classes.actionSecondary}`}
-                    onClick={clips.discard}
+                    onClick={() => { preparation.current?.abort(); preparation.current = null; setConfirmation(null); clips.discard(); }}
                   >
                     Descartar clipe
                   </button>
@@ -286,6 +335,17 @@ export function ClipControls({
           </div>
         </Popover.Dropdown>
       </Popover>
+
+      <Modal opened={Boolean(confirmation)} onClose={closeConfirmation} title="Assistir juntos?"
+        portalProps={{ target: typeof document === 'undefined' ? undefined : document.fullscreenElement instanceof HTMLElement ? document.fullscreenElement : document.body }} returnFocus={false} onExitTransitionEnd={() => watchButton.current?.focus()} centered size="sm"
+        styles={{ content: { maxWidth: 'calc(100vw - 24px)' } }}>
+        <Text size="sm">O clipe da sua transmissão será oferecido aos participantes da sala. Cada pessoa poderá aceitar ou recusar o recebimento.</Text>
+        {watchUnavailable && <Text size="sm" mt="sm">{watchUnavailable}</Text>}
+        <Group mt="md" justify="flex-end">
+          <Button variant="default" mih={44} data-autofocus onClick={closeConfirmation}>Cancelar</Button>
+          <Button mih={44} disabled={Boolean(watchUnavailable)} onClick={confirmWatch}>Confirmar e iniciar</Button>
+        </Group>
+      </Modal>
 
       {hasAmbientStatus && (
         <div
