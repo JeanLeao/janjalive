@@ -190,6 +190,7 @@ function RoomPageContent() {
 
   const connected = session.connectionStatus === 'connected';
   const interactionsUi = useInteractionsUi({
+    clip: session.clips.file,
     roomId,
     messages: session.chatMessages,
     error: session.interactionError,
@@ -381,7 +382,17 @@ function RoomPageContent() {
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
         watch={isDemo ? undefined : session.watch}
-        clipControls={<ClipControls clips={session.clips} participants={session.participants} localStream={session.localStream} remoteStreams={session.remoteStreams} featuredStreamId={session.featuredStreamId} />}
+        clipControls={<ClipControls
+          clips={session.clips}
+          participants={session.participants}
+          localStream={session.localStream}
+          remoteStreams={session.remoteStreams}
+          featuredStreamId={session.featuredStreamId}
+          connected={connected}
+          attachmentBusy={interactionsUi.attachment.busy}
+          attachmentPrepared={Boolean(interactionsUi.attachment.file)}
+          onSendClip={() => Boolean(session.clips.file && interactionsUi.prepareClip(session.clips.file, session.clips.source?.own === true))}
+        />}
         onVideoPresented={session.onVideoPresented}
         annotations={{ store: session.annotations, send: session.sendCollaboration, available: session.collaborationAvailable }}
         onTogglePointingPermission={session.togglePointingPermission}

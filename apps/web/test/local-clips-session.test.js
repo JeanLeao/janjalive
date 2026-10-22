@@ -190,7 +190,7 @@ test('clip session: source A stays identifiable through request, recording, fina
   const a = { ...target, nickname: 'Transmissão A' };
   const b = { peerId: 'b', streamId: 'capture-b', isSharing: true, isLocal: false, nickname: 'Transmissão B' };
   hook.current.start(a, streamA, false);
-  const expected = { presenterId: 'p', streamId: 'capture', displayName: 'Transmissão A' };
+  const expected = { own: false, presenterId: 'p', streamId: 'capture', displayName: 'Transmissão A' };
   assert.deepEqual(hook.current.source, expected);
   // Selecting B cannot replace a pending or active recording of A.
   hook.current.start(b, source, false);
