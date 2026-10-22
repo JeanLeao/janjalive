@@ -198,3 +198,60 @@ test('lobby: reduced motion keeps every section in its final state', async ({ br
   expect(await page.locator('h1').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
   await context.close();
 });
+
+for (const [width, stacked] of [[1280, false], [768, true], [390, true], [320, true]] as const) {
+  test(`lobby: Compare demonstration follows the room layout at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    const page = await context.newPage();
+    await openLobby(page);
+    const compare = page.getByRole('group', { name: 'Demonstração do modo Comparar' });
+    await compare.scrollIntoViewIfNeeded();
+    const comparing = compare.getByRole('button', { name: 'Comparar' });
+    await expect(comparing).toHaveAttribute('aria-pressed', 'true');
+    const figure = page.locator('section[aria-labelledby="compare-title"] figure');
+    const [primary, secondary] = await figure.locator('[data-comparing] > span').evaluateAll(panels =>
+      panels.map(panel => panel.getBoundingClientRect().toJSON() as DOMRect));
+    // The room stacks Compare panels up to 768px and keeps them side by side above it.
+    if (stacked) {
+      expect(Math.abs(primary.x - secondary.x)).toBeLessThan(1);
+      expect(secondary.y).toBeGreaterThanOrEqual(primary.y + primary.height - 1);
+    } else {
+      expect(Math.abs(primary.y - secondary.y)).toBeLessThan(1);
+      expect(secondary.x).toBeGreaterThanOrEqual(primary.x + primary.width - 1);
+    }
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    const figureHeight = (await figure.boundingBox())!.height;
+    await compare.getByRole('button', { name: 'Uma transmissão' }).click();
+    await expect(page.getByText(/o botão Comparar abre a segunda/)).toBeVisible();
+    await comparing.click();
+    await expect(page.getByText(/resultado na tela de Hanzinza/)).toBeVisible();
+    // Switching between one and two streams must not move the rest of the page.
+    expect((await figure.boundingBox())!.height).toBeCloseTo(figureHeight, 0);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    await context.close();
+  });
+}
+
+test('lobby: illustrations never receive keyboard focus', async ({ page }) => {
+  await openLobby(page);
+  await expect(page.locator('[aria-hidden="true"] :is(a, button, input, select, textarea, [tabindex])')).toHaveCount(0);
+  for (let index = 0; index < 16; index++) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[aria-hidden="true"], [inert]')))).toBe(false);
+  }
+});
+
+test('lobby: content stays available without JavaScript', async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.goto('/');
+  for (const text of ['Escolha uma aba, janela ou tela inteira', 'Converse enquanto acompanha', 'A sincronização é aproximada', 'resultado na tela de Hanzinza', 'Arquivos, com aceite individual', 'Guarde um trecho em clipe']) {
+    // innerText only includes rendered text; Playwright text locators skip <noscript> content.
+    expect(await page.evaluate(() => document.body.innerText)).toContain(text);
+  }
+  const states = await page.locator('[data-reveal]').evaluateAll(elements => elements.map(element => element.getAttribute('data-reveal')));
+  expect(new Set(states)).toEqual(new Set(['static']));
+  await expect(page.getByRole('button', { name: 'Criar sala', exact: true })).toBeVisible();
+  await context.close();
+});

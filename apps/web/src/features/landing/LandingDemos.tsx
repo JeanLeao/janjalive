@@ -280,6 +280,8 @@ export function ProductShowcase({ heading }: { heading: React.ReactNode }) {
         <figcaption>
           <span className={styles.srOnly}>{active.figure} </span>
           <span key={scene} className={styles.sceneText}>{active.text}</span>
+          {/* Sem JavaScript as abas não alternam; os demais estados continuam descritos. */}
+          <noscript>{SCENES.filter(item => item.id !== scene).map(item => <span key={item.id} className={styles.sceneText}><b>{item.title}.</b> {item.text}</span>)}</noscript>
           <span className={styles.demoNote}>Demonstração ilustrativa · nenhuma sala conectada</span>
         </figcaption>
       </figure>
@@ -336,10 +338,10 @@ export function CompareShowcase() {
           </span>
         </span>
       </div>
-      <figcaption>
-        {comparing
-          ? 'Ilustração do modo Comparar · código da ficha na tela de Firminha e o resultado na tela de Hanzinza, com o áudio de uma das transmissões'
-          : 'Ilustração do palco com uma transmissão em destaque · o botão Comparar abre a segunda ao lado'}
+      {/* As duas legendas ocupam a mesma célula: a altura não muda ao alternar a demonstração. */}
+      <figcaption className={styles.compareCaption}>
+        <span aria-hidden={!comparing} data-visible={comparing || undefined}>Ilustração do modo Comparar · código da ficha na tela de Firminha e o resultado na tela de Hanzinza, com o áudio de uma das transmissões</span>
+        <span aria-hidden={comparing} data-visible={!comparing || undefined}>Ilustração do palco com uma transmissão em destaque · o botão Comparar abre a segunda transmissão</span>
       </figcaption>
     </figure>
   </section>;

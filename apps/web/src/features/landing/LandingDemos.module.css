@@ -158,9 +158,8 @@
 @keyframes grow { from { transform: scaleX(0); } }
 
 @container demo (max-width: 600px) {
-  .stage { aspect-ratio: 10 / 11; }
-  .screen { width: min(100cqw, 133cqh); aspect-ratio: 4 / 3; }
-  .editor { font-size: max(5px, 2.65cqi); }
+  /* Mesma captura 16:10 do desktop, contida; a folga acomoda barra do palco, dock e painel de interações. */
+  .stage { aspect-ratio: auto; height: calc(140px + 62.5cqw); }
   .qualityPill { display: none; }
   .streamerBadge { max-width: calc(100% - 24px); }
   .railOptional { display: none; }
@@ -211,13 +210,27 @@
 .select svg { color: #94a3b8; }
 .metaBadge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px; background: rgba(13, 17, 23, 0.82); border: 1px solid rgba(255, 255, 255, 0.09); color: #8c959f; font-size: 11px; font-weight: 500; white-space: nowrap; }
 .miniRail { position: absolute; right: 8px; bottom: 10px; z-index: 3; }
-.compareFigure figcaption { color: #b3c7e2; font-size: 12px; line-height: 1.6; margin-top: 12px; min-height: 3.2em; }
+.compareFigure figcaption { display: grid; color: #b3c7e2; font-size: 12px; line-height: 1.6; margin-top: 12px; }
+.compareCaption > span { grid-area: 1 / 1; visibility: hidden; opacity: 0; transition: opacity 200ms ease, visibility 0s linear 200ms; }
+.compareCaption > span[data-visible] { visibility: visible; opacity: 1; transition: opacity 200ms ease, visibility 0s; }
 
 @container compare (max-width: 520px) {
   .roleTag { font-size: 0; gap: 0; }
   .metaBadge { display: none; }
 }
 .compareFigure { container: compare / inline-size; }
+/* Como na sala real (até 768 px), o Comparar empilha as transmissões. A altura reserva os dois painéis desde o início,
+   então a passagem de uma para duas não desloca a página; cada captura mantém 16:10, contida como no vídeo real. */
+@media (max-width: 768px) {
+  .compareStage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 0fr); aspect-ratio: auto; height: calc(84px + 125cqw); transition-property: grid-template-rows; }
+  .compareStage[data-comparing] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .comparePanel { min-height: 0; }
+  .comparePanel + .comparePanel { border-left: 0; border-top: 1px solid transparent; }
+  .compareStage[data-comparing] .comparePanel + .comparePanel { border-top-color: rgba(255, 255, 255, 0.14); }
+  .comparePanel .letterbox { top: 42px; }
+  .comparePanel .screen { width: min(100cqw, 160cqh); height: auto; aspect-ratio: 16 / 10; }
+  .comparePanel .editor { font-size: max(5px, 2.05cqi); }
+}
 
 /* ---- Arquivos e clipes ---- */
 .sharing { display: flex; flex-direction: column; margin-top: 88px; }
