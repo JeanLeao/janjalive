@@ -39,7 +39,7 @@ export const terms: LegalDocument = {
       'Não tente contornar chaves, bloqueios, limites de requisições ou permissões. Não explore vulnerabilidades, comprometa conexões de outros participantes ou sobrecarregue o serviço.'
     ] },
     { id: 'moderacao', title: 'Moderação e encerramento', paragraphs: [
-      'Os controles da sala permitem ao anfitrião administrar o ingresso, bloquear novas entradas, remover participantes e encerrar a sala, conforme as opções disponíveis. Há limites automáticos para determinadas operações. Isso não representa fiscalização contínua ou revisão prévia de todo conteúdo pelo responsável pelo serviço.',
+      'Os controles da sala permitem ao anfitrião bloquear e desbloquear novas entradas e remover participantes. Cada participante pode sair da sala. O estado da sala é eliminado quando não restam participantes nem reservas de reconexão ativas. Há limites automáticos para determinadas operações. Esses controles não representam fiscalização contínua ou revisão prévia de todo conteúdo pelo responsável pelo serviço.',
       'Salas e estados de colaboração são temporários. O encerramento da sala ou uma ação de moderação não apaga arquivos, clipes ou outras cópias já recebidas em dispositivos de participantes.'
     ] },
     { id: 'limites', title: 'Disponibilidade e limites técnicos', paragraphs: [
