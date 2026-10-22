@@ -2,7 +2,7 @@ import { createRoom } from '../features/room/signaling/create-room';
 import React, { useRef, useState } from 'react';
 import styles from './index.module.css';
 import { ProductShowcase, CompareShowcase, SharingShowcase } from '../features/landing/LandingDemos';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   Box,
   Container,
@@ -188,6 +188,10 @@ function LobbyPage() {
       <footer className={styles.footer}>
         <Container size="lg" className={styles.footerInner}>
           <Text size="sm">Janjalive · Salas efêmeras</Text>
+          <nav aria-label="Documentos institucionais" className={styles.legalLinks}>
+            <Link to="/termos">Termos de Uso</Link>
+            <Link to="/privacidade">Privacidade</Link>
+          </nav>
           <a href="#criar-sala" onClick={(event) => {
             event.preventDefault();
             document.getElementById('criar-sala')?.scrollIntoView({ block: 'center' });
