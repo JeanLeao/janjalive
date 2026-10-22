@@ -18,9 +18,14 @@ import {
   IconDots,
   IconExit,
   IconLink,
+  IconQrCode,
+  IconShield,
 } from './Icons';
+import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface RoomHeaderProps {
+  locked?: boolean;
+  isProtected?: boolean;
   roomId: string;
   participantCount: number;
   raisedHandCount?: number;
@@ -30,9 +35,12 @@ export interface RoomHeaderProps {
   onLeave: () => void;
   /** Acesso social (chat e reações), posicionado junto aos participantes. */
   interactions?: React.ReactNode;
+  onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
 }
 
 export function RoomHeader({
+  locked = false,
+  isProtected = false,
   roomId,
   participantCount,
   raisedHandCount = 0,
@@ -41,23 +49,18 @@ export function RoomHeader({
   onOpenSettings,
   onLeave,
   interactions,
+  onOpenQrCode,
 }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false);
+  const moreMenuBtnRef = React.useRef<HTMLButtonElement>(null);
 
   const shortRoomId = roomId.length > 12 ? roomId.slice(0, 8) : roomId;
 
   const handleCopyLink = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.search = '';
-        cleanUrl.hash = '';
-        await navigator.clipboard.writeText(cleanUrl.toString());
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy link:', err);
-      }
+    const success = await copyRoomInviteUrl();
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -170,7 +173,7 @@ export function RoomHeader({
             size="sm"
             className="room-header-brand-title"
           >
-            Screen Room
+            Janjalive
           </Text>
         </Group>
 
@@ -204,6 +207,30 @@ export function RoomHeader({
             )}
           </UnstyledButton>
         </Tooltip>
+
+        {isProtected && (
+          <Tooltip label="Sala protegida por chave de acesso" withArrow>
+            <Box
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                border: '1px solid rgba(37, 99, 235, 0.3)',
+                padding: '3px 8px',
+                borderRadius: '16px',
+                color: '#60a5fa',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+              aria-label="Sala protegida por chave de acesso"
+            >
+              <IconShield size={12} />
+              <span>Protegida</span>
+            </Box>
+          </Tooltip>
+        )}
       </Group>
 
       {/* Right: Participant Count, Settings, Status */}
@@ -236,6 +263,7 @@ export function RoomHeader({
           </Box>
         </Tooltip>
 
+        {locked && <Text size="xs" c="#fcd34d" fw={600} role="status">Bloqueada</Text>}
         {interactions}
 
         {/* Participant cluster button */}
@@ -295,6 +323,7 @@ export function RoomHeader({
         <Menu shadow="md" width={180} position="bottom-end">
           <Menu.Target>
             <UnstyledButton
+              ref={moreMenuBtnRef}
               aria-label="Mais opções da sala"
               style={{
                 width: 36,
@@ -326,6 +355,15 @@ export function RoomHeader({
             >
               Copiar link
             </Menu.Item>
+            {onOpenQrCode && (
+              <Menu.Item
+                leftSection={<IconQrCode size={14} />}
+                onClick={() => onOpenQrCode(moreMenuBtnRef.current)}
+                style={{ fontSize: '0.82rem' }}
+              >
+                Mostrar QR Code
+              </Menu.Item>
+            )}
             <Menu.Item
               leftSection={<IconGear size={14} />}
               onClick={onOpenSettings}

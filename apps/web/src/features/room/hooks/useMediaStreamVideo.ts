@@ -1,3 +1,4 @@
+import { useAudioOutput } from './AudioOutput';
 import { observeVideoPresentation } from '../diagnostics/video-presentation';
 import { useLayoutEffect, useRef, useState } from 'react';
 
@@ -12,6 +13,9 @@ function applyPlaybackMute(video: HTMLVideoElement, muted: boolean) {
 }
 
 export function useMediaStreamVideo(stream: MediaStream | null, muted = false, onPlayback?: (state: string) => void, onPresented?: () => void, volume = 1) {
+  const output = useAudioOutput();
+  const routing = useRef(output);
+  routing.current = output;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const desiredMuted = useRef(muted);
@@ -26,7 +30,7 @@ export function useMediaStreamVideo(stream: MediaStream | null, muted = false, o
     const generation = ++playbackGeneration.current;
     const current = () => generation === playbackGeneration.current &&
       videoRef.current === video && video.srcObject === source;
-    applyPlaybackMute(video, desiredMuted.current);
+    applyPlaybackMute(video, desiredMuted.current || (routing.current !== null && !routing.current.router.allowed(video)));
     try {
       await video.play();
       if (current()) setAudioBlocked(false);
@@ -46,6 +50,16 @@ export function useMediaStreamVideo(stream: MediaStream | null, muted = false, o
       !stream.getAudioTracks().some(track => track.readyState === 'live')) return;
     await play(video, stream);
   };
+
+  useLayoutEffect(() => {
+    const video = videoRef.current;
+    if (!video || !output) return;
+    return output.router.register(video, () => {
+      if (videoRef.current !== video || video.srcObject !== stream || !stream) return;
+      // play() on this same element does not restart media; it preserves autoplay rejection handling.
+      void play(video, stream);
+    });
+  }, [output?.router, stream]);
 
   // Only source changes own the attachment and presentation observer, preserving PiP.
   useLayoutEffect(() => {

@@ -8,6 +8,7 @@ test-results/
 
 # Generated visual evidence
 /screenshots/
+/docs/f14-ui-rebuild/*.png
 
 # Local logs
 *.log

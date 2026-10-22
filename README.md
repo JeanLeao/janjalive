@@ -1,8 +1,8 @@
-# Screen Room
+# Janjalive
 
 Aplicação WebRTC streaming-first projetada especificamente para **compartilhamento de tela e áudio da aba/sistema em tempo real**.
 
-O Screen Room foi construído com foco em simplicidade, privacidade e desempenho: não exige cadastro, não armazena dados em contas de usuário e opera em salas efêmeras acessadas diretamente por link ou código.
+O Janjalive foi construído com foco em simplicidade, privacidade e desempenho: não exige cadastro, não armazena dados em contas de usuário e opera em salas efêmeras acessadas diretamente por link ou código.
 
 ---
 
@@ -19,6 +19,41 @@ O Screen Room foi construído com foco em simplicidade, privacidade e desempenho
 - **Diagnóstico em tempo real:** Métricas de latência (RTT), perda de pacotes, bitrate e conexões ativas visíveis diretamente na interface da sala.
 
 ---
+
+## Instalação como aplicativo (F33)
+
+Em um navegador compatível, acesse o Janjalive por HTTPS (ou localhost para
+testes) e use a opção nativa **Instalar aplicativo** do menu do navegador. Em
+dispositivos Apple compatíveis, use **Adicionar à Tela de Início** ou **Adicionar
+ao Dock**, conforme as opções disponíveis. O aplicativo instalado abre no lobby.
+
+A instalação não oferece funcionamento offline: criar e entrar em salas depende
+da conexão com o signaling. A captura de tela e áudio depende do suporte real do
+dispositivo e navegador. Salas e sessões continuam efêmeras; a instalação não as
+preserva permanentemente nem transfere credenciais entre a aba do navegador e o
+aplicativo. Fechar o aplicativo não garante recuperação posterior da sessão.
+
+## Host efêmero e moderação (F11)
+
+**Criar sala** solicita a criação ao signaling por WebSocket (`create-room`). O servidor gera um código aleatório de 128 bits e uma credencial administrativa independente de 256 bits, mantidos somente em memória. O primeiro visitante não recebe autoridade. Uma criação não reivindicada expira após 60 segundos; se convidados já estiverem conectados, a sala continua sem administrador, com a credencial revogada. A criação respeita origens permitidas, o limite de mensagens e um limite adicional de 10 salas por minuto por IP (resolução via proxies confiáveis, sem confiar livremente em `X-Forwarded-For`). O mapa desse limite aceita até 10.000 IPs por janela.
+
+A credencial administrativa fica no `sessionStorage` da aba, isolada por sala, junto da identidade e do token de reconexão. Não integra links, códigos, QR Codes, snapshots públicos ou diagnósticos. No primeiro ingresso autorizado, o servidor vincula o host à identidade do criador. Reconexões seguintes exigem **ambas** as credenciais; o token de reconexão sozinho não concede administração. Recarregar a página pode recuperar a sessão dentro dos 30 segundos de reserva. Sair pela interface revoga a autoridade imediatamente e limpa o armazenamento da sala. O armazenamento de sessão precisa estar disponível para criar uma sala; convidados podem continuar com recuperação em memória quando ele estiver indisponível.
+
+Em **Participantes**, o host pode **Bloquear entradas**, **Desbloquear entradas** e **Remover** outros participantes, com confirmação e feedback. A identificação do host e o bloqueio são públicos. Comandos usam a sessão WebSocket ativa, revisão autoritativa e identificação de requisição; mudanças de presença invalidam comandos antigos, e sockets substituídos perdem autorização. O snapshot de ingresso/reconexão inclui o estado administrativo. A sala bloqueada aceita apenas recuperações autenticadas de identidades ativas ou reservadas, mantendo a capacidade padrão de 10 vagas, incluindo reservas.
+
+Remover encerra a sessão, libera a vaga e invalida o token anterior; o cliente limpa a mídia e não tenta reconectar automaticamente. **Não há banimento permanente:** sem contas, uma pessoa pode entrar com nova identidade enquanto a sala estiver aberta. Bloquear entradas é o mecanismo complementar. Uma remoção não pode apagar mídia que outro navegador já tenha recebido por P2P; o servidor impede a continuidade daquela sessão no signaling, e os clientes encerram as conexões correspondentes.
+
+Quedas involuntárias reservam a autoridade por 30 segundos. Expiração ou saída voluntária revogam a credencial e desbloqueiam a sala ocupada, sem promover outro participante. Sem participantes nem reservas, todo o estado é destruído. Salas inexistentes/encerradas rejeitam ingresso com orientação para criar outra sala; `join` nunca cria salas. Bloqueio, remoção, sala inexistente e recuperação inválida têm encerramentos terminais, sem loop de reconexão. Reiniciar o signaling encerra todas as salas e autoridades, como os demais estados efêmeros. Web, signaling e protocolo devem ser atualizados juntos.
+
+## Salas protegidas por chave efêmera (F12)
+
+A proteção por chave é opcional e configurada exclusivamente na criação da sala (`isProtected: true`). Quando habilitada, o servidor gera automaticamente uma chave aleatória com alta entropia criptográfica (128 bits, codificada em `base64url`). O servidor armazena apenas um verificador criptográfico da chave (HMAC-SHA256 com sal aleatório por sala) e realiza comparações resistentes a diferenças de tempo (`timingSafeEqual`), sem nunca persistir a chave em texto puro.
+
+Links, códigos e QR Codes continuam contendo exclusivamente o endereço da sala (`/room/:roomId`), sem embutir a chave. O criador visualiza a chave na criação e pode consultá-la ou copiá-la durante sua sessão na mesma aba via armazenamento de sessão efêmero (`sessionStorage`). O criador entra automaticamente utilizando sua credencial administrativa de host (F11), sem necessidade de digitar a chave.
+
+Visitantes que acessam a sala protegida pela primeira vez devem fornecer a chave antes da admissão. O servidor valida a autorização antes de admitir o participante, enviar snapshots, estabelecer relações de presença ou aceitar mensagens WebRTC. Reconexões legítimas de participantes ativos ou reservados utilizam o token de reconexão existente, sem exigir novamente a chave.
+
+Tentativas incorretas de chave são limitadas pelo servidor por IP e sala (máximo de 5 falhas com bloqueio temporário de 60 segundos), prevenindo ataques de força bruta sem revelar se a sala está cheia ou bloqueada. A chave não concede autoridade administrativa; a F11 continua independente. Ao encerrar a sala ou reiniciar o signaling, todo o estado efêmero é destruído.
 
 ## Prévia, pausa e encerramento
 
@@ -330,3 +365,35 @@ O painel mantém as abas **Chat | Perguntas | Enquetes**, inclusive no Modo Cine
 - A memória retém uma enquete aberta e até 3 encerradas (mais recentes primeiro), com até 10.000 identidades votantes por enquete, incluindo quem saiu; ao atingir esse teto, novos votantes são recusados, mas votos existentes podem ser alterados. Os totais derivam de escolhas individuais, sem incrementos duplicados. Os textos limitam cada criação a 900 caracteres de conteúdo; o limite de frame WebSocket existente permanece em 64 KiB.
 - Todos os dados ficam somente em memória e são descartados quando a sala é destruída, após encerrar eventuais reservas de recuperação. Não há exportação, banco de dados, host ou moderação permanente.
 - A interface aguarda confirmação por até 8 segundos, exibe erros ou desconexão e não reenvia operações automaticamente. A entrada tardia e a reconexão recebem o estado atual; rascunhos de criação sobrevivem a mudanças de modo dentro da mesma sala.
+
+### Saída de áudio recebida (F28)
+
+Em **Configurações → Áudio → Saída de áudio**, escolha uma saída para todas as
+transmissões recebidas. A preferência existe somente na memória da página da sala;
+volume, mudo e seleção da transmissão audível continuam independentes. O dispositivo
+padrão do sistema é uma escolha explícita e acompanha a rota padrão do navegador.
+
+A seleção depende de contexto seguro, `setSinkId()` e da política
+`speaker-selection`. Firefox desktop oferece o seletor nativo `selectAudioOutput()`;
+Chromium desktop e Safari com `setSinkId()` permitem escolher saídas já expostas pelo
+navegador, que podem se limitar ao padrão. A aplicação não pede microfone ou câmera
+para ampliar essa lista. Sem suporte, utilize a configuração de áudio do sistema.
+O suporte varia por versão e plataforma, especialmente em dispositivos móveis:
+[compatibilidade de setSinkId](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/setSinkId#browser_compatibility)
+e [selectAudioOutput](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/selectAudioOutput#browser_compatibility).
+
+Durante a troca, os elementos permanecem silenciosos até aplicar a saída. Falha de
+roteamento, remoção ou perda de exposição da saída selecionada suspende o áudio até
+uma nova escolha, inclusive o retorno explícito ao padrão. Alterações de dispositivos
+são verificadas com o áudio temporariamente suspenso. O navegador ou sistema pode
+mudar a rota física antes de notificar a página; não há garantia absoluta contra
+redirecionamentos externos. Cancelamento ou rejeição do seletor nativo mantém a
+preferência anterior. A seleção não remove as restrições de autoplay do navegador.
+
+### Watch Party de vídeos locais (F14)
+
+No palco, abra **Watch Party** para compartilhar um MP4 ou WebM de até 20 MiB com consentimento individual via P2P. Quem inicia controla play, pause e posição; os demais mantêm volume e mudo locais. A sincronização é aproximada, com estado confirmado pelo servidor. Capturas existentes continuam disponíveis em **Voltar às transmissões**. Veja [autoridade, privacidade, limites e validação](F14.md).
+
+### Transferência de arquivos (F15)
+
+Envie arquivos de até 20 MiB pelo compositor do Chat a destinatários selecionados, com cards privados, aceitação individual e download explícito. Funciona também entre espectadores sem mídia. Veja [fluxo, limites e segurança](FILES.md).

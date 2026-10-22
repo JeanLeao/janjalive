@@ -1,6 +1,6 @@
 # Diagnóstico e Depuração da Conexão WebRTC
 
-Este documento descreve os procedimentos de inspeção de conexão, métricas de rede e ciclo de vida de eventos WebRTC no Screen Room.
+Este documento descreve os procedimentos de inspeção de conexão, métricas de rede e ciclo de vida de eventos WebRTC no Janjalive.
 
 ---
 

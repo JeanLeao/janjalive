@@ -1,3 +1,4 @@
+import { createTestRooms } from '../../signaling/test/helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -45,6 +46,7 @@ async function until(label, condition, participants) {
 async function room(t, roomId) {
   const server = createSignalServer({ port: 0, host: '127.0.0.1', maxParticipantsPerRoom: 10 });
   await server.ready;
+  roomId = (await createTestRooms(server, [roomId]))[roomId];
   const participants = [];
   t.after(async () => {
     for (const p of participants) {

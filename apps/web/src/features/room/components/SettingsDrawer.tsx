@@ -1,3 +1,4 @@
+import { AudioOutputSettings } from '../hooks/AudioOutput';
 import React, { useState } from 'react';
 import {
   Drawer,
@@ -9,8 +10,9 @@ import {
   Button,
   Code,
   Tabs,
+  Switch,
 } from '@mantine/core';
-import type { QualitySelection } from '@screen-room/protocol';
+import { QUALITY_PROFILES, type QualitySelection } from '@screen-room/protocol';
 import { QualityControls } from './QualityControls';
 import type {
   ConnectionState,
@@ -32,6 +34,8 @@ export interface SettingsDrawerProps {
   opened: boolean;
   onClose: () => void;
   quality: QualitySelection;
+  requestedQuality?: QualitySelection;
+  qualityVerification?: 'pending' | 'verified' | 'partial' | null;
   onChangeQuality: (newQuality: QualitySelection) => void;
   networkStats: NetworkMetrics | null;
   connectionStatus: ConnectionState;
@@ -41,12 +45,16 @@ export interface SettingsDrawerProps {
   onToggleAudioMute: () => void;
   isSharing: boolean;
   initialTab?: string;
+  shortcutsEnabled?: boolean;
+  onToggleShortcuts?: (enabled: boolean) => void;
 }
 
 export function SettingsDrawer({
   opened,
   onClose,
   quality,
+  requestedQuality = quality,
+  qualityVerification,
   onChangeQuality,
   networkStats,
   connectionStatus,
@@ -56,6 +64,8 @@ export function SettingsDrawer({
   onToggleAudioMute,
   isSharing,
   initialTab = 'quality',
+  shortcutsEnabled = false,
+  onToggleShortcuts,
 }: SettingsDrawerProps) {
   const measurementLabel = { unavailable: 'Estatísticas indisponíveis', 'no-report': 'Sem amostra', unsupported: 'Campo não fornecido pelo navegador', pending: 'Medição ainda não estabelecida', measured: 'Medido' };
   const [copiedLogs, setCopiedLogs] = useState(false);
@@ -89,6 +99,7 @@ export function SettingsDrawer({
       position="right"
       size="md"
       withCloseButton={false}
+      aria-label="Configurações"
       styles={{
         content: {
           backgroundColor: '#0d1117',
@@ -116,9 +127,16 @@ export function SettingsDrawer({
         }}
       >
         <div>
-          <Text fw={700} size="md" c="#ffffff">
+          <Drawer.Title
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#ffffff',
+              margin: 0,
+            }}
+          >
             Configurações
-          </Text>
+          </Drawer.Title>
           <Text size="xs" c="#8c959f">
             Transmissão, áudio e diagnóstico
           </Text>
@@ -184,6 +202,14 @@ export function SettingsDrawer({
         <Tabs.Panel value="quality">
           <Stack gap="md">
             <QualityControls quality={quality} onChange={onChangeQuality} />
+            <Text size="xs" c="dimmed">
+              Preferência: {QUALITY_PROFILES[quality.profile].label} · {quality.fps} FPS.
+              {' '}Proteção e recuperação automática gradual de qualidade.
+              {requestedQuality.profile !== quality.profile && ` Perfil temporário solicitado: ${QUALITY_PROFILES[requestedQuality.profile].label} · ${requestedQuality.fps} FPS.`}
+              {qualityVerification === 'pending' && ' Verificando limites solicitados…'}
+              {qualityVerification === 'verified' && ' Limites aplicados verificados; a qualidade transmitida pode variar.'}
+              {qualityVerification === 'partial' && ' Aplicação dos limites incompleta ou não verificada. Consulte o diagnóstico.'}
+            </Text>
 
             <Box
               style={{
@@ -206,6 +232,7 @@ export function SettingsDrawer({
         {/* Tab 2: Áudio */}
         <Tabs.Panel value="audio">
           <Stack gap="md">
+            <AudioOutputSettings />
             <div>
               <Text fw={600} size="sm" c="#fff" mb={4}>
                 Áudio da tela
@@ -461,7 +488,7 @@ export function SettingsDrawer({
           <Stack gap="md">
             <div>
               <Text fw={600} size="sm" c="#fff" mb={4}>
-                Sobre o Screen Room
+                Sobre o Janjalive
               </Text>
               <Text size="xs" c="#8c959f">
                 Alternativa rápida e focada para visualização de telas em tempo real.
@@ -486,7 +513,59 @@ export function SettingsDrawer({
 
             <Box
               style={{
-                marginTop: '1rem',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+              }}
+            >
+              <Group justify="space-between" align="center" mb="xs">
+                <div>
+                  <Text fw={600} size="sm" c="#fff">
+                    Atalhos de uma tecla
+                  </Text>
+                  <Text size="xs" c="#8c959f">
+                    {shortcutsEnabled ? 'Ativados' : 'Desativados por padrão (WCAG 2.1.4)'}
+                  </Text>
+                </div>
+                <Switch
+                  checked={shortcutsEnabled}
+                  onChange={(event) => onToggleShortcuts?.(event.currentTarget.checked)}
+                  aria-label="Ativar atalhos de teclado de uma tecla"
+                  size="sm"
+                  color="blue"
+                />
+              </Group>
+
+              <Text size="xs" c="#8c959f" mb="sm" style={{ lineHeight: 1.45 }}>
+                {shortcutsEnabled
+                  ? 'Atalhos ativos. Pressione as teclas abaixo quando não estiver digitando.'
+                  : 'Recurso desativado. Ative para navegar rapidamente com teclas únicas.'}
+              </Text>
+
+              <Stack gap="xs">
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Próxima transmissão principal</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>N</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Transmissão principal anterior</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>P</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Alternar fullscreen do palco</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>F</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Abrir ou focar o painel de interações</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>I</Code>
+                </Group>
+              </Stack>
+            </Box>
+
+            <Box
+              style={{
+                marginTop: '0.5rem',
                 padding: '10px 12px',
                 borderRadius: '8px',
                 backgroundColor: 'rgba(255, 255, 255, 0.03)',

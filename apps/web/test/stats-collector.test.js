@@ -255,3 +255,166 @@ test('no peers measures zero WebRTC connections without inventing network sample
   assert.deepEqual(metrics, { bitrateKbps: null, lossPercent: null, rttMs: null, activeConnections: 0, peers: [] });
   collector.stop();
 });
+
+function recoveryHarness() {
+  let now = 0, loss = 0, rtt, publishing = true, mode = 'valid';
+  const peers = new Map();
+  const events = [];
+  function add(id) {
+    let received = 0, lost = 0, stamp = -3000;
+    const pc = { connectionState: 'connected', iceConnectionState: 'connected', signalingState: 'stable', getStats: async () => {
+      if (mode === 'missing') return new Map();
+      if (mode === 'reject') throw new Error('stats unavailable');
+      if (mode !== 'repeated') stamp = now;
+      received += mode === 'insufficient' ? 1 : 100 - loss;
+      lost += loss;
+      return new Map([
+        ['out', { id: 'out', type: 'outbound-rtp', kind: 'video', timestamp: now, packetsSent: received + lost }],
+        ['remote', { id: 'remote', type: 'remote-inbound-rtp', kind: 'video', localId: 'out', timestamp: mode === 'old' ? now - 9000 : stamp,
+          packetsReceived: mode === 'invalid' ? NaN : received, packetsLost: lost, roundTripTime: rtt }],
+      ]);
+    } };
+    peers.set(id, { pc });
+    return pc;
+  }
+  add('a');
+  const collector = new StatsCollector({ peerManager: { getPeers: () => peers }, onStats() {}, now: () => now,
+    isPublishing: () => publishing, onRecovery: () => events.push(['recover', now]), onDegradation: () => events.push(['reduce', now]) });
+  return { collector, peers, events, add, set: values => {
+    if ('loss' in values) loss = values.loss;
+    if ('rtt' in values) rtt = values.rtt;
+    if ('mode' in values) mode = values.mode;
+    if ('publishing' in values) publishing = values.publishing;
+  }, tick: async (gap = 3000) => { now += gap; await collector.collect(); } };
+}
+
+test('recovery requires 60 continuous seconds and 60 seconds between steps, without RTT', async () => {
+  const h = recoveryHarness();
+  await h.tick(); // baseline
+  for (let i = 0; i < 20; i++) await h.tick();
+  assert.deepEqual(h.events, []);
+  await h.tick();
+  assert.deepEqual(h.events, [['recover', 66000]]);
+  for (let i = 0; i < 20; i++) await h.tick();
+  assert.equal(h.events.length, 1);
+  await h.tick();
+  assert.deepEqual(h.events[1], ['recover', 129000]);
+});
+
+for (const block of [{ loss: 2 }, { rtt: .301 }, { mode: 'missing' }, { mode: 'repeated' }, { mode: 'old' }, { mode: 'invalid' }, { mode: 'insufficient' }, { mode: 'reject' }, { publishing: false }]) {
+  test(`recovery blocked by ${JSON.stringify(block)} and requires a new full window`, async () => {
+    const h = recoveryHarness();
+    for (let i = 0; i < 18; i++) await h.tick();
+    h.set(block);
+    for (let i = 0; i < 25; i++) await h.tick();
+    assert.deepEqual(h.events, []);
+    h.set({ loss: 0, rtt: undefined, mode: 'valid', publishing: true });
+    for (let i = 0; i < 19; i++) await h.tick();
+    assert.deepEqual(h.events, []);
+    for (let i = 0; i < 4; i++) await h.tick();
+    assert.equal(h.events[0][0], 'recover');
+  });
+}
+
+for (const change of ['join', 'leave', 'replace', 'disconnected', 'gap', 'manual-reset']) {
+  test(`recovery invalidates previous stability on ${change}`, async () => {
+    const h = recoveryHarness();
+    if (change === 'leave') h.add('b');
+    for (let i = 0; i < 18; i++) await h.tick();
+    if (change === 'join') h.add('b');
+    if (change === 'leave') h.peers.delete('b');
+    if (change === 'replace') h.add('a');
+    if (change === 'disconnected') h.peers.get('a').pc.connectionState = 'disconnected';
+    if (change === 'manual-reset') h.collector.resetAdaptation();
+    await h.tick(change === 'gap' ? 9000 : 3000);
+    if (change === 'disconnected') h.peers.get('a').pc.connectionState = 'connected';
+    for (let i = 0; i < 19; i++) await h.tick();
+    assert.deepEqual(h.events, []);
+    for (let i = 0; i < 4; i++) await h.tick();
+    assert.equal(h.events[0][0], 'recover');
+  });
+}
+
+test('one unavailable peer and zero spectators block global recovery', async () => {
+  const h = recoveryHarness();
+  h.peers.set('bad', { pc: { connectionState: 'connected', getStats: async () => new Map() } });
+  for (let i = 0; i < 30; i++) await h.tick();
+  assert.deepEqual(h.events, []);
+  h.peers.clear();
+  for (let i = 0; i < 30; i++) await h.tick();
+  assert.deepEqual(h.events, []);
+});
+
+test('degradation keeps 20 second cooldown and resets recovery stability', async () => {
+  const h = recoveryHarness();
+  h.set({ loss: 6 });
+  for (let i = 0; i < 10; i++) await h.tick();
+  assert.deepEqual(h.events, [['reduce', 6000], ['reduce', 27000]]);
+  h.set({ loss: 0 });
+  for (let i = 0; i < 20; i++) await h.tick();
+  assert.equal(h.events.length, 2);
+  await h.tick();
+  assert.equal(h.events[2][0], 'recover');
+});
+
+test('reset during delayed stats cancels automatic decisions', async () => {
+  const h = recoveryHarness();
+  for (let i = 0; i < 21; i++) await h.tick();
+  let resolve;
+  h.peers.get('a').pc.getStats = () => new Promise(done => { resolve = done; });
+  const pending = h.tick();
+  h.collector.resetAdaptation();
+  resolve(new Map());
+  await pending;
+  assert.deepEqual(h.events, []);
+});
+
+test('a single peer at 3% loss blocks recovery even when the other peer is stable', async () => {
+  const h = recoveryHarness();
+  const bad = h.add('bad');
+  const getStats = bad.getStats;
+  let packets = 0;
+  bad.getStats = async () => {
+    const reports = await getStats();
+    packets++;
+    reports.get('remote').packetsReceived = packets * 97;
+    reports.get('remote').packetsLost = packets * 3;
+    return reports;
+  };
+  for (let i = 0; i < 30; i++) await h.tick();
+  assert.deepEqual(h.events, []);
+});
+
+test('300ms RTT is allowed; absent outbound report timestamp cannot prove freshness', async () => {
+  const h = recoveryHarness();
+  h.set({ rtt: .3 });
+  for (let i = 0; i < 22; i++) await h.tick();
+  assert.deepEqual(h.events, [['recover', 66000]]);
+  h.collector.resetAdaptation();
+  const pc = h.peers.get('a').pc;
+  const getStats = pc.getStats;
+  pc.getStats = async () => {
+    const reports = await getStats();
+    delete reports.get('out').timestamp;
+    return reports;
+  };
+  for (let i = 0; i < 30; i++) await h.tick();
+  assert.equal(h.events.length, 1);
+});
+
+test('a getStats result delayed more than two cadences cannot finish the stability window', async () => {
+  const h = recoveryHarness();
+  for (let i = 0; i < 21; i++) await h.tick();
+  const pc = h.peers.get('a').pc, getStats = pc.getStats;
+  let resolve;
+  pc.getStats = async () => {
+    const reports = await getStats();
+    await new Promise(done => { resolve = done; });
+    return reports;
+  };
+  const pending = h.tick();
+  await new Promise(setImmediate);
+  await h.tick(9000); // concurrent collection is skipped, but monotonic time advances
+  resolve(); await pending;
+  assert.deepEqual(h.events, []);
+});

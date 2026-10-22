@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
@@ -12,7 +13,7 @@ function connect(url, options = {}) {
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
       // F38 snapshots are verified in hands.test.js and qa.test.js; these queues assert presence/relay ordering.
-      if (parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
+      if (parsed.type === 'clips-snapshot' || parsed.type === 'room-state' || parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {
@@ -60,6 +61,7 @@ function waitForClose(socket, timeoutMs = 2000) {
 test('SEC-03: 1 & 2 - primeiro ingresso sem token e recebimento privado do token', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["sec-room-1"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
@@ -68,7 +70,7 @@ test('SEC-03: 1 & 2 - primeiro ingresso sem token e recebimento privado do token
   t.after(() => { s1.close(); s2.close(); });
 
   // 1. Primeiro ingresso sem token
-  s1.send(JSON.stringify({ type: 'join', roomId: 'sec-room-1', peerId: 'alice', nickname: 'Alice' }));
+  s1.send(JSON.stringify({ type: 'join', roomId: ids["sec-room-1"], peerId: 'alice', nickname: 'Alice' }));
   const alicePeers = await nextMessage(s1);
 
   // 2. Recebimento privado do token
@@ -76,7 +78,7 @@ test('SEC-03: 1 & 2 - primeiro ingresso sem token e recebimento privado do token
   assert.ok(typeof alicePeers.reconnectToken === 'string' && alicePeers.reconnectToken.length >= 16);
 
   // 9. Ausência de vazamento do token para outros participantes
-  s2.send(JSON.stringify({ type: 'join', roomId: 'sec-room-1', peerId: 'bob', nickname: 'Bob' }));
+  s2.send(JSON.stringify({ type: 'join', roomId: ids["sec-room-1"], peerId: 'bob', nickname: 'Bob' }));
   const bobPeers = await nextMessage(s2);
   const aliceJoinedNotif = await nextMessage(s1);
 
@@ -93,13 +95,14 @@ test('SEC-03: 1 & 2 - primeiro ingresso sem token e recebimento privado do token
 test('SEC-03: 3, 4, 5, 6 - substituição legítima vs ataque sem token e com token inválido', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["sec-room-2"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
   const aliceSocket = await connect(wsUrl);
   t.after(() => aliceSocket.close());
 
-  aliceSocket.send(JSON.stringify({ type: 'join', roomId: 'sec-room-2', peerId: 'alice', nickname: 'Alice' }));
+  aliceSocket.send(JSON.stringify({ type: 'join', roomId: ids["sec-room-2"], peerId: 'alice', nickname: 'Alice' }));
   const alicePeers = await nextMessage(aliceSocket);
   const legitimateToken = alicePeers.reconnectToken;
   assert.ok(legitimateToken);
@@ -108,7 +111,7 @@ test('SEC-03: 3, 4, 5, 6 - substituição legítima vs ataque sem token e com to
   const imposter1 = await connect(wsUrl);
   const imposter1ClosePromise = waitForClose(imposter1);
 
-  imposter1.send(JSON.stringify({ type: 'join', roomId: 'sec-room-2', peerId: 'alice', nickname: 'Imposter1' }));
+  imposter1.send(JSON.stringify({ type: 'join', roomId: ids["sec-room-2"], peerId: 'alice', nickname: 'Imposter1' }));
   const err1 = await nextMessage(imposter1);
   assert.equal(err1.type, 'error');
   assert.equal(err1.code, 'UNAUTHORIZED_RECONNECT');
@@ -128,7 +131,7 @@ test('SEC-03: 3, 4, 5, 6 - substituição legítima vs ataque sem token e com to
   imposter2.send(
     JSON.stringify({
       type: 'join',
-      roomId: 'sec-room-2',
+      roomId: ids["sec-room-2"],
       peerId: 'alice',
       nickname: 'Imposter2',
       reconnectToken: 'forged-token-abc',
@@ -150,7 +153,7 @@ test('SEC-03: 3, 4, 5, 6 - substituição legítima vs ataque sem token e com to
   aliceNewSocket.send(
     JSON.stringify({
       type: 'join',
-      roomId: 'sec-room-2',
+      roomId: ids["sec-room-2"],
       peerId: 'alice',
       nickname: 'Alice Reconnected',
       reconnectToken: legitimateToken,
@@ -169,10 +172,11 @@ test('SEC-03: 3, 4, 5, 6 - substituição legítima vs ataque sem token e com to
 test('SEC-03: 7 - reconexão com dez participantes na sala sem ultrapassar capacidade', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', maxParticipantsPerRoom: 10 });
   await app.ready;
+  const ids = await createTestRooms(app, ["room-10-sec"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'room-10-sec';
+  const roomId = ids["room-10-sec"];
   const participants = [];
 
   // Conecta 10 participantes legítimos
@@ -223,11 +227,12 @@ test('SEC-03: 7 - reconexão com dez participantes na sala sem ultrapassar capac
 test('SEC-03: 8 - saída e encerramento de sessão limpam credenciais efêmeras', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["exit-room"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
   const s1 = await connect(wsUrl);
-  s1.send(JSON.stringify({ type: 'join', roomId: 'exit-room', peerId: 'alice' }));
+  s1.send(JSON.stringify({ type: 'join', roomId: ids["exit-room"], peerId: 'alice' }));
   const peers1 = await nextMessage(s1);
   const oldToken = peers1.reconnectToken;
   assert.ok(oldToken);
@@ -237,9 +242,10 @@ test('SEC-03: 8 - saída e encerramento de sessão limpam credenciais efêmeras'
   await new Promise((r) => setTimeout(r, 50));
 
   // Novo ingresso com peerId alice: a sessão anterior foi destruída, novo token deve ser emitido
+  ids["exit-room"] = (await createTestRooms(app, ['replacement']))['replacement'];
   const s2 = await connect(wsUrl);
   t.after(() => s2.close());
-  s2.send(JSON.stringify({ type: 'join', roomId: 'exit-room', peerId: 'alice' }));
+  s2.send(JSON.stringify({ type: 'join', roomId: ids["exit-room"], peerId: 'alice' }));
   const peers2 = await nextMessage(s2);
   assert.equal(peers2.type, 'peers');
   assert.notEqual(peers2.reconnectToken, oldToken, 'Novo ingresso em sessão limpa gera um novo token criptográfico');
@@ -265,10 +271,11 @@ test('SEC-03: 10 - ausência de loops de reconexão para códigos terminais', ()
 test('SEC-03: 11 - recuperação após remoção abrupta do socket protege contra sequestro e restaura sessão legítima', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["sec-recovery-room"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'sec-recovery-room';
+  const roomId = ids["sec-recovery-room"];
 
   // 1. Alice ingressa na sala e recebe seu peerId e reconnectToken
   const aliceSocket = await connect(wsUrl);
@@ -346,10 +353,11 @@ test('SEC-03: 11 - recuperação após remoção abrupta do socket protege contr
 test('SEC-03: 12 - saída voluntária via mensagem leave limpa imediatamente reserva e vaga', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["sec-voluntary-room"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'sec-voluntary-room';
+  let roomId = ids["sec-voluntary-room"];
 
   const s1 = await connect(wsUrl);
   s1.send(JSON.stringify({ type: 'join', roomId, peerId: 'charlie', nickname: 'Charlie' }));
@@ -362,7 +370,8 @@ test('SEC-03: 12 - saída voluntária via mensagem leave limpa imediatamente res
   s1.close(WS_CLOSE_CODES.NORMAL);
   await new Promise((r) => setTimeout(r, 50));
 
-  // Novo participante ingressando com o mesmo peerId entra como nova sessão limpa
+  roomId = (await createTestRooms(app, ['replacement']))['replacement'];
+  // A sala vazia foi destruída; criação explícita permite nova sessão limpa
   const s2 = await connect(wsUrl);
   t.after(() => s2.close());
   s2.send(JSON.stringify({ type: 'join', roomId, peerId: 'charlie' }));

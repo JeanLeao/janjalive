@@ -633,3 +633,53 @@ test('quality completion cannot send an answer from a retired peer', async () =>
     assert.equal(signals.filter(signal => signal.type === 'answer').length, 0);
   } finally { manager.dispose(); }
 });
+
+test('recovery reports partial constraints or sender failures without interrupting video/audio', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal() {}, onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  try {
+    const video = new MockMediaStreamTrack('video'), audio = new MockMediaStreamTrack('audio');
+    video.contentHint = '';
+    video.getSettings = () => ({ width: 640, height: 360, frameRate: 30 });
+    video.applyConstraints = async () => {};
+    audio.enabled = false;
+    const peer = manager.getOrCreatePeer('viewer');
+    await manager.attachLocalStream(new MockMediaStream([video, audio]));
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'economy', fps: 30 }), true);
+    video.applyConstraints = async () => { throw new Error('constraints unavailable'); };
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'balanced', fps: 60 }), false);
+    video.applyConstraints = async () => {};
+    peer.videoSender.setParameters = async () => { throw new Error('parameters unavailable'); };
+    assert.equal(await manager.applyQuality({ priority: 'motion', profile: 'ultra', fps: 60 }), false);
+    assert.equal(peer.videoSender.track, video);
+    assert.equal(peer.audioSender.track, audio);
+    assert.equal(video.readyState, 'live');
+    assert.equal(audio.enabled, false);
+  } finally { manager.dispose(); }
+});
+
+test('peer-manager: spectators negotiate one data-only channel on demand and reuse media connection', async () => {
+  const signals = [], bindings = [], disconnected = [];
+  const manager = new PeerManager({ localPeerId: 'a', rtcConfig: { iceServers: [] }, onSendSignal: (target, data) => signals.push(data),
+    onRemoteStreamAdd() {}, onRemoteStreamRemove() {}, onDataChannel: (id, channel) => bindings.push(channel), onDataDisconnect: id => disconnected.push(id) });
+  manager.setParticipants(['b']); assert.equal(manager.getPeers().size, 0);
+  const peer = manager.getOrCreatePeer('b');
+  peer.pc.createDataChannel = (label, options) => ({ label, ...options, readyState: 'connecting', close() { this.readyState = 'closed'; } });
+  const channel = manager.ensureDataChannel('b'); assert.equal(manager.ensureDataChannel('b'), channel); assert.equal(bindings.length, 1);
+  await manager.createAndSendOffer('b'); assert.equal(signals.filter(s => s.type === 'offer').length, 1);
+  assert.equal(channel.negotiated, true); assert.equal(channel.id, 0);
+  assert.equal(manager.ensureDataChannel('outsider'), null);
+  manager.resetPeer('b'); assert.equal(channel.readyState, 'closed'); assert.ok(disconnected.includes('b'));
+  assert.equal(manager.getPeers().size, 0); manager.dispose();
+});
+
+test('peer-manager: higher spectator waits for initial data offer without weakening generation checks', async () => {
+  const signals = [];
+  const manager = new PeerManager({ localPeerId: 'z', rtcConfig: { iceServers: [] }, onSendSignal: (id, data) => signals.push(data), onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  manager.setParticipants(['a']); const peer = manager.getOrCreatePeer('a');
+  peer.pc.createDataChannel = () => ({ readyState: 'connecting', close() {} });
+  manager.ensureDataChannel('a'); await manager.createAndSendOffer('a'); assert.equal(signals.length, 0);
+  await manager.handleSignal('a', { type: 'offer', generation: 'remote', negotiationId: 'initial', sdp: { type: 'offer', sdp: 'data-offer' } });
+  assert.equal(signals.at(-1).type, 'answer');
+  await manager.handleSignal('a', { type: 'offer', generation: 'retired', negotiationId: 'stale', sdp: { type: 'offer', sdp: 'stale-offer' } });
+  assert.equal(signals.length, 1); manager.dispose();
+});

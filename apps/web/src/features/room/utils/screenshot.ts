@@ -1,5 +1,5 @@
 /**
- * Utility functions for capturing and exporting video screenshots in Screen Room.
+ * Utility functions for capturing and exporting video screenshots in Janjalive.
  * Exclusively captures the decoded video frame at intrinsic resolution,
  * ignoring CSS zoom/pan, annotations, and UI overlays.
  */
@@ -12,7 +12,7 @@ export function formatScreenshotFilename(date: Date = new Date()): string {
   const hh = pad(date.getHours());
   const min = pad(date.getMinutes());
   const ss = pad(date.getSeconds());
-  return `screen-room-${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}.png`;
+  return `janjalive-${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}.png`;
 }
 
 export function isScreenshotAvailable(

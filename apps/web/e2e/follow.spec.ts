@@ -1,3 +1,4 @@
+import { gotoRoom } from './fixtures/rooms';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 // F29 — Seguir apresentador. Capture is synthetic (canvas); permissions, real audio and STUN/TURN are not covered.
@@ -41,9 +42,9 @@ async function open(browser: Browser, room: string, name: string, viewport?: { w
             ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
             ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 0, w, 46);
             ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 16px system-ui, sans-serif';
-            ctx.fillText(`${nickname} · Screen Room Analytics (${w}×${h})`, 20, 29);
+            ctx.fillText(`${nickname} · Janjalive Analytics (${w}×${h})`, 20, 29);
             ctx.fillStyle = '#94a3b8'; ctx.font = '13px system-ui, sans-serif';
-            ctx.fillText('https://app.screenroom.dev/metrics/mesh-p2p', 480, 29);
+            ctx.fillText('https://app.janjalive.dev/metrics/mesh-p2p', 480, 29);
             const cards = [
               ['Bitrate de saída', '2.84 Mbps', '#22c55e'],
               ['Quadros / seg', '30 fps', '#38bdf8'],
@@ -139,8 +140,9 @@ async function open(browser: Browser, room: string, name: string, viewport?: { w
       },
     });
   }, name);
-  await page.goto(`/room/${room}`);
-  await expect(page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeEnabled();
+  await gotoRoom(page, `/room/${room}`);
+  // Viewers only need an authenticated room session; capture controls are checked by startLive.
+  await expect(page.getByText('Conectado', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Ver participantes/ }).first()).toBeVisible();
   return { context, page };
 }

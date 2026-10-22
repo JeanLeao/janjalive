@@ -1,0 +1,36 @@
+.attachment { min-width: 0; margin-bottom: 6px; }
+.hidden { display: none; }
+.attachRow { display: flex; align-items: center; justify-content: space-between; gap: 4px; color: #a9b4c2; font-size: 10px; }
+.attachment button, .card button { font: inherit; min-height: 44px; padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #a9b4c2; cursor: pointer; }
+.attachment button:hover:not(:disabled), .card button:hover:not(:disabled) { background: #212c3b; color: #e6edf3; }
+.attachment button:disabled, .card button:disabled { opacity: .5; cursor: default; }
+.attachment button:focus-visible, .card button:focus-visible, .recipients input:focus-visible, .card:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.attachment .attach { display: inline-flex; align-items: center; gap: 6px; padding-left: 2px; font-size: 12px; }
+.card, .draft { padding: 12px; border: 1px solid #303d50; border-radius: 4px 14px 14px 14px; background: #161e29; min-width: 0; font-size: 12px; flex-shrink: 0; }
+.draft { background: #161b22; border-radius: 10px; max-height: min(360px, 45dvh); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #30363d transparent; }
+.header { display: flex; align-items: center; gap: 10px; color: #93c5fd; }
+.header > svg { flex-shrink: 0; }
+.identity { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.identity strong { color: #e6edf3; overflow-wrap: anywhere; line-height: 1.4; font-size: 13px; }
+.identity span, .context, .hint { color: #a9b4c2; font-size: 11px; line-height: 1.5; }
+.context { margin: 10px 0 0; overflow-wrap: anywhere; }
+.hint { margin: 6px 0; }
+.attachment .icon { display: grid; place-items: center; width: 44px; flex-shrink: 0; padding: 0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.attachment .primary, .card .primary { background: #2563eb; color: #fff; }
+.attachment .primary:hover:not(:disabled), .card .primary:hover:not(:disabled) { background: #1d4ed8; color: #fff; }
+.recipients { margin: 4px 0; padding: 0; border: 0; max-height: 145px; overflow-y: auto; scrollbar-width: thin; }
+.recipients legend { color: #a9b4c2; font-size: 11px; margin-bottom: 4px; }
+.recipients label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
+.recipients label:hover { background: #21262d; }
+.recipients input { accent-color: #2563eb; flex-shrink: 0; }
+.recipients span { overflow-wrap: anywhere; min-width: 0; }
+.delivery { padding-top: 10px; margin-top: 8px; border-top: 1px solid #303d50; }
+.person { display: block; color: #e6edf3; overflow-wrap: anywhere; margin-bottom: 4px; }
+.state { color: #a9b4c2; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.state[data-state='complete'] { color: #86efac; }
+.state[data-state='offered'], .state[data-state='transferring'] { color: #93c5fd; }
+.state[data-state='error'], .error { color: #fca5a5; }
+.error { font-size: 12px; line-height: 1.5; margin: 6px 0; }
+.progress { width: 100%; height: 5px; accent-color: #58a6ff; margin: 8px 0; }
+@media (max-width: 360px) { .attachRow > span { max-width: 80px; text-align: right; } .card, .draft { padding: 10px; } }

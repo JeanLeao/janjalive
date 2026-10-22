@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
@@ -12,7 +13,7 @@ function connect(url, options = {}) {
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
       // F38 snapshots are verified in hands.test.js and qa.test.js; these queues assert presence/relay ordering.
-      if (parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
+      if (parsed.type === 'clips-snapshot' || parsed.type === 'room-state' || parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {
@@ -93,10 +94,11 @@ test('capacity: controlled 10-participant room lifecycle, rejection, reconnectio
     maxParticipantsPerRoom: 10,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["capacidade-sala-10"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'capacidade-sala-10';
+  const roomId = ids["capacidade-sala-10"];
   const participants = [];
 
   // Helper to safely close all sockets at end
@@ -370,10 +372,11 @@ test('capacity: Policy A main scenario - involuntary disconnect reserves slot fo
     maxParticipantsPerRoom: 2,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-main"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-main';
+  const roomId = ids["policy-a-main"];
 
   // 1 & 2. Connect p1 and p2 (capacity 2 filled)
   const s1 = await connect(wsUrl);
@@ -455,10 +458,11 @@ test('capacity: Policy A - 10-participant room reserves slot upon abrupt disconn
     maxParticipantsPerRoom: 10,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-10-room"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-10-room';
+  const roomId = ids["policy-a-10-room"];
   const participants = [];
 
   t.after(() => {
@@ -543,10 +547,11 @@ test('capacity: Policy A - voluntary leave frees slot immediately without reserv
     maxParticipantsPerRoom: 2,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-voluntary"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-voluntary';
+  const roomId = ids["policy-a-voluntary"];
 
   const s1 = await connect(wsUrl);
   const s2 = await connect(wsUrl);
@@ -595,10 +600,11 @@ test('capacity: Policy A - unauthorized reconnect attempt with invalid token doe
     maxParticipantsPerRoom: 2,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-auth"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-auth';
+  const roomId = ids["policy-a-auth"];
 
   const s1 = await connect(wsUrl);
   const s2 = await connect(wsUrl);
@@ -656,10 +662,11 @@ test('capacity: Policy A - multiple simultaneous reservations hold slots and res
     maxParticipantsPerRoom: 3,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-multi-res"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-multi-res';
+  const roomId = ids["policy-a-multi-res"];
 
   const s1 = await connect(wsUrl);
   const s2 = await connect(wsUrl);
@@ -732,10 +739,11 @@ test('capacity: Policy A - reservation expiration frees slot for new participant
     recoveryGraceMs: 80, // Expire after 80ms for test speed
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["policy-a-expiration"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'policy-a-expiration';
+  const roomId = ids["policy-a-expiration"];
 
   const s1 = await connect(wsUrl);
   const s2 = await connect(wsUrl);
@@ -789,10 +797,11 @@ test('capacity: reconnection after heartbeat timeout succeeds and restores prese
     heartbeatIntervalMs: 50,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["timeout-reconnect"]);
   t.after(() => app.close());
 
   const wsUrl = `ws://127.0.0.1:${app.port}/signal`;
-  const roomId = 'timeout-reconnect';
+  const roomId = ids["timeout-reconnect"];
 
   const host = await connect(wsUrl);
   t.after(() => host.close());

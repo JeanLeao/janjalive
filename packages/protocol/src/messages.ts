@@ -287,6 +287,33 @@ export const CollaborationEventSchema = z.object({
 });
 export type CollaborationEvent = z.infer<typeof CollaborationEventSchema>;
 
+// F16: ephemeral consent and two-phase local recording. No media crosses signaling.
+export const CLIP_LIMITS = { durationMs: 60_000, bytes: 64 * 1024 * 1024, pendingMs: 5000 } as const;
+export const ClipOperationSchema = z.object({
+  type: z.literal('clip-operation'),
+  seq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  action: z.enum(['permission', 'request', 'started', 'stop']),
+  presenterId: z.string().min(1).max(128), streamId: z.string().min(1).max(128),
+  recordingId: z.string().uuid(),
+  version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  allowed: z.boolean().optional(),
+}).strict();
+export type ClipOperation = z.infer<typeof ClipOperationSchema>;
+export const ClipPermissionSchema = z.object({
+  presenterId: z.string(), streamId: z.string(), allowed: z.boolean(), version: z.number().int().nonnegative(),
+});
+export const ClipActiveSchema = z.object({
+  recordingId: z.string().uuid(), recorderId: z.string(), presenterId: z.string(), streamId: z.string(), startedAt: z.number(),
+});
+export const ClipsSnapshotSchema = z.object({
+  type: z.literal('clips-snapshot'), roomId: z.string(), revision: z.number().int().nonnegative(),
+  permissions: z.array(ClipPermissionSchema).max(1000), recordings: z.array(ClipActiveSchema).max(1000),
+});
+export type ClipsSnapshot = z.infer<typeof ClipsSnapshotSchema>;
+export const ClipResultSchema = z.object({
+  type: z.literal('clip-result'), recordingId: z.string().uuid(), ok: z.boolean(), message: z.string(),
+});
+
 // Client -> Server
 export const JoinMessageSchema = z.object({
   type: z.literal('join'),
@@ -294,6 +321,8 @@ export const JoinMessageSchema = z.object({
   peerId: z.string().min(1),
   nickname: z.string().trim().min(1).max(32).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
+  hostCredential: z.string().min(1).max(128).optional(),
+  roomKey: z.string().trim().min(1).max(128).optional(),
 });
 export type JoinMessage = z.infer<typeof JoinMessageSchema>;
 
@@ -315,7 +344,101 @@ export const LeaveMessageSchema = z.object({
 });
 export type LeaveMessage = z.infer<typeof LeaveMessageSchema>;
 
+export const RoomStateSchema = z.object({
+  hostPeerId: z.string().nullable(),
+  hostConnected: z.boolean(),
+  locked: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  isProtected: z.boolean().optional(),
+}).strict();
+export type RoomState = z.infer<typeof RoomStateSchema>;
+export const CreateRoomSchema = z.object({
+  type: z.literal('create-room'),
+  isProtected: z.boolean().optional(),
+}).strict();
+export const ModerateRoomSchema = z.object({
+  type: z.literal('moderate-room'),
+  requestId: z.string().min(1).max(80),
+  revision: z.number().int().nonnegative(),
+  action: z.enum(['lock', 'unlock', 'remove']),
+  targetPeerId: z.string().min(1).max(80).optional(),
+}).strict();
+export const RoomCreatedSchema = z.object({
+  type: z.literal('room-created'),
+  roomId: z.string(),
+  hostCredential: z.string().min(1).max(128),
+  roomKey: z.string().min(1).max(128).optional(),
+}).strict();
+export const RoomStateMessageSchema = z.object({ type: z.literal('room-state'), state: RoomStateSchema }).strict();
+export const ModerationResultSchema = z.object({
+  type: z.literal('moderation-result'), requestId: z.string(), ok: z.boolean(), message: z.string(),
+}).strict();
+
+// F15: control only. File bytes never enter signaling.
+export const FILE_LIMITS = { maxBytes: 20 * 1024 * 1024, chunkBytes: 16 * 1024,
+  pending: 8, requestMs: 60_000, lifetimeMs: 600_000, idleMs: 30_000 } as const;
+export const FileMetadataSchema = z.object({
+  name: z.string().min(1).max(255).regex(/^[^\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069/\\]+$/u),
+  mime: z.string().max(127).regex(/^[\x20-\x7e]*$/),
+  size: z.number().int().min(0).max(FILE_LIMITS.maxBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type FileMetadata = z.infer<typeof FileMetadataSchema>;
+const fileIdentity = { id: z.string().uuid(), target: z.string().min(1).max(80) };
+export const FileRequestSchema = z.object({ type: z.literal('file-request'), ...fileIdentity, file: FileMetadataSchema, watchSessionId: z.string().uuid().optional() }).strict();
+export const FileControlSchema = z.object({ type: z.literal('file-control'), ...fileIdentity,
+  action: z.enum(['accept', 'reject', 'cancel', 'complete']),
+}).strict();
+export type FileOperation = z.infer<typeof FileRequestSchema> | z.infer<typeof FileControlSchema>;
+export const FileEventSchema = z.object({ type: z.literal('file-event'), id: z.string().uuid(),
+  from: z.string().min(1).max(80), to: z.string().min(1).max(80),
+  action: z.enum(['request', 'accept', 'reject', 'cancel', 'complete', 'error']),
+  file: FileMetadataSchema.optional(), watchSessionId: z.string().uuid().optional(),
+}).strict();
+export type FileEvent = z.infer<typeof FileEventSchema>;
+
+// F14: metadata and authoritative playback only; media uses F15 consent.
+export const WatchStateSchema = z.object({
+  sessionId: z.string().uuid(), controllerId: z.string().min(1).max(80),
+  file: FileMetadataSchema, duration: z.number().finite().positive().max(Number.MAX_SAFE_INTEGER),
+  position: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER), playing: z.boolean(),
+  referenceTime: z.number().int().nonnegative(),
+}).strict();
+export type WatchState = z.infer<typeof WatchStateSchema>;
+export const WatchOperationSchema = z.object({
+  type: z.literal('watch-operation'), requestId: z.string().uuid(), sessionId: z.string().uuid(),
+  revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  action: z.enum(['create', 'play', 'pause', 'seek', 'end']),
+  position: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  file: FileMetadataSchema.optional(), duration: z.number().finite().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+}).strict();
+export type WatchOperation = z.infer<typeof WatchOperationSchema>;
+export const WatchAvailabilitySchema = z.enum(['ready', 'buffering', 'blocked', 'error', 'unavailable']);
+export type WatchAvailability = z.infer<typeof WatchAvailabilitySchema>;
+export const WatchReadinessSchema = z.object({
+  type: z.literal('watch-readiness'), sessionId: z.string().uuid(), status: WatchAvailabilitySchema,
+}).strict();
+export const WatchReadinessEventSchema = z.object({
+  type: z.literal('watch-readiness-updated'), roomId: z.string(), sessionId: z.string().uuid(),
+  peerId: z.string().min(1).max(80), status: WatchAvailabilitySchema,
+}).strict();
+export type WatchReadinessEvent = z.infer<typeof WatchReadinessEventSchema>;
+export const WatchSnapshotSchema = z.object({
+  type: z.literal('watch-snapshot'), roomId: z.string(), revision: z.number().int().nonnegative(),
+  serverTime: z.number().int().nonnegative(), state: WatchStateSchema.nullable(),
+  availability: z.array(z.object({ peerId: z.string().min(1).max(80), status: WatchAvailabilitySchema }).strict()).max(1000).optional(),
+}).strict();
+export type WatchSnapshot = z.infer<typeof WatchSnapshotSchema>;
+export const WatchResultSchema = z.object({
+  type: z.literal('watch-result'), requestId: z.string().uuid(), ok: z.boolean(), message: z.string(),
+}).strict();
+export const WatchClockSchema = z.object({ type: z.literal('watch-clock'), sentAt: z.number().finite().nonnegative() }).strict();
+export const WatchClockReplySchema = WatchClockSchema.extend({ type: z.literal('watch-clock-reply'), serverTime: z.number().int().nonnegative() });
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  WatchOperationSchema, WatchClockSchema, WatchReadinessSchema,
+  FileRequestSchema, FileControlSchema,
+  ClipOperationSchema,
   LaserMessageSchema, DrawingMessageSchema, ClearAnnotationsSchema, ClearCollaborativeDrawingsSchema,
   PointMessageSchema, SpectatorDrawingMessageSchema,
   CreatePollSchema, VotePollSchema, ClosePollSchema,
@@ -325,6 +448,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   UpdateQuestionBaseSchema,
   SendChatSchema,
   SendReactionSchema,
+  CreateRoomSchema, ModerateRoomSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
   SelectStageMessageSchema,
@@ -352,9 +476,11 @@ export type ReservedPeerInfo = z.infer<typeof ReservedPeerInfoSchema>;
 export const PeersMessageSchema = z.object({
   type: z.literal('peers'),
   serverTime: z.number().int().nonnegative().optional(),
+  watch: WatchSnapshotSchema.optional(),
   peers: z.array(z.string()),
   count: z.number().int().nonnegative(),
   participants: z.array(ParticipantInfoSchema).optional(),
+  roomState: RoomStateSchema.optional(),
   reservedPeers: z.array(ReservedPeerInfoSchema).optional(),
   reconnectToken: z.string().trim().min(1).max(128).optional(),
 });
@@ -392,21 +518,31 @@ export const RelayedSignalMessageSchema = z.object({
 export type RelayedSignalMessage = z.infer<typeof RelayedSignalMessageSchema>;
 
 export const WS_CLOSE_CODES = {
+  ROOM_NOT_FOUND: 4404,
+  ROOM_LOCKED: 4423,
+  REMOVED: 4408,
   NORMAL: 1000,
   POLICY_VIOLATION: 1008,
   SUPERSEDED: 4000,
   UNAUTHORIZED_RECONNECT: 4401,
   ROOM_FULL: 4009,
   FORBIDDEN_ORIGIN: 4403,
+  KEY_REQUIRED: 4425,
+  KEY_INVALID: 4426,
+  KEY_RATE_LIMIT: 4429,
 } as const;
 
 export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([
+  WS_CLOSE_CODES.ROOM_NOT_FOUND, WS_CLOSE_CODES.ROOM_LOCKED, WS_CLOSE_CODES.REMOVED,
   WS_CLOSE_CODES.NORMAL,
   WS_CLOSE_CODES.POLICY_VIOLATION,
   WS_CLOSE_CODES.SUPERSEDED,
   WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT,
   WS_CLOSE_CODES.ROOM_FULL,
   WS_CLOSE_CODES.FORBIDDEN_ORIGIN,
+  WS_CLOSE_CODES.KEY_REQUIRED,
+  WS_CLOSE_CODES.KEY_INVALID,
+  WS_CLOSE_CODES.KEY_RATE_LIMIT,
 ]);
 
 export function isTerminalCloseCode(code: number): boolean {
@@ -421,6 +557,10 @@ export const ErrorMessageSchema = z.object({
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
+  WatchSnapshotSchema, WatchResultSchema, WatchClockReplySchema, WatchReadinessEventSchema,
+  FileEventSchema,
+  ClipsSnapshotSchema, ClipResultSchema,
+  RoomCreatedSchema, RoomStateMessageSchema, ModerationResultSchema,
   PollsSnapshotSchema, PollAcceptedSchema,
   HandsSnapshotSchema,
   QuestionsSnapshotSchema,

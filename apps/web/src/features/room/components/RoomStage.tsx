@@ -1,6 +1,10 @@
+import { WatchPartyPanel, StageContentSelector } from './WatchParty';
+import watchStyles from './WatchParty.module.css';
+import type { WatchParty } from '../hooks/useWatchParty';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
-import React, { useRef, useState, useEffect, useId } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useId } from 'react';
+import { useRoomShortcuts } from '../hooks/useRoomShortcuts';
 import {
   Box,
   Text,
@@ -33,9 +37,12 @@ import {
   IconMinimize,
   IconSignal,
   IconLink,
+  IconQrCode,
 } from './Icons';
 
 export interface RoomStageProps {
+  watch?: WatchParty;
+  clipControls?: React.ReactNode;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
   annotations?: AnnotationChannel;
   onTogglePointingPermission?: () => void;
@@ -45,6 +52,7 @@ export interface RoomStageProps {
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
+  onOpenOrFocusInteractions?: () => void;
   isCinema?: boolean;
   onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
@@ -58,6 +66,8 @@ export interface RoomStageProps {
   onStartSharing: () => void;
   onCopyInvite: () => void;
   canShareScreen?: boolean | null;
+  shortcutsEnabled?: boolean;
+  onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
 }
 
 interface StreamItem {
@@ -70,6 +80,8 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  watch,
+  clipControls: originalClipControls,
   onVideoPresented,
   annotations,
   onTogglePointingPermission,
@@ -78,6 +90,7 @@ export function RoomStage({
   onClearCollaborativeDrawings,
   interactions,
   interactionAccess,
+  onOpenOrFocusInteractions,
   isCinema = false,
   onToggleCinema,
   remoteConnectionStates = {},
@@ -91,7 +104,14 @@ export function RoomStage({
   onStartSharing,
   onCopyInvite,
   canShareScreen,
+  shortcutsEnabled = false,
+  onOpenQrCode,
 }: RoomStageProps) {
+  const [watchMode, setWatchMode] = useState(false);
+  const clipControls = originalClipControls;
+  useEffect(() => {
+    if (watch?.createdSessionId) setWatchMode(true);
+  }, [watch?.createdSessionId]);
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
@@ -101,12 +121,42 @@ export function RoomStage({
   const [manualAudio, setManualAudio] = useState<string | null>(null);
   const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
+  const primaryPlayerContainerRef = useRef<HTMLDivElement | null>(null);
+  const qrBtnRef = useRef<HTMLButtonElement | null>(null);
+  const wasInFullscreenRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const previousWatchMode = useRef(watchMode);
+  useEffect(() => {
+    if (previousWatchMode.current === watchMode) return;
+    previousWatchMode.current = watchMode;
+    const frame = requestAnimationFrame(() =>
+      stageContainerRef.current?.querySelector<HTMLElement>(
+        watchMode
+          ? '[data-control-id="watch-back"]'
+          : '[data-control-id="watch-party"], [data-control-id="empty-watch-entry"]'
+      )?.focus()
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [watchMode]);
 
   // Fullscreen change listener
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!stageContainerRef.current && document.fullscreenElement === stageContainerRef.current);
+      const isFs = !!stageContainerRef.current && document.fullscreenElement === stageContainerRef.current;
+      setIsFullscreen(isFs);
+      if (wasInFullscreenRef.current && !isFs) {
+        requestAnimationFrame(() => {
+          if (stageContainerRef.current && (!document.activeElement || document.activeElement === document.body)) {
+            const fsBtn = stageContainerRef.current.querySelector<HTMLElement>('[data-control-id="fullscreen-toggle"]');
+            if (fsBtn) {
+              fsBtn.focus();
+            } else {
+              stageContainerRef.current.focus();
+            }
+          }
+        });
+      }
+      wasInFullscreenRef.current = isFs;
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => {
@@ -212,20 +262,184 @@ export function RoomStage({
     })),
   });
 
-  const selectPrimary = (id: string) => {
+  const [announceMessage, setAnnounceMessage] = useState<string>('');
+  const lastFocusedStreamIdRef = useRef<string | null>(null);
+  const wasFocusedOnPreviewRef = useRef(false);
+  const lastFocusedControlRef = useRef<{ controlId?: string; ariaLabel?: string; wasInControls?: boolean } | null>(null);
+
+  useEffect(() => {
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      if (target.closest('.secondary-preview-btn')) {
+        wasFocusedOnPreviewRef.current = true;
+        lastFocusedControlRef.current = null;
+      } else if (primaryPlayerContainerRef.current?.contains(target)) {
+        wasFocusedOnPreviewRef.current = false;
+        const controlId = target.closest('[data-control-id]')?.getAttribute('data-control-id') ?? undefined;
+        const ariaLabel = target.getAttribute('aria-label') ?? undefined;
+        const wasInControls = Boolean(target.closest('.stage-view-controls'));
+        lastFocusedControlRef.current = { controlId, ariaLabel, wasInControls };
+      } else {
+        wasFocusedOnPreviewRef.current = false;
+        lastFocusedControlRef.current = null;
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+    };
+  }, []);
+
+  const captureFocusedElement = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (!activeEl || activeEl === document.body) {
+      wasFocusedOnPreviewRef.current = false;
+      lastFocusedControlRef.current = null;
+      return;
+    }
+
+    if (activeEl.closest('.secondary-preview-btn')) {
+      wasFocusedOnPreviewRef.current = true;
+      lastFocusedControlRef.current = null;
+    } else if (primaryPlayerContainerRef.current?.contains(activeEl)) {
+      wasFocusedOnPreviewRef.current = false;
+      const controlId = activeEl.closest('[data-control-id]')?.getAttribute('data-control-id') ?? undefined;
+      const ariaLabel = activeEl.getAttribute('aria-label') ?? undefined;
+      const wasInControls = Boolean(activeEl.closest('.stage-view-controls'));
+      lastFocusedControlRef.current = { controlId, ariaLabel, wasInControls };
+    } else {
+      wasFocusedOnPreviewRef.current = false;
+      lastFocusedControlRef.current = null;
+    }
+  }, []);
+
+  const selectPrimary = useCallback((id: string) => {
+    captureFocusedElement();
+    if (wasFocusedOnPreviewRef.current) {
+      lastFocusedStreamIdRef.current = id;
+    } else {
+      lastFocusedStreamIdRef.current = null;
+    }
     setAudioSuspended(false);
     if (!manualValid) setManualAudio(null);
     onSelectFeaturedStream(id);
-  };
+    const target = streamItems.find(s => s.id === id);
+    if (target) {
+      setAnnounceMessage(`Transmissão principal: ${target.displayName}`);
+    }
+  }, [captureFocusedElement, manualValid, onSelectFeaturedStream, streamItems]);
+
+  useEffect(() => {
+    if (wasFocusedOnPreviewRef.current) {
+      wasFocusedOnPreviewRef.current = false;
+      requestAnimationFrame(() => {
+        const nextPreview = stageContainerRef.current?.querySelector<HTMLElement>('.secondary-preview-btn');
+        if (nextPreview) {
+          nextPreview.focus();
+        } else {
+          stageContainerRef.current?.focus();
+        }
+      });
+      return;
+    }
+
+    if (lastFocusedControlRef.current) {
+      const saved = lastFocusedControlRef.current;
+      lastFocusedControlRef.current = null;
+      requestAnimationFrame(() => {
+        const currentActive = document.activeElement as HTMLElement | null;
+        if (
+          currentActive &&
+          currentActive !== document.body &&
+          currentActive !== stageContainerRef.current &&
+          currentActive.isConnected &&
+          !primaryPlayerContainerRef.current?.contains(currentActive)
+        ) {
+          return;
+        }
+
+        const container = primaryPlayerContainerRef.current;
+        if (!container) return;
+
+        let target: HTMLElement | null = null;
+        if (saved.controlId) {
+          target = container.querySelector<HTMLElement>(`[data-control-id="${saved.controlId}"]:not([disabled])`);
+        }
+        if (!target && saved.ariaLabel) {
+          target = container.querySelector<HTMLElement>(`[aria-label="${saved.ariaLabel}"]:not([disabled])`);
+        }
+        if (!target && saved.wasInControls) {
+          target = container.querySelector<HTMLElement>('.stage-view-controls button:not([disabled])');
+        }
+        if (target) {
+          target.focus();
+        } else {
+          stageContainerRef.current?.focus();
+        }
+      });
+    }
+  }, [activeStream?.id]);
+
+  const currentIndex = activeStream ? streamItems.findIndex(s => s.id === activeStream.id) : -1;
+  const canCycleStreams = streamItems.length > 1;
+
+  const handleNextStream = useCallback(() => {
+    if (streamItems.length <= 1 || currentIndex === -1) return;
+    const nextIdx = (currentIndex + 1) % streamItems.length;
+    const nextStream = streamItems[nextIdx];
+    selectPrimary(nextStream.id);
+  }, [currentIndex, streamItems, selectPrimary]);
+
+  const handlePrevStream = useCallback(() => {
+    if (streamItems.length <= 1 || currentIndex === -1) return;
+    const prevIdx = (currentIndex - 1 + streamItems.length) % streamItems.length;
+    const prevStream = streamItems[prevIdx];
+    selectPrimary(prevStream.id);
+  }, [currentIndex, streamItems, selectPrimary]);
+
+  useRoomShortcuts({
+    enabled: Boolean(shortcutsEnabled),
+    onNextStream: handleNextStream,
+    onPrevStream: handlePrevStream,
+    canCycleStreams,
+    onToggleFullscreen: toggleFullscreen,
+    canFullscreen: true,
+    onOpenOrFocusInteractions,
+    canInteractions: Boolean(onOpenOrFocusInteractions),
+  });
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
   const showAccess = isCinema || isFullscreen;
+
+  if (watchMode && watch) {
+    return (
+      <WatchPartyPanel
+        watch={watch}
+        participants={participants}
+        streamCount={streamItems.length}
+        onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+        isCinema={isCinema}
+        onToggleCinema={onToggleCinema}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        showAccess={showAccess}
+        interactionAccess={interactionAccess}
+        interactions={interactions}
+        stageContainerRef={stageContainerRef}
+      />
+    );
+  }
 
   // Empty state if no stream is active
   if (!activeStream) {
     return (
       <Box
         ref={stageContainerRef}
+        tabIndex={-1}
         className="stage-empty-container"
         style={{
           flex: 1,
@@ -238,6 +452,24 @@ export function RoomStage({
           position: 'relative',
         }}
       >
+        <Box
+          data-stage-live-region
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          {announceMessage}
+        </Box>
         <style>{`
           .stage-empty-container { --stage-control-size: 36px; }
           .stage-empty-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
@@ -246,7 +478,17 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
-        {showAccess && <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25 }}>{interactionAccess}</Box>}
+        {watch && (watch.state || streamItems.length > 0) && (
+          <div className={watchStyles.streamsSelectorHost}>
+            <StageContentSelector
+              watchMode={false}
+              hasSession={!!watch.state}
+              streamCount={streamItems.length}
+              onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+            />
+          </div>
+        )}
+        <Box className={watch?.state ? watchStyles.streamsTools : undefined} style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -292,11 +534,12 @@ export function RoomStage({
               gap: '10px',
               justifyContent: 'center',
               width: '100%',
-              maxWidth: '400px',
+              maxWidth: '440px',
             }}
           >
             {canShareScreen === true && (
               <Button
+                key="empty-share"
                 leftSection={<IconScreen size={16} />}
                 onClick={onStartSharing}
                 style={{
@@ -311,7 +554,32 @@ export function RoomStage({
               </Button>
             )}
 
+            {watch && !watch.state && (
+              <Button
+                key="empty-watch"
+                variant="default"
+                data-control-id="empty-watch-entry"
+                data-testid="empty-watch-entry"
+                aria-label={watch.state ? 'Vídeo compartilhado' : 'Assistir vídeo com a sala'}
+                styles={{ label: { whiteSpace: 'normal', textAlign: 'center' } }}
+                leftSection={<IconCinema size={16} />}
+                onClick={() => setWatchMode(true)}
+                disabled={!watch.snapshot}
+                style={{
+                  backgroundColor: '#161b22',
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  color: '#e6edf3',
+                  height: '42px',
+                  padding: '0 1.25rem',
+                  flex: '1 1 160px',
+                }}
+              >
+                Vídeo compartilhado
+              </Button>
+            )}
+
             <Button
+              key="empty-invite"
               variant="default"
               leftSection={<IconLink size={16} />}
               onClick={onCopyInvite}
@@ -326,6 +594,25 @@ export function RoomStage({
             >
               Copiar convite
             </Button>
+
+            {onOpenQrCode && (
+              <Button
+                ref={qrBtnRef}
+                variant="default"
+                leftSection={<IconQrCode size={16} />}
+                onClick={() => onOpenQrCode(qrBtnRef.current)}
+                style={{
+                  backgroundColor: '#161b22',
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  color: '#e6edf3',
+                  height: '42px',
+                  padding: '0 1.25rem',
+                  flex: '1 1 160px',
+                }}
+              >
+                Mostrar QR Code
+              </Button>
+            )}
           </Box>
         </Box>
       </Box>
@@ -336,6 +623,7 @@ export function RoomStage({
   return (
     <Box
       ref={stageContainerRef}
+      tabIndex={-1}
       className={`stage-main-container${comparing ? ' stage-comparing' : ''}`}
       style={{
         flex: 1,
@@ -347,6 +635,24 @@ export function RoomStage({
         minHeight: 0,
       }}
     >
+      <Box
+        data-stage-live-region
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {announceMessage}
+      </Box>
       {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }
@@ -357,12 +663,15 @@ export function RoomStage({
           top: 12px;
           left: 12px;
           right: 12px;
-          z-index: 18;
+          z-index: 26;
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           justify-content: space-between;
           gap: 8px;
           pointer-events: none;
+        }
+        .comparison-panel:has([data-clip-controls] [aria-expanded="true"]) {
+          z-index: 30;
         }
         .comparison-selector-pill {
           pointer-events: auto;
@@ -433,7 +742,16 @@ export function RoomStage({
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .stage-comparing .stage-top-right { display: none !important; }
+        .stage-top-right {
+          position: absolute;
+          top: 14px;
+          right: 14px;
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          z-index: 28;
+          pointer-events: none;
+        }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
         .stage-view-controls {
           position: absolute;
@@ -580,9 +898,13 @@ export function RoomStage({
             display: none !important;
           }
         }
-        @media (max-width: 560px) {
-          .stage-quality-pill-compact { display: none !important; }
-          .stage-top-right-access { top: 56px !important; }
+        @media (max-width: 640px) {
+          .stage-quality-pill { display: none !important; }
+          .comparison-meta-badge { display: none !important; }
+          .stage-top-right { top: 52px !important; }
+          .stage-top-right-access { top: 52px !important; }
+          .stage-streamer-badge { top: 52px !important; max-width: calc(100% - 148px); }
+          .stage-main-container:not(.stage-comparing) .stage-view-controls { top: 108px; }
         }
         @media (max-width: 440px) {
           .comparison-header {
@@ -590,37 +912,85 @@ export function RoomStage({
             left: 8px;
             right: 8px;
           }
+          .stage-top-right {
+            right: 8px;
+            gap: 6px;
+          }
           .comparison-selector-pill select {
-            max-width: 112px;
+            max-width: 96px;
+          }
+          .comparison-role-tag {
+            font-size: 0;
+            gap: 0;
+          }
+          .stage-streamer-badge {
+            left: 8px;
+            max-width: calc(100% - 128px);
           }
         }
       `}</style>
+      {watch && (
+        <div className={watchStyles.streamsSelectorHost}>
+          <StageContentSelector
+            watchMode={false}
+            hasSession={!!watch.state}
+            streamCount={streamItems.length}
+            onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+          />
+        </div>
+      )}
       <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined}>
-      {comparing && <Box className="comparison-header">
-        <Box className="comparison-selector-pill">
-          <span className="comparison-role-tag" data-role="primary">
-            <span style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
-            }} />
-            Principal
-          </span>
-          <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => selectPrimary(event.target.value)}>
-            {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
-          </select>
-        </Box>
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          <span className="comparison-meta-badge">
-            <IconSignal size={12} style={{ color: '#22c55e' }} />
-            {activeStream.hasAudio ? 'Com áudio' : 'Tela'}
-          </span>
+      <Box className={comparing ? 'comparison-header' : (showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right')}>
+        {comparing && (
+          <Box className="comparison-selector-pill">
+            <span className="comparison-role-tag" data-role="primary">
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
+              }} />
+              Principal
+            </span>
+            <select aria-label="Transmissão principal" value={activeStream.id} onChange={event => selectPrimary(event.target.value)}>
+              {streamItems.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+            </select>
+          </Box>
+        )}
+        <Box style={{ display: 'flex', alignItems: 'flex-start', gap: comparing ? 6 : 8, pointerEvents: 'auto' }}>
+          {comparing ? (
+            <span className="comparison-meta-badge">
+              <IconSignal size={12} style={{ color: '#22c55e' }} />
+              {activeStream.hasAudio ? 'Com áudio' : 'Tela'}
+            </span>
+          ) : (
+            <Box
+              className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                minHeight: 'var(--stage-control-size, 36px)',
+                backgroundColor: 'rgba(13, 17, 23, 0.85)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '4px 10px',
+                borderRadius: '999px',
+              }}
+            >
+              <IconSignal size={13} style={{ color: '#22c55e' }} />
+              <Text size="xs" fw={500} c="#8c959f">
+                {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
+              </Text>
+            </Box>
+          )}
+          {clipControls}
           {showAccess && interactionAccess}
         </Box>
-      </Box>}
+      </Box>
       {/* Main Spotlight Canvas */}
       <Box
+        ref={primaryPlayerContainerRef}
         className="comparison-canvas"
         style={{
           flex: 1,
@@ -683,6 +1053,7 @@ export function RoomStage({
         {/* Top-Left Streamer Badge (Traditional stage only; in comparison mode the compact selector pill identifies the presenter) */}
         {!comparing && (
           <Box
+            className="stage-streamer-badge"
             style={{
               position: 'absolute',
               top: 14,
@@ -697,6 +1068,7 @@ export function RoomStage({
               borderRadius: '20px',
               zIndex: 10,
               pointerEvents: 'auto',
+              minWidth: 0,
             }}
           >
             <Box
@@ -711,11 +1083,12 @@ export function RoomStage({
                 justifyContent: 'center',
                 fontSize: '10px',
                 fontWeight: 700,
+                flexShrink: 0,
               }}
             >
               {getInitials(activeStream.displayName)}
             </Box>
-            <Text size="xs" fw={600} c="#fff">
+            <Text size="xs" fw={600} c="#fff" truncate>
               {activeStream.displayName} · {activeStream.paused ? 'Pausado' : 'Transmitindo'}
             </Text>
             <Box
@@ -724,44 +1097,11 @@ export function RoomStage({
                 height: 6,
                 borderRadius: '50%',
                 backgroundColor: activeStream.paused ? '#eab308' : '#22c55e',
+                flexShrink: 0,
               }}
             />
           </Box>
         )}
-
-        {/* Top-Right: contextual interaction access (Cinema/fullscreen) + Quality / Live Pill */}
-        <Box
-          className={showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right'}
-          style={{
-            position: 'absolute',
-            top: 14,
-            right: 14,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            zIndex: 26,
-          }}
-        >
-          {showAccess && !comparing && interactionAccess}
-          <Box
-            className={showAccess ? 'stage-quality-pill stage-quality-pill-compact' : 'stage-quality-pill'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: 'rgba(13, 17, 23, 0.85)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              padding: '4px 10px',
-              borderRadius: '16px',
-            }}
-          >
-            <IconSignal size={13} style={{ color: '#22c55e' }} />
-            <Text size="xs" fw={500} c="#8c959f">
-              {activeStream.hasAudio ? 'Tela com áudio' : 'Tela'}
-            </Text>
-          </Box>
-        </Box>
       </Box>
 
       </Box>
@@ -993,6 +1333,7 @@ function SpotlightVideoPlayer({
     <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
       <Tooltip label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} position="left" events={{ hover: true, focus: true, touch: false }} withArrow>
         <Button variant="subtle" color="gray" className="stage-controls-toggle"
+          data-control-id="tools-toggle"
           aria-label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} aria-expanded={controlsExpanded}
           aria-controls={toolsId}
           onClick={() => { setTool('navigate'); onControlsExpandedChange(!controlsExpanded); }}>
@@ -1005,6 +1346,7 @@ function SpotlightVideoPlayer({
       {!secondary && isLocal && annotations && annotationStreamId && <Box className="stage-tools-group" role="group" aria-label="Anotações temporárias" style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
         {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip position="left" key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
+            data-control-id={`tool-${mode}`}
             disabled={!canAnnotate} aria-pressed={effectiveTool === mode} onClick={() => setTool(effectiveTool === mode ? 'navigate' : mode)}
             aria-label={mode === 'navigate' ? 'Navegar' : mode === 'laser' ? 'Ponteiro laser' : 'Desenhar'}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1014,10 +1356,10 @@ function SpotlightVideoPlayer({
         </Tooltip>)}
         <Menu key={`${annotationPeerId}:${annotationStreamId}:${isFullscreen}`} position="left-start" offset={8}
           middlewares={{ flip: true, shift: { padding: 12, crossAxis: true } }}
-          width={280} closeOnItemClick={false}
+          width={280} closeOnItemClick={false} returnFocus
           portalProps={{ target: isFullscreen ? controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined : undefined }}>
           <Menu.Target>
-            <Button variant="subtle" color="gray" aria-label="Anotações" title="Anotações">
+            <Button variant="subtle" color="gray" aria-label="Anotações" title="Anotações" data-control-id="annotations-menu">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
@@ -1069,6 +1411,7 @@ function SpotlightVideoPlayer({
               <Button
                 variant={effectiveTool === 'point' ? 'filled' : 'subtle'}
                 color={effectiveTool === 'point' ? 'cyan' : 'gray'}
+                data-control-id="tool-point"
                 disabled={!canPoint}
                 aria-pressed={effectiveTool === 'point'}
                 aria-label="Apontar"
@@ -1106,6 +1449,7 @@ function SpotlightVideoPlayer({
               <Button
                 variant={effectiveTool === 'draw' ? 'filled' : 'subtle'}
                 color={effectiveTool === 'draw' ? 'blue' : 'gray'}
+                data-control-id="tool-draw"
                 disabled={!canDraw}
                 aria-pressed={effectiveTool === 'draw'}
                 aria-label="Desenhar"
@@ -1127,7 +1471,7 @@ function SpotlightVideoPlayer({
       )}
       <Box className="stage-display-controls" role="group" aria-label="Controles de visualização">
       {!isLocal && <Popover position="left-start" width={240} trapFocus returnFocus portalProps={{ target: controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined }}>
-        <Popover.Target><Button variant={audio.selected ? 'filled' : 'subtle'} color={audio.selected ? 'blue' : 'gray'} aria-label="Áudio da transmissão" title="Áudio da transmissão">
+        <Popover.Target><Button variant={audio.selected ? 'filled' : 'subtle'} color={audio.selected ? 'blue' : 'gray'} data-control-id="audio-menu" aria-label="Áudio da transmissão" title="Áudio da transmissão">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" />{audio.preference.muted ? <path d="m16 9 6 6m0-6-6 6" /> : <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" />}</svg>
         </Button></Popover.Target>
         <Popover.Dropdown style={{ background: '#161b22', color: '#e6edf3', borderColor: '#484f58', maxWidth: 'calc(100vw - 24px)' }}>
@@ -1144,13 +1488,14 @@ function SpotlightVideoPlayer({
         <Tooltip position="left" label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button
             variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
+            data-control-id="cinema-toggle"
             aria-pressed={isCinema} aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
             onClick={onToggleCinema}
           ><IconCinema size={15} aria-hidden /></Button>
         </Tooltip>
       )}
       {isCinema && streamCount > 0 && (
-        <Button aria-label="Alternar outras transmissões" title="Outras transmissões" className="stage-streams-btn" variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams} style={{ fontSize: 12, padding: '0 8px' }}>
+        <Button aria-label="Alternar outras transmissões" title="Outras transmissões" data-control-id="cinema-streams" className="stage-streams-btn" variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams} style={{ fontSize: 12, padding: '0 8px' }}>
           <IconScreen size={15} aria-hidden />
         </Button>
       )}
@@ -1163,6 +1508,7 @@ function SpotlightVideoPlayer({
         >
           <Button
             variant={pip.active ? 'filled' : 'subtle'} color={pip.active ? 'blue' : 'gray'}
+            data-control-id="pip-toggle"
             aria-pressed={pip.active} aria-label={pip.active ? 'Fechar janela flutuante' : 'Janela flutuante (PiP)'}
             disabled={pip.pending || (!pip.available && !pip.active)} aria-busy={pip.pending} loading={pip.pending}
             onClick={pip.toggle}
@@ -1190,6 +1536,7 @@ function SpotlightVideoPlayer({
           <Button
             variant={screenshot.feedback === 'success' ? 'filled' : 'subtle'}
             color={screenshot.feedback === 'success' ? 'teal' : 'gray'}
+            data-control-id="screenshot-btn"
             aria-label="Salvar imagem"
             disabled={!screenshot.canCapture || screenshot.isCapturing}
             aria-busy={screenshot.isCapturing}
@@ -1237,12 +1584,14 @@ function SpotlightVideoPlayer({
       >
         <Button
           variant="subtle" color="gray" aria-label="Reduzir zoom"
+          data-control-id="zoom-out"
           disabled={!stream || zoom.scale === 1} onClick={() => zoom.changeZoom(-0.25)}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconMinus size={14} aria-hidden /></Button>
         <Tooltip position="left" label={zoom.scale !== 1 ? 'Restaurar enquadramento (100%)' : 'Enquadramento original'} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button
             className="zoom-reset-btn"
+            data-control-id="zoom-reset"
             variant="subtle" color="gray"
             aria-label="Restaurar enquadramento"
             aria-live="polite"
@@ -1255,13 +1604,15 @@ function SpotlightVideoPlayer({
         </Tooltip>
         <Button
           variant="subtle" color="gray" aria-label="Ampliar zoom"
+          data-control-id="zoom-in"
           disabled={!stream || zoom.scale === 3} onClick={() => zoom.changeZoom(0.25)}
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={14} aria-hidden /></Button>
       </Box>
-      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'} events={{ hover: true, focus: true, touch: false }} withArrow>
+      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'} events={{ hover: true, focus: true, touch: false }} withArrow>
         <Button
           variant="subtle" color="gray" onClick={onToggleFullscreen}
+          data-control-id="fullscreen-toggle"
           aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
         >{isFullscreen ? <IconMinimize size={15} aria-hidden /> : <IconMaximize size={15} aria-hidden />}</Button>
       </Tooltip>}
@@ -1276,9 +1627,9 @@ function SpotlightVideoPlayer({
             {statusText}
           </Text>
         )}
-        {connectionState === 'failed' && <Button size="xs" onClick={onRetry}>Tentar novamente</Button>}
-        {audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button size="xs" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
-        {playback === 'Falha na reprodução' && <Button size="xs" onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
+        {connectionState === 'failed' && <Button size="xs" data-control-id="retry-btn" onClick={onRetry}>Tentar novamente</Button>}
+        {audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button size="xs" data-control-id="enable-audio-btn" onClick={videoRef.enableAudio}>Ativar áudio</Button>}
+        {playback === 'Falha na reprodução' && <Button size="xs" data-control-id="playback-retry-btn" onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
       </Box>
     )}
     <Box
@@ -1293,6 +1644,7 @@ function SpotlightVideoPlayer({
       }
       onKeyDown={event => { if (event.key === 'Escape') setTool('navigate'); }}
       data-testid="zoom-viewport"
+      data-control-id="zoom-viewport"
       style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
     >
     {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
@@ -1346,6 +1698,7 @@ function PreviewCard({
   return (
     <UnstyledButton
       onClick={onClick}
+      data-preview-id={streamItem.id}
       className="secondary-preview-btn"
       aria-label={`Destacar transmissão de ${streamItem.displayName}`}
       style={{

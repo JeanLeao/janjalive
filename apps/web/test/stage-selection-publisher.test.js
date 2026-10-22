@@ -77,6 +77,7 @@ test('stop/start preserves the socket budget; a new session has no inherited int
 test('integration: a saturated server budget drops the first attempt but the follower reaches the final choice', t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   for (const id of ['a', 'b', 'c']) {
     rooms.join('r', id);
     rooms.updateSharing('r', id, { active: true, paused: false, streamId: id, hasAudio: false, audioMuted: false });

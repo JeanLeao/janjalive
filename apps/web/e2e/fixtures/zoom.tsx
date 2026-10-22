@@ -20,7 +20,7 @@ const render = () => root.render(<MantineProvider defaultColorScheme="dark"><div
   timer = setInterval(() => {
     context.fillStyle = '#16314f'; context.fillRect(0, 0, width, height);
     context.fillStyle = '#ffffff'; context.font = '24px monospace';
-    for (let y = 40; y < height; y += 60) context.fillText(`Screen Room — linha ${y} — quadro ${frame}`, 20, y);
+    for (let y = 40; y < height; y += 60) context.fillText(`Janjalive — linha ${y} — quadro ${frame}`, 20, y);
     frame++;
   }, 40);
   stream = canvas.captureStream(25);

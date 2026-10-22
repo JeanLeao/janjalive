@@ -1,4 +1,4 @@
-/* Interações sociais: chat e reações. Paleta alinhada ao header, dock e palco do Screen Room. */
+/* Interações sociais: chat e reações. Paleta alinhada ao header, dock e palco do Janjalive. */
 .srOnly { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---- Acesso compacto (header e contextual) ---- */
@@ -37,7 +37,7 @@
 .error { position: absolute; top: 56px; right: 16px; z-index: 26; max-width: min(320px, calc(100% - 32px)); padding: 8px 12px; background: #161b22; border: 1px solid rgba(248,113,113,.35); border-radius: 10px; color: #fca5a5; font-size: 13px; }
 
 /* ---- Painel do chat / perguntas ---- */
-.panel { position: absolute; top: 60px; right: 12px; bottom: 76px; z-index: 28; width: min(372px, calc(100% - 24px)); display: flex; flex-direction: column; min-height: 0; background: #0d1117; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.55); color: #e6edf3; overflow: hidden; animation: slideIn 180ms ease-out; }
+.panel { position: absolute; top: 60px; right: 12px; bottom: 76px; z-index: 32; width: min(372px, calc(100% - 24px)); display: flex; flex-direction: column; min-height: 0; background: #0d1117; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.55); color: #e6edf3; overflow: hidden; animation: slideIn 180ms ease-out; }
 .panelHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,.08); flex-shrink: 0; }
 .close { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #a9b4c2; cursor: pointer; }
 .close:hover { background: rgba(255,255,255,.08); color: #e6edf3; }

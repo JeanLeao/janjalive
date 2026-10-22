@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, unlinkSync } from 'node:fs';
@@ -24,7 +25,7 @@ function connect(url, options = {}) {
     socket.on('message', (data) => {
       const parsed = JSON.parse(data.toString());
       // F38 snapshots are verified in hands.test.js and qa.test.js; these queues assert presence/relay ordering.
-      if (parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
+      if (parsed.type === 'clips-snapshot' || parsed.type === 'room-state' || parsed.type === 'hands-snapshot' || parsed.type === 'questions-snapshot' || parsed.type === 'polls-snapshot') return;
       if (waiters.length > 0) {
         waiters.shift()(parsed);
       } else {
@@ -52,14 +53,14 @@ function nextMessage(socket, timeoutMs = 1000) {
 // ---------------------------------------------------------------------------
 
 test('SEC-01: origin validation rejects forged Host header bypass', async () => {
-  const allowed = ['http://trusted.local:3000', 'https://app.screenroom.com'];
+  const allowed = ['http://trusted.local:3000', 'https://app.janjalive.com'];
 
   // Attacker attempts to forge Host: evil.attacker.com matching Origin: http://evil.attacker.com
   const isAllowed = isAllowedOrigin('http://evil.attacker.com', 'evil.attacker.com', allowed);
   assert.equal(isAllowed, false, 'Forged Host header must NOT bypass origin validation');
 
-  // Attacker attempts to forge Host: app.screenroom.com while sending untrusted Origin
-  const isAllowed2 = isAllowedOrigin('http://evil.attacker.com', 'app.screenroom.com', allowed);
+  // Attacker attempts to forge Host: app.janjalive.com while sending untrusted Origin
+  const isAllowed2 = isAllowedOrigin('http://evil.attacker.com', 'app.janjalive.com', allowed);
   assert.equal(isAllowed2, false, 'Legitimate Host header must NOT authorize untrusted origin');
 });
 
@@ -143,17 +144,17 @@ test('CFG-01: returns STUN-only mode when TURN secret is not configured', () => 
 test('CFG-01: generates valid TURN credentials when host and secret are provided', () => {
   const config = loadTurnConfig({
     TURN_SECRET: 'testsecret123',
-    TURN_HOST: 'turn.screenroom.example',
+    TURN_HOST: 'turn.janjalive.example',
   });
   assert.equal(config.enabled, true);
-  assert.equal(config.host, 'turn.screenroom.example');
+  assert.equal(config.host, 'turn.janjalive.example');
 
   const provider = createTurnCredentialsProvider(config);
   const creds = provider();
   assert.equal(creds.iceServers.length, 2);
   const turnServer = creds.iceServers[1];
   assert.ok(Array.isArray(turnServer.urls));
-  assert.ok(turnServer.urls[0].includes('turn.screenroom.example'));
+  assert.ok(turnServer.urls[0].includes('turn.janjalive.example'));
   assert.ok(turnServer.username);
   assert.ok(turnServer.credential);
 });
@@ -199,13 +200,14 @@ test('DOS-01: handles invalid JSON gracefully without server crash', async (t) =
 test('DOS-01: rejects payloads exceeding maxPayload without server crash', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1', maxPayload: 1024 }); // 1 KiB limit for test
   await app.ready;
+  const ids = await createTestRooms(app, ["room"]);
   t.after(() => app.close());
 
   const socket = await connect(`ws://127.0.0.1:${app.port}/signal`);
 
   const giantMessage = JSON.stringify({
     type: 'join',
-    roomId: 'room',
+    roomId: ids["room"],
     peerId: 'peer',
     nickname: 'x'.repeat(2048),
   });
@@ -223,6 +225,7 @@ test('DOS-01: rejects payloads exceeding maxPayload without server crash', async
 test('DOS-01: validates message types and fields against protocol schema', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["only-room", "r1"]);
   t.after(() => app.close());
 
   const socket = await connect(`ws://127.0.0.1:${app.port}/signal`);
@@ -234,12 +237,12 @@ test('DOS-01: validates message types and fields against protocol schema', async
   assert.deepEqual(err, { type: 'error', message: 'Mensagem malformada ou campos inválidos.' });
 
   // Missing required fields
-  socket.send(JSON.stringify({ type: 'join', roomId: 'only-room' }));
+  socket.send(JSON.stringify({ type: 'join', roomId: ids["only-room"] }));
   err = await nextMessage(socket);
   assert.deepEqual(err, { type: 'error', message: 'Mensagem malformada ou campos inválidos.' });
 
   // Nickname exceeding 32 chars
-  socket.send(JSON.stringify({ type: 'join', roomId: 'r1', peerId: 'p1', nickname: 'a'.repeat(33) }));
+  socket.send(JSON.stringify({ type: 'join', roomId: ids["r1"], peerId: 'p1', nickname: 'a'.repeat(33) }));
   err = await nextMessage(socket);
   assert.deepEqual(err, { type: 'error', message: 'Mensagem malformada ou campos inválidos.' });
 });
@@ -264,12 +267,13 @@ test('DOS-01: rejects messages sent before join', async (t) => {
 test('DOS-01: handles relay to non-existent peer gracefully', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["room1"]);
   t.after(() => app.close());
 
   const socket = await connect(`ws://127.0.0.1:${app.port}/signal`);
   t.after(() => socket.close());
 
-  socket.send(JSON.stringify({ type: 'join', roomId: 'room1', peerId: 'p1' }));
+  socket.send(JSON.stringify({ type: 'join', roomId: ids["room1"], peerId: 'p1' }));
   await nextMessage(socket); // peers message
 
   // Send signal to ghost peer
@@ -293,16 +297,17 @@ test('REL-01: terminates unresponsive sockets and cleans up presence', async (t)
     heartbeatIntervalMs: 40,
   });
   await app.ready;
+  const ids = await createTestRooms(app, ["heartbeat-room"]);
   t.after(() => app.close());
 
   const host = await connect(`ws://127.0.0.1:${app.port}/signal`);
   const inactiveViewer = await connect(`ws://127.0.0.1:${app.port}/signal`);
   t.after(() => host.close());
 
-  host.send(JSON.stringify({ type: 'join', roomId: 'heartbeat-room', peerId: 'host-1' }));
+  host.send(JSON.stringify({ type: 'join', roomId: ids["heartbeat-room"], peerId: 'host-1' }));
   await nextMessage(host); // peers
 
-  inactiveViewer.send(JSON.stringify({ type: 'join', roomId: 'heartbeat-room', peerId: 'viewer-1' }));
+  inactiveViewer.send(JSON.stringify({ type: 'join', roomId: ids["heartbeat-room"], peerId: 'viewer-1' }));
   await nextMessage(inactiveViewer); // peers
   await nextMessage(host); // peer-joined
 
@@ -328,17 +333,18 @@ test('REL-01: terminates unresponsive sockets and cleans up presence', async (t)
 test('BUG-01: handles peerId collision deterministically and avoids ghost disconnects', async (t) => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' });
   await app.ready;
+  const ids = await createTestRooms(app, ["col-room"]);
   t.after(() => app.close());
 
   const observer = await connect(`ws://127.0.0.1:${app.port}/signal`);
   t.after(() => observer.close());
 
-  observer.send(JSON.stringify({ type: 'join', roomId: 'col-room', peerId: 'observer' }));
+  observer.send(JSON.stringify({ type: 'join', roomId: ids["col-room"], peerId: 'observer' }));
   await nextMessage(observer); // peers
 
   // Client 1 connects as peer-alpha
   const socket1 = await connect(`ws://127.0.0.1:${app.port}/signal`);
-  socket1.send(JSON.stringify({ type: 'join', roomId: 'col-room', peerId: 'peer-alpha', nickname: 'Alpha1' }));
+  socket1.send(JSON.stringify({ type: 'join', roomId: ids["col-room"], peerId: 'peer-alpha', nickname: 'Alpha1' }));
   const socket1Peers = await nextMessage(socket1); // peers
   await nextMessage(observer); // peer-joined
 
@@ -353,7 +359,7 @@ test('BUG-01: handles peerId collision deterministically and avoids ghost discon
   socket2.send(
     JSON.stringify({
       type: 'join',
-      roomId: 'col-room',
+      roomId: ids["col-room"],
       peerId: 'peer-alpha',
       nickname: 'Alpha2',
       reconnectToken: socket1Peers.reconnectToken,

@@ -20,9 +20,11 @@ export const Route = createRootRoute({
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { name: 'theme-color', content: '#080a0f' },
-      { title: 'Screen Room — compartilhamento em tempo real' },
+      { title: 'Janjalive — compartilhamento em tempo real' },
     ],
     links: [
+      { rel: 'manifest', href: '/manifest.webmanifest' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180' },
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
       { rel: 'alternate icon', href: '/favicon.ico' },
     ],

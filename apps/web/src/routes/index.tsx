@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createRoom } from '../features/room/signaling/create-room';
+import React, { useRef, useState } from 'react';
+import styles from './index.module.css';
+import { ProductShowcase, CompareShowcase, SharingShowcase } from '../features/landing/LandingDemos';
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   Box,
   Container,
@@ -10,21 +13,25 @@ import {
   Modal,
   Stack,
   Group,
-  Badge,
-  Card,
+  Accordion,
   UnstyledButton,
+  Checkbox,
 } from '@mantine/core';
-import { generateSecureRoomId, normalizeRoom } from '@screen-room/protocol';
+import { normalizeRoom } from '@screen-room/protocol';
 import {
   IconScreen,
   IconPlus,
   IconLink,
   IconShield,
-  IconVolume,
-  IconUsers,
 } from '../features/room/components/Icons';
 
 export const Route = createFileRoute('/')({
+  head: () => ({
+    meta: [
+      { title: 'Janjalive — Compartilhamento de tela no navegador' },
+      { name: 'description', content: 'Crie uma sala efêmera para compartilhar tela e áudio, conversar, trocar arquivos e assistir a vídeos locais com outras pessoas. Sem cadastro.' },
+    ],
+  }),
   component: LobbyPage,
 });
 
@@ -40,6 +47,7 @@ function parseRoomInput(input: string): string {
 
 function LobbyPage() {
   const navigate = useNavigate();
+  const nicknameInput = useRef<HTMLInputElement>(null);
   const [nickname, setNickname] = useState(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('screen_room_display_name') || '';
@@ -56,6 +64,9 @@ function LobbyPage() {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [protectRoom, setProtectRoom] = useState(false);
   const [inputCode, setInputCode] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
 
@@ -70,13 +81,15 @@ function LobbyPage() {
     }
   };
 
-  const handleCreateRoom = () => {
-    const newRoomId = generateSecureRoomId();
-    handleSaveNickname(nickname);
-    navigate({
-      to: '/room/$roomId',
-      params: { roomId: newRoomId },
-    });
+  const handleCreateRoom = async () => {
+    if (creating) return;
+    setCreating(true); setCreateError(null);
+    try {
+      const { roomId: newRoomId } = await createRoom({ isProtected: protectRoom });
+      handleSaveNickname(nickname);
+      await navigate({ to: '/room/$roomId', params: { roomId: newRoomId } });
+    } catch (error) { setCreateError(error instanceof Error ? error.message : 'Não foi possível criar a sala.'); }
+    finally { setCreating(false); }
   };
 
   const handleJoinByCode = (e: React.FormEvent) => {
@@ -101,369 +114,91 @@ function LobbyPage() {
   };
 
   return (
-    <Box
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#080a0f',
-        color: '#e6edf3',
-      }}
-    >
-      <style>{`
-        .lobby-header {
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          background-color: #0d1117;
-          padding: 0.85rem 1.5rem;
-        }
-        .lobby-main-area {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          padding: 3rem 1.5rem;
-        }
-        @media (max-width: 600px) {
-          .lobby-header {
-            padding: 0.5rem 1rem !important;
-          }
-          .lobby-brand-icon {
-            width: 28px !important;
-            height: 28px !important;
-          }
-          .lobby-brand-title {
-            font-size: 1.05rem !important;
-          }
-          .lobby-nav-btn {
-            height: 36px !important;
-            min-height: 36px !important;
-            padding: 0 10px !important;
-            font-size: 0.85rem !important;
-          }
-          .lobby-main-area {
-            padding: 1.25rem 1rem !important;
-          }
-        }
-      `}</style>
-
-      {/* Top Navbar */}
-      <Box
-        component="header"
-        className="lobby-header"
-      >
-        <Container size="lg" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <UnstyledButton
-            onClick={() => navigate({ to: '/' })}
-            aria-label="Screen Room - Página inicial"
-            style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 8 }}
-          >
-            <Group gap="xs">
-              <Box
-                className="lobby-brand-icon"
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  backgroundColor: '#2563eb',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#fff',
-                }}
-              >
-                <IconScreen size={18} />
-              </Box>
-              <Text fw={700} size="lg" className="lobby-brand-title" style={{ color: '#fff', letterSpacing: '-0.01em' }}>
-                Screen Room
-              </Text>
-            </Group>
+    <Box className={styles.lobby}>
+      <a className={styles.skipLink} href="#criar-sala">Ir para criar sala</a>
+      <header className={styles.header}>
+        <Container size="lg" className={styles.headerInner}>
+          <UnstyledButton onClick={() => navigate({ to: '/' })} aria-label="Janjalive - Página inicial" className={styles.brand}>
+            <span className={styles.brandIcon}><IconScreen size={19} /></span>
+            <span>Janjalive</span>
           </UnstyledButton>
-
-          <Group gap="xs">
-            <Button
-              variant="subtle"
-              color="gray"
-              size="sm"
-              className="lobby-nav-btn"
-              onClick={() => setIsAboutModalOpen(true)}
-              style={{ color: '#8c959f', fontWeight: 500 }}
-            >
-              Sobre
-            </Button>
-            <Button
-              variant="subtle"
-              color="gray"
-              size="sm"
-              className="lobby-nav-btn"
-              onClick={() => setIsHelpModalOpen(true)}
-              style={{ color: '#8c959f', fontWeight: 500 }}
-            >
-              Ajuda
-            </Button>
-          </Group>
+          <nav aria-label="Informações">
+            <Button variant="subtle" color="gray" onClick={() => setIsAboutModalOpen(true)}>Sobre</Button>
+            <Button variant="subtle" color="gray" onClick={() => setIsHelpModalOpen(true)}>Ajuda</Button>
+          </nav>
         </Container>
-      </Box>
+      </header>
 
-      {/* Main Content Area */}
-      <Box className="lobby-main-area">
-        <Container size="lg" style={{ width: '100%' }}>
-          <Box
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '3.5rem',
-              alignItems: 'center',
-            }}
-          >
-            {/* Left Column: Hero & Actions */}
-            <Stack gap="xl">
-              <div>
-                <Badge
-                  variant="outline"
-                  color="blue"
-                  size="md"
-                  radius="sm"
-                  mb="md"
-                  styles={{
-                    root: {
-                      textTransform: 'uppercase',
-                      borderColor: 'rgba(37, 99, 235, 0.4)',
-                      color: '#60a5fa',
-                      fontWeight: 600,
-                    },
-                  }}
-                >
-                  WebRTC · Apenas tela e som
-                </Badge>
-
-                <Title
-                  order={1}
-                  style={{
-                    fontSize: 'clamp(2rem, 4vw, 2.85rem)',
-                    fontWeight: 800,
-                    lineHeight: 1.15,
-                    color: '#ffffff',
-                    letterSpacing: '-0.02em',
-                  }}
-                >
-                  Compartilhe sua tela em tempo real
-                </Title>
-
-                <Text
-                  size="lg"
-                  c="#8c959f"
-                  mt="md"
-                  style={{ lineHeight: 1.55, maxWidth: '520px' }}
-                >
-                  Transmissão direta ponto a ponto com baixa latência e áudio do sistema. Sem cadastro, sem microfone, sem complicações.
-                </Text>
-              </div>
-
-              {/* Optional Nickname Input */}
-              <Box style={{ maxWidth: '420px' }}>
+      <main>
+        <Container size="lg">
+          <section className={styles.hero} aria-labelledby="lobby-title">
+            <div className={styles.intro}>
+              <Title id="lobby-title" order={1} className={styles.title}>
+                Compartilhamento<br className={styles.desktopBreak} /> de tela, <span>direto no navegador.</span>
+              </Title>
+              <Text className={styles.description}>
+                Uma sala temporária para apresentar sua tela e o áudio da aba ou do sistema. Sem cadastro, sem instalar nada.
+              </Text>
+              <Text className={styles.inviteHint}>Convide por link, código ou QR Code.</Text>
+            </div>
+              <div id="criar-sala" className={styles.createArea}>
+                <Title order={2} className={styles.formTitle}>Crie ou entre em uma sala</Title>
                 <TextInput
+                  ref={nicknameInput}
                   label="Seu nickname temporário (opcional)"
                   placeholder="Visitante (padrão)"
                   value={nickname}
                   onChange={(e) => handleSaveNickname(e.currentTarget.value)}
-                  styles={{
-                    label: { color: '#8c959f', fontSize: '0.85rem', marginBottom: '0.35rem' },
-                    input: {
-                      backgroundColor: '#161b22',
-                      borderColor: 'rgba(255, 255, 255, 0.12)',
-                      color: '#fff',
-                      height: '42px',
-                    },
-                  }}
                 />
-              </Box>
+                <Checkbox
+                  className={styles.protection}
+                  label="Proteger sala com chave de acesso"
+                  description="Gera uma chave aleatória para a entrada dos convidados."
+                  checked={protectRoom}
+                  onChange={(e) => setProtectRoom(e.currentTarget.checked)}
+                />
+                {createError && <Text role="alert" c="#fca5a5" size="sm">{createError}</Text>}
+                <div className={styles.actions}>
+                  <Button size="md" leftSection={<IconPlus size={18} />} onClick={handleCreateRoom} loading={creating}>Criar sala</Button>
+                  <Button size="md" variant="default" leftSection={<IconLink size={18} />} onClick={() => setIsCodeModalOpen(true)}>Entrar com código</Button>
+                </div>
+              </div>
+          </section>
 
-              {/* Main Actions */}
-              <Group gap="md">
-                <Button
-                  size="lg"
-                  leftSection={<IconPlus size={18} />}
-                  onClick={handleCreateRoom}
-                  style={{
-                    backgroundColor: '#2563eb',
-                    fontWeight: 600,
-                    padding: '0 1.5rem',
-                    height: '48px',
-                  }}
-                >
-                  Criar sala
-                </Button>
+          <section className={styles.features} aria-labelledby="features-title">
+            <ProductShowcase heading={
+              <div className={styles.sectionHeading}>
+                <Title order={2} id="features-title">Dentro da sala</Title>
+                <Text>A tela em primeiro plano. As ferramentas, por perto.</Text>
+              </div>
+            } />
+            <CompareShowcase />
+            <SharingShowcase />
+          </section>
 
-                <Button
-                  size="lg"
-                  variant="default"
-                  leftSection={<IconLink size={18} />}
-                  onClick={() => setIsCodeModalOpen(true)}
-                  style={{
-                    backgroundColor: '#161b22',
-                    borderColor: 'rgba(255, 255, 255, 0.12)',
-                    color: '#e6edf3',
-                    fontWeight: 600,
-                    padding: '0 1.5rem',
-                    height: '48px',
-                  }}
-                >
-                  Entrar com código
-                </Button>
-              </Group>
-
-              <Text size="xs" c="#6e7781">
-                Ao criar uma sala, você recebe um link seguro para convidar participantes. Acesso instantâneo sem login.
-              </Text>
-            </Stack>
-
-            {/* Right Column: Visual Preview Card */}
-            <Box
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
-              <Card
-                withBorder
-                padding="0"
-                radius="lg"
-                style={{
-                  backgroundColor: '#0d1117',
-                  borderColor: 'rgba(255, 255, 255, 0.1)',
-                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6)',
-                  width: '100%',
-                  maxWidth: '520px',
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Mockup Titlebar */}
-                <Box
-                  style={{
-                    padding: '0.75rem 1rem',
-                    backgroundColor: '#161b22',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <Group gap="xs">
-                    <Box style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: '#ef4444' }} />
-                    <Box style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: '#eab308' }} />
-                    <Box style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: '#22c55e' }} />
-                  </Group>
-                  <Text size="xs" c="#8c959f" fw={500}>
-                    sala • demo
-                  </Text>
-                  <Badge size="xs" color="blue" variant="light">
-                    Ao vivo
-                  </Badge>
-                </Box>
-
-                {/* Mockup Screen Stage */}
-                <Box
-                  style={{
-                    height: '240px',
-                    backgroundColor: '#06090e',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative',
-                    padding: '1rem',
-                  }}
-                >
-                  {/* Mockup Streamer Badge */}
-                  <Box
-                    style={{
-                      position: 'absolute',
-                      top: 12,
-                      left: 12,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                      padding: '4px 10px',
-                      borderRadius: 16,
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                    }}
-                  >
-                    <Box
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: '50%',
-                        backgroundColor: '#2563eb',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: '#fff',
-                      }}
-                    >
-                      F
-                    </Box>
-                    <Text size="xs" fw={600} c="#fff">
-                      Firminha · Transmitindo
-                    </Text>
-                  </Box>
-
-                  {/* Mockup Stream Content Graphic */}
-                  <Stack align="center" gap="xs">
-                    <Box
-                      style={{
-                        width: 52,
-                        height: 52,
-                        borderRadius: 12,
-                        backgroundColor: 'rgba(37, 99, 235, 0.12)',
-                        border: '1px solid rgba(37, 99, 235, 0.3)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#60a5fa',
-                      }}
-                    >
-                      <IconScreen size={26} />
-                    </Box>
-                    <Text size="xs" c="#8c959f" fw={500}>
-                      Transmissão de tela em tempo real
-                    </Text>
-                  </Stack>
-
-                  {/* Mockup Floating Dock */}
-                  <Box
-                    style={{
-                      position: 'absolute',
-                      bottom: 12,
-                      display: 'flex',
-                      gap: 8,
-                      backgroundColor: '#161b22',
-                      padding: '6px 12px',
-                      borderRadius: 24,
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                    }}
-                  >
-                    <Box style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <IconScreen size={14} />
-                    </Box>
-                    <Box style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: '#21262d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <IconVolume size={14} />
-                    </Box>
-                    <Box style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: '#21262d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <IconUsers size={14} />
-                    </Box>
-                    <Box style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Box style={{ width: 10, height: 10, backgroundColor: '#fff', borderRadius: 2 }} />
-                    </Box>
-                  </Box>
-                </Box>
-              </Card>
-            </Box>
-          </Box>
+          <aside className={styles.notes} aria-label="Privacidade e compatibilidade">
+            <div className={styles.privacyNote}>
+              <IconShield size={20} />
+              <Text>Conexões de mídia via WebRTC. Sem captura de câmera ou microfone pessoal.</Text>
+            </div>
+            <Text>Captura de tela e áudio variam conforme o navegador e o sistema. Em celulares, a captura pode não estar disponível.</Text>
+          </aside>
         </Container>
-      </Box>
+      </main>
+      <footer className={styles.footer}>
+        <Container size="lg" className={styles.footerInner}>
+          <Text size="sm">Janjalive · Salas efêmeras</Text>
+          <nav aria-label="Documentos institucionais" className={styles.legalLinks}>
+            <Link to="/termos">Termos de Uso</Link>
+            <Link to="/privacidade">Privacidade</Link>
+          </nav>
+          <a href="#criar-sala" onClick={(event) => {
+            event.preventDefault();
+            document.getElementById('criar-sala')?.scrollIntoView({ block: 'center' });
+            nicknameInput.current?.focus({ preventScroll: true });
+          }}>Voltar para criar sala <span aria-hidden="true">↑</span></a>
+        </Container>
+      </footer>
 
       {/* Modal: Entrar com código */}
       <Modal
@@ -474,6 +209,8 @@ function LobbyPage() {
         }}
         title="Entrar com código"
         centered
+        classNames={{ content: styles.modal, close: styles.modalClose }}
+        closeButtonProps={{ 'aria-label': 'Fechar modal' }}
         styles={{
           content: { backgroundColor: '#161b22', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.12)' },
           header: { backgroundColor: '#161b22', color: '#fff', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' },
@@ -483,7 +220,7 @@ function LobbyPage() {
         <form onSubmit={handleJoinByCode}>
           <Stack gap="md" mt="xs">
             <Text size="sm" c="#8c959f">
-              Cole o link do convite ou digite o código da sala fornecido por quem está transmitindo.
+              Cole o link do convite ou digite o código fornecido por quem convidou você.
             </Text>
 
             <TextInput
@@ -543,8 +280,10 @@ function LobbyPage() {
       <Modal
         opened={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
-        title="Sobre o Screen Room"
+        title="Sobre o Janjalive"
         centered
+        classNames={{ content: styles.modal, close: styles.modalClose }}
+        closeButtonProps={{ 'aria-label': 'Fechar modal' }}
         styles={{
           content: { backgroundColor: '#161b22', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.12)' },
           header: { backgroundColor: '#161b22', color: '#fff', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' },
@@ -552,40 +291,12 @@ function LobbyPage() {
         }}
       >
         <Stack gap="md" mt="xs">
-          <Text size="sm" c="#d0d7de">
-            O <strong>Screen Room</strong> é uma alternativa focada e leve para transmissão de telas em tempo real, sem recursos de rede social.
-          </Text>
-
-          <Stack gap="xs">
-            <Group gap="xs" align="flex-start">
-              <IconShield size={18} style={{ color: '#60a5fa', marginTop: 2 }} />
-              <Text size="sm" c="#8c959f">
-                <strong>Ponto a ponto (P2P):</strong> O vídeo e áudio viajam diretamente entre navegadores usando WebRTC criptografado.
-              </Text>
-            </Group>
-
-            <Group gap="xs" align="flex-start">
-              <IconVolume size={18} style={{ color: '#60a5fa', marginTop: 2 }} />
-              <Text size="sm" c="#8c959f">
-                <strong>Áudio do sistema:</strong> Compartilhe áudio de abas e janelas sem necessidade de microfone.
-              </Text>
-            </Group>
-
-            <Group gap="xs" align="flex-start">
-              <IconUsers size={18} style={{ color: '#60a5fa', marginTop: 2 }} />
-              <Text size="sm" c="#8c959f">
-                <strong>Sessões efêmeras:</strong> Sem cadastro, perfis ou histórico salvo. Cada visita é temporária.
-              </Text>
-            </Group>
-          </Stack>
-
-          <Button
-            fullWidth
-            onClick={() => setIsAboutModalOpen(false)}
-            style={{ backgroundColor: '#21262d', color: '#fff', marginTop: '0.5rem' }}
-          >
-            Entendido
-          </Button>
+          <Text size="sm">O Janjalive reúne pessoas em salas efêmeras, sem cadastro, para compartilhar tela e áudio, conversar, trocar arquivos, criar clipes e assistir a vídeos locais.</Text>
+          <Text size="sm"><strong>Conexões via WebRTC.</strong> Transmissões e transferências de arquivos e vídeos usam conexões entre navegadores, com criptografia de transporte. Quando necessário, TURN pode retransmitir esse tráfego. O servidor mantém a sinalização, a presença e recursos de colaboração.</Text>
+          <Text size="sm"><strong>Controle sobre suas mídias.</strong> Você escolhe a tela e encerra o compartilhamento quando quiser. Arquivos e Watch Party exigem aceite individual; clipes exigem permissão do apresentador. Esse consentimento controla o gravador integrado e não impede gravações externas.</Text>
+          <Text size="sm"><strong>Salas temporárias.</strong> As salas são efêmeras; participantes podem salvar explicitamente arquivos e clipes no próprio dispositivo.</Text>
+          <Text size="sm"><strong>Sem microfone pessoal.</strong> A captura usa apenas a tela e, quando disponível, o áudio da aba ou do sistema. Não solicitamos câmera ou microfone.</Text>
+          <Button fullWidth variant="default" onClick={() => setIsAboutModalOpen(false)}>Entendido</Button>
         </Stack>
       </Modal>
 
@@ -595,48 +306,30 @@ function LobbyPage() {
         onClose={() => setIsHelpModalOpen(false)}
         title="Dicas e Ajuda"
         centered
+        classNames={{ content: styles.modal, close: styles.modalClose }}
+        closeButtonProps={{ 'aria-label': 'Fechar modal' }}
         styles={{
           content: { backgroundColor: '#161b22', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.12)' },
           header: { backgroundColor: '#161b22', color: '#fff', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' },
           title: { fontWeight: 700, fontSize: '1.1rem' },
         }}
       >
-        <Stack gap="md" mt="xs">
-          <div>
-            <Text fw={600} size="sm" c="#fff">
-              Como transmitir com áudio?
-            </Text>
-            <Text size="sm" c="#8c959f" mt={4}>
-              Ao iniciar o compartilhamento no navegador (Chrome, Edge ou Firefox), marque a opção "Compartilhar áudio da aba" ou "Compartilhar áudio do sistema".
-            </Text>
-          </div>
-
-          <div>
-            <Text fw={600} size="sm" c="#fff">
-              Dispositivos móveis
-            </Text>
-            <Text size="sm" c="#8c959f" mt={4}>
-              Smartphones e tablets podem assistir às transmissões em alta qualidade com áudio. A captura de tela depende do suporte do navegador móvel.
-            </Text>
-          </div>
-
-          <div>
-            <Text fw={600} size="sm" c="#fff">
-              Dificuldades de conexão?
-            </Text>
-            <Text size="sm" c="#8c959f" mt={4}>
-              Se houver lentidão ou perda de pacotes, acesse as Configurações da sala para ajustar o perfil de qualidade (Equilibrada ou Econômica).
-            </Text>
-          </div>
-
-          <Button
-            fullWidth
-            onClick={() => setIsHelpModalOpen(false)}
-            style={{ backgroundColor: '#21262d', color: '#fff', marginTop: '0.5rem' }}
-          >
-            Fechar
-          </Button>
-        </Stack>
+        <Accordion variant="separated" mt="md" defaultValue="rooms">
+          {[
+            ['rooms', 'Criar, proteger e entrar', 'Escolha um nickname opcional e selecione Criar sala. Para restringir a entrada, marque Proteger sala com chave de acesso antes de criar e envie a chave aos convidados separadamente. Entre por link, QR Code ou pelo botão Entrar com código.'],
+            ['screen', 'Compartilhar tela e áudio', 'Na sala, use Compartilhar tela, escolha a fonte no seletor do navegador e confirme a prévia. Se o seletor oferecer áudio, habilite a opção desejada. A disponibilidade depende do navegador, sistema e fonte. Você pode parar pelo aplicativo ou pelo navegador. O microfone pessoal não é solicitado.'],
+            ['collaboration', 'Conversar, interagir e enviar arquivos', 'Abra as interações para acessar chat, reações, levantar a mão, perguntas e enquetes. Pelo Chat, selecione arquivos de até 20 MiB e os destinatários. Cada pessoa aceita ou recusa a transferência e escolhe se deseja salvar o arquivo.'],
+            ['watch', 'Clipes e Watch Party', 'No menu Clipes, grave até 60 segundos com a permissão do apresentador. Você pode salvar o clipe e compartilhar clipes próprios pelo Chat. Na Watch Party, escolha um MP4 ou WebM de até 20 MiB, ou use Assistir juntos em um clipe próprio elegível. Cada participante aceita o vídeo; quem inicia controla a reprodução coordenada e cada pessoa ajusta seu volume. A sincronização é aproximada.'],
+            ['browser', 'Navegadores e dispositivos', 'Use um navegador atualizado. Captura de tela, áudio de aba/sistema, gravação e formatos de vídeo variam entre navegadores e sistemas. Em dispositivos móveis, a captura pode não estar disponível. Se não ouvir uma transmissão, use Ativar áudio quando exibido.'],
+            ['connection', 'Problemas de conexão', 'Confira sua conexão e tente entrar novamente pelo convite. Em Configurações, reduza o perfil de qualidade para Econômico se houver lentidão. Redes restritas podem impedir conexões mesmo com TURN. Se houver um erro de entrada, confira o código e a chave com quem criou a sala.'],
+          ].map(([value, title, content]) => (
+            <Accordion.Item key={value} value={value}>
+              <Accordion.Control>{title}</Accordion.Control>
+              <Accordion.Panel><Text size="sm">{content}</Text></Accordion.Panel>
+            </Accordion.Item>
+          ))}
+        </Accordion>
+        <Button fullWidth variant="default" mt="md" onClick={() => setIsHelpModalOpen(false)}>Fechar</Button>
       </Modal>
     </Box>
   );

@@ -1,4 +1,4 @@
-# Screen Room — instruções para agentes
+# Janjalive — instruções para agentes
 
 Aplicação focada em compartilhamento de tela e áudio da aba/sistema, sem cadastro, em salas efêmeras. Priorize confiabilidade da transmissão, privacidade e simplicidade da interface.
 

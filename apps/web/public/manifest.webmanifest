@@ -1,0 +1,26 @@
+{
+  "name": "Janjalive",
+  "short_name": "Janjalive",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#080a0f",
+  "background_color": "#080a0f",
+  "lang": "pt-BR",
+  "description": "Compartilhe tela e áudio, converse, troque arquivos e assista a vídeos locais em salas efêmeras, sem cadastro.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

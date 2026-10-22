@@ -1,3 +1,4 @@
+import { createTestRooms } from './helpers/create-rooms.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -13,6 +14,7 @@ const sharing = { active: true, hasAudio: false, audioMuted: false };
 
 function fixture() {
   const rooms = new RoomRegistry();
+  rooms.createRoom('r');
   for (const peer of ['p', 'q', 'v']) rooms.join('r', peer);
   rooms.updateSharing('r', 'p', sharing);
   rooms.updateSharing('r', 'q', { ...sharing, paused: true });
@@ -88,6 +90,7 @@ test('private identities survive recovery and replacement, but voluntary/new ses
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(rooms.has('r'), false);
   assert.deepEqual(rooms.polls.snapshot('r').polls, []);
+  rooms.createRoom('r');
   rooms.join('r', 'v'); assert.equal(snapshot('v').polls.length, 0);
   rooms.leave('r', 'v');
 });
@@ -132,10 +135,11 @@ async function connect(app) {
 
 test('wire polls: concurrent creation, authoritative snapshots, late join, isolation, replaced sockets and recovery', async t => {
   const app = createSignalServer({ port: 0, host: '127.0.0.1' }); await app.ready;
+  const ids = await createTestRooms(app, ["r", "other"]);
   t.after(() => app.close());
   const p = await connect(app), q = await connect(app), v = await connect(app), other = await connect(app);
   v.send(create()); await v.next('interaction-rejected');
-  for (const [client, peerId, roomId] of [[p, 'p', 'r'], [q, 'q', 'r'], [v, 'v', 'r'], [other, 'o', 'other']]) {
+  for (const [client, peerId, roomId] of [[p, 'p', ids["r"]], [q, 'q', ids["r"]], [v, 'v', ids["r"]], [other, 'o', ids["other"]]]) {
     client.send({ type: 'join', roomId, peerId }); client.peers = await client.next('peers');
     assert.deepEqual((await client.next('polls-snapshot')).polls, []);
   }
@@ -159,16 +163,16 @@ test('wire polls: concurrent creation, authoritative snapshots, late join, isola
   assert.equal(JSON.stringify(presenter).includes('votes'), false);
   const original = [...app.wss.clients].find(s => s.meta?.peerId === 'v');
   const replacement = await connect(app);
-  replacement.send({ type: 'join', roomId: 'r', peerId: 'v', reconnectToken: v.peers.reconnectToken });
+  replacement.send({ type: 'join', roomId: ids["r"], peerId: 'v', reconnectToken: v.peers.reconnectToken });
   await replacement.next('peers');
   assert.equal((await replacement.next('polls-snapshot')).polls[0].ownVote, 1);
   for (const operation of [create('stale'), vote(id), close(id)]) original.emit('message', Buffer.from(JSON.stringify(operation)));
-  const late = await connect(app); late.send({ type: 'join', roomId: 'r', peerId: 'late' }); await late.next('peers');
+  const late = await connect(app); late.send({ type: 'join', roomId: ids["r"], peerId: 'late' }); await late.next('peers');
   const lateSnap = await late.next('polls-snapshot'); assert.equal(lateSnap.polls[0].ownVote, null); assert.equal(lateSnap.polls[0].counts, null);
   late.send(vote(id)); await late.next('poll-accepted');
   assert.deepEqual((await late.next('polls-snapshot')).polls[0].counts, [1, 1]);
   replacement.ws.terminate(); await new Promise(resolve => setTimeout(resolve, 40));
-  const recovered = await connect(app); recovered.send({ type: 'join', roomId: 'r', peerId: 'v', reconnectToken: v.peers.reconnectToken });
+  const recovered = await connect(app); recovered.send({ type: 'join', roomId: ids["r"], peerId: 'v', reconnectToken: v.peers.reconnectToken });
   await recovered.next('peers'); assert.equal((await recovered.next('polls-snapshot')).polls[0].ownVote, 1);
   recovered.send(vote(id)); await recovered.next('poll-accepted');
   assert.deepEqual((await recovered.next('polls-snapshot')).polls[0].counts, [2, 0]);

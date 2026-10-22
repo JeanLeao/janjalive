@@ -35,7 +35,22 @@ Referências técnicas: [Screen Capture](https://w3c.github.io/mediacapture-scre
 
 A cada 3 segundos, as estatísticas são consultadas por peer. O gatilho considera a **pior perda de envio** entre espectadores, sem diluição pela média de conexões diferentes. Usa apenas deltas de relatórios `remote-inbound-rtp` ligados por `localId` ao vídeo enviado. O primeiro relatório cria a referência; relatórios repetidos, contadores reiniciados ou substituição de conexão não disparam redução. Receber vídeo com perdas de outro apresentador não reduz a própria qualidade.
 
-Uma perda de envio de **5% ou mais**, com cooldown de **20 segundos**, reduz um nível: **Ultra → Equilibrado → Econômico**. Preserva prioridade e limita FPS conforme a matriz (Fluidez Ultra 60 → Equilibrado 60 → Econômico 30). O apresentador recebe uma notificação e a seleção reflete o novo nível solicitado. Sem relatório remoto válido, não se infere perda de envio. Não há recuperação automática de qualidade.
+Uma perda de envio de **5% ou mais**, com cooldown de **20 segundos**, reduz um nível: **Ultra → Equilibrado → Econômico**. Preserva prioridade e limita FPS conforme a matriz (Fluidez Ultra 60 → Equilibrado 60 → Econômico 30). A seleção manual permanece preservada: a gaveta distingue preferência, perfil temporariamente solicitado e resultado da verificação. Sem relatório remoto válido, não se infere perda de envio.
+
+A recuperação é global, um nível por etapa (**Econômico → Equilibrado → Ultra**), limitada à preferência explícita. Reconstrói o FPS a partir dessa preferência: Fluidez Ultra 60 → Econômico 30 → Equilibrado 60 → Ultra 60; Nitidez 20 permanece em 20. Encerrar a captura descarta a redução temporária; a próxima captura parte da preferência manual.
+
+Política conservadora da F34:
+
+- Exige **60 segundos contínuos** de perda de envio **inferior a 2% em todos os peers**, e no mínimo **60 segundos desde a última decisão automática de redução ou recuperação**. Após cada tentativa começa uma nova janela. Reduções mantêm cooldown independente de 20 segundos.
+- Cada intervalo deve ter ao menos **100 pacotes**, delta positivo de recebidos/enviados, perdas e contadores não negativos e monotônicos, mesma conexão e mesmos IDs de relatório. O primeiro relatório serve apenas de referência. Ausência de campo não vira zero.
+- O relatório remoto deve avançar e os intervalos entre relatórios e coletas devem ser de no máximo **6 segundos** (duas cadências). Os timestamps remoto e de saída precisam estar disponíveis e a até 6 segundos um do outro. Uma coleta que demora mais de 6 segundos também bloqueia a recuperação. Relatórios repetidos, antigos, inválidos, tráfego insuficiente e falhas de coleta interrompem a janela.
+- RTT remoto válido ou RTT atual do par selecionado, com timestamp recente comparado ao relatório de saída, **acima de 300 ms** bloqueia. Ausência de RTT isoladamente não bloqueia. Não se usa média de RTT acumulada.
+- Todos os participantes remotos esperados precisam ter conexão e estatísticas válidas; ausência de espectadores não autoriza recuperação. Entrada, saída, substituição e mudança de estado de conexão descartam a estabilidade anterior, inclusive mudanças sinalizadas entre coletas.
+- Somente captura local publicada, ativa e não pausada pode ser adaptada. Prévia, pausa, troca de fonte, escolha manual, encerramento e desmontagem invalidam observações pendentes. Aplicações usam as filas existentes de constraints e de `PeerManager.applyQuality()`; uma conclusão obsoleta não atualiza a preferência nem confirma sucesso. Uma redução pode substituir uma recuperação ainda pendente.
+
+`quality-stability-start`, `quality-stability-reset`, `quality-downgrade`, `quality-recovery-attempt`, `quality-adaptation-result` e `quality-adaptation-obsolete` registram decisões e resultados sem notificações repetitivas. Falha ou aplicação parcial mantém a transmissão e aparece como aplicação incompleta/não verificada. Verificação confirma limites da captura e parâmetros retornados pelos senders, sem afirmar melhoria efetiva de resolução, FPS ou bitrate transmitido.
+
+Os testes determinísticos injetam relógio monotônico e relatórios por peer. Os E2E F34 usam WebRTC local e captura sintética, com estatísticas de adaptação e relógio controlados, incluindo os estados normal, reduzido e recuperado em desktop/mobile. Não simulam congestionamento real de rede.
 
 ## Diagnóstico e medições
 
