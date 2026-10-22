@@ -1,3 +1,5 @@
+import { useFileAttachment } from '../hooks/useFileAttachment';
+import type { ClipFile } from '../media/local-clip';
 import { FileAttachment, FileTransferCard, groupDeliveries } from './FileTransfers';
 import type { FileDelivery, FileTransferManager } from '../files/file-transfer-manager';
 import type { RoomParticipant } from '../types';
@@ -39,6 +41,7 @@ const GROUP_WINDOW_MS = 5 * 60 * 1000;
 export type InteractionTab = 'chat' | 'qa' | 'polls';
 
 interface InteractionsStateInput {
+  clip?: ClipFile | null;
   files?: FileTransferManager;
   fileDeliveries?: FileDelivery[];
   participants?: RoomParticipant[];
@@ -61,7 +64,7 @@ interface InteractionsStateInput {
  * sobrevivem a mudanças de modo (normal, Cinema e tela cheia) sem remontar a sessão.
  */
 export function useInteractionsUi({
-  files, fileDeliveries = [], participants = [],
+  clip, files, fileDeliveries = [], participants = [],
   roomId,
   messages,
   error,
@@ -75,6 +78,7 @@ export function useInteractionsUi({
   qaSubmitPending = false,
   onSubmitQuestion,
 }: InteractionsStateInput) {
+  const attachment = useFileAttachment(roomId, connected, files, clip);
   const [opened, setOpened] = useState(false);
   const [tab, setTab] = useState<InteractionTab>('chat');
   const [picker, setPicker] = useState(false);
@@ -156,7 +160,11 @@ export function useInteractionsUi({
   const toggleChat = useCallback(() => { if (opened) closeChat(); else openChat(); }, [opened, openChat, closeChat]);
   const closePicker = useCallback(() => setPicker(false), []);
   return {
-    files, fileDeliveries, participants, pendingFiles, fileTimes,
+    files, fileDeliveries, participants, pendingFiles, fileTimes, attachment,
+    prepareClip(next: ClipFile, own: boolean) {
+      if (!attachment.prepareClip(next, own)) return false;
+      setTab('chat'); openChat(); return true;
+    },
     opened,
     tab,
     setTab,
@@ -506,7 +514,7 @@ function ChatTabView({ ui, messages, error, pending, connected, localPeerId }: {
       <div role="status" className={`${classes.status} ${error ? classes.statusError : ''}`}>
         {status}
       </div>
-      {ui.files && <FileAttachment manager={ui.files} participants={ui.participants} connected={connected} />}
+      {ui.files && <FileAttachment state={ui.attachment} participants={ui.participants} connected={connected} />}
       <div className={classes.field} data-disabled={!connected || undefined}>
         <textarea ref={field} aria-label="Mensagem" aria-describedby="room-chat-hint" placeholder="Escreva para a sala" value={draft} readOnly={pending}
           rows={1} maxLength={INTERACTION_LIMITS.textLength} onChange={event => setDraft(event.currentTarget.value)}

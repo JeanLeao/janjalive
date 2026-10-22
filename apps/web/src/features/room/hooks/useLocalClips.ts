@@ -4,7 +4,7 @@ import { LocalClip, clipMimeType, type ClipFile } from '../media/local-clip.ts';
 import type { SignalingClient } from '../signaling/signaling-client';
 import type { RoomParticipant, RemoteStreamEntry } from '../types';
 
-type ClipSource = { presenterId: string; streamId: string; displayName: string };
+type ClipSource = { own: boolean; presenterId: string; streamId: string; displayName: string };
 type Target = { presenterId: string; streamId: string; stream: MediaStream; version: number };
 type Pending = Target & { own: boolean; id: string; audio: boolean; phase: 'request' | 'starting' | 'active'; timer: ReturnType<typeof setTimeout> };
 export function useLocalClips(roomId: string) {
@@ -140,7 +140,7 @@ export function useLocalClips(roomId: string) {
       if (!p || !ready.current || target.isPaused || (!target.isLocal && !p.allowed)) { setNotice('O apresentador não autorizou a gravação desta transmissão.'); return; }
       const operation: Pending = { presenterId: target.peerId, streamId: p.streamId, version: p.version, stream,
         own: target.isLocal, id: crypto.randomUUID(), audio, phase: 'request', timer: setTimeout(() => { if (pending.current === operation) stop('A autorização não foi confirmada.'); }, 5000) };
-      setSource({ presenterId: target.peerId, streamId: p.streamId, displayName: target.nickname || target.peerId.slice(0, 8) });
+      setSource({ own: target.isLocal, presenterId: target.peerId, streamId: p.streamId, displayName: target.nickname || target.peerId.slice(0, 8) });
       pending.current = operation; setElapsed(0); setStatus('pending');
       if (!send('request', operation, operation.id)) stop('Sem conexão com a sala.');
     },

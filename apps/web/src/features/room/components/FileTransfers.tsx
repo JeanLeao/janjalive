@@ -1,45 +1,45 @@
+import { FILE_LIMITS } from '@screen-room/protocol';
 import { useState, useRef, useEffect } from 'react';
-import { FILE_LIMITS, FileMetadataSchema } from '@screen-room/protocol';
+import type { FileAttachmentState } from '../hooks/useFileAttachment';
 import type { RoomParticipant } from '../types';
 import type { FileDelivery, FileTransferManager } from '../files/file-transfer-manager';
 import { IconClose } from './Icons';
 import classes from './FileTransfers.module.css';
 
-const attachmentMetadata = FileMetadataSchema.omit({ sha256: true });
 const labels = { waiting: 'Aguardando aceitação', offered: 'Solicitação recebida', queued: 'Aceito · conectando', transferring: 'Transferindo', verifying: 'Verificando integridade', complete: 'Concluído', rejected: 'Recusado', cancelled: 'Cancelado', error: 'Falha na transferência' };
 const size = (bytes: number) => bytes < 1048576 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / 1048576).toFixed(2)} MiB`;
 const name = (participants: RoomParticipant[], id: string) => participants.find(p => p.peerId === id)?.nickname || `Visitante (${id.slice(-6)})`;
 function AttachmentIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 13 7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2"/><path d="m6 15 9-9"/></svg>; }
-export function FileAttachment({ manager, participants, connected }: { manager: FileTransferManager; participants: RoomParticipant[]; connected: boolean }) {
-  const [selected, setSelected] = useState<string[]>([]);
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [choosing, setChoosing] = useState(false);
+export function FileAttachment({ participants, connected, state }: { participants: RoomParticipant[]; connected: boolean; state: FileAttachmentState }) {
+  const { selected, setSelected, file, busy, error, setError, choosing, setChoosing } = state;
+  const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const peers = participants.filter(p => !p.isLocal);
   const targets = selected.filter(id => peers.some(p => p.peerId === id));
-  const clear = () => { setFile(null); setSelected([]); setError(''); setChoosing(false); if (input.current) input.current.value = ''; requestAnimationFrame(() => trigger.current?.focus()); };
-  return <div className={classes.attachment}>
+  const focusTrigger = () => requestAnimationFrame(() => trigger.current?.focus());
+  const clear = () => { state.clear(); if (input.current) input.current.value = ''; focusTrigger(); };
+  useEffect(() => {
+    if (!file) { if (input.current) input.current.value = ''; return; }
+    const frame = requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[aria-label="Preparar arquivo"] button')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [file]);
+  return <div ref={root} className={classes.attachment}>
     <input ref={input} type="file" aria-label="Escolher arquivo" className={classes.hidden} disabled={!connected || busy} onChange={e => {
       const next = e.target.files?.[0]; if (!next) return;
-      if (!attachmentMetadata.safeParse({ name: next.name, mime: next.type, size: next.size }).success) {
-        clear();
-        setError(next.size > FILE_LIMITS.maxBytes ? 'O arquivo excede 20 MiB. Escolha um menor.' : 'Nome, tipo ou tamanho de arquivo inválido. Escolha outro arquivo.');
-        return;
+      // A failed replacement invalidates the conventional draft, as before.
+      if (!state.prepare({ blob: next, name: next.name })) {
+        const message = next.size > FILE_LIMITS.maxBytes ? 'O arquivo excede 20 MiB. Escolha um menor.' : 'Nome, tipo ou tamanho de arquivo inválido. Escolha outro arquivo.';
+        clear(); setError(message);
       }
-      setFile(next); setError(''); setChoosing(true);
     }} />
     {!file ? <div className={classes.attachRow}><button ref={trigger} type="button" className={classes.attach} disabled={!connected || busy} onClick={() => input.current?.click()}><AttachmentIcon /> Anexar arquivo</button><span>Privado · até 20 MiB</span></div> : <div className={classes.draft} aria-label="Preparar arquivo">
-      <div className={classes.header}><AttachmentIcon /><div className={classes.identity}><strong>{file.name}</strong><span>{size(file.size)} · envio privado</span></div><button type="button" className={classes.icon} disabled={busy} aria-label="Remover arquivo" onClick={clear}><IconClose size={16} /></button></div>
+      <div className={classes.header}><AttachmentIcon /><div className={classes.identity}><strong>{file.name}</strong><span>{size(file.blob.size)} · envio privado</span></div><button type="button" className={classes.icon} disabled={busy} aria-label="Remover arquivo" onClick={clear}><IconClose size={16} /></button></div>
       <div className={classes.tools}><button type="button" disabled={busy} onClick={() => input.current?.click()}>Substituir</button><button type="button" disabled={busy} aria-expanded={choosing} onClick={() => setChoosing(v => !v)}>{targets.length ? `${targets.length} destinatário${targets.length > 1 ? 's' : ''}` : 'Selecionar destinatários'}</button></div>
       {choosing && <fieldset className={classes.recipients}><legend>Enviar para · selecione até 8</legend>{peers.length === 0 ? <p>Ninguém conectado para receber. Convide alguém para a sala.</p> : peers.map(p => <label key={p.peerId}><input type="checkbox" checked={targets.includes(p.peerId)} disabled={busy || (!targets.includes(p.peerId) && targets.length >= 8)} onChange={e => { const checked = e.target.checked; setSelected(ids => checked ? [...ids, p.peerId] : ids.filter(id => id !== p.peerId)); }} /><span>{name(participants, p.peerId)}</span></label>)}</fieldset>}
       <p className={classes.hint}>Cada pessoa decide se aceita. Só ela e você veem a entrega.</p>
       <button type="button" className={classes.primary} disabled={!connected || !targets.length || busy} aria-busy={busy} onClick={async () => {
-        setBusy(true); setError('');
-        try { await manager.offer(file, file.name, targets); clear(); }
-        catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível preparar o arquivo.'); } finally { setBusy(false); }
+        if (await state.offer(targets)) { if (input.current) input.current.value = ''; focusTrigger(); }
       }}>{busy ? 'Preparando arquivo…' : `Solicitar envio${targets.length ? ` para ${targets.length}` : ''}`}</button>
     </div>}
     {error && <p role="alert" className={classes.error}>{error}</p>}

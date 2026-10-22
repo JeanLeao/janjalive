@@ -1,3 +1,4 @@
+import { FILE_LIMITS } from '@screen-room/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { Popover } from '@mantine/core';
 import type { useLocalClips } from '../hooks/useLocalClips';
@@ -5,6 +6,10 @@ import type { RoomParticipant, RemoteStreamEntry } from '../types';
 import classes from './ClipControls.module.css';
 
 type Props = {
+  onSendClip: () => boolean;
+  attachmentBusy: boolean;
+  attachmentPrepared: boolean;
+  connected: boolean;
   clips: ReturnType<typeof useLocalClips>;
   participants: RoomParticipant[];
   localStream: MediaStream | null;
@@ -13,12 +18,13 @@ type Props = {
 };
 
 export function ClipControls({
-  clips,
+  clips, onSendClip, attachmentBusy, attachmentPrepared, connected,
   participants,
   localStream,
   remoteStreams,
   featuredStreamId,
 }: Props) {
+  const [returnFocus, setReturnFocus] = useState(true);
   const [audio, setAudio] = useState(false);
   const [opened, setOpened] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -96,7 +102,7 @@ export function ClipControls({
         offset={8}
         withinPortal={false}
         trapFocus
-        returnFocus
+        returnFocus={returnFocus}
         middlewares={{ flip: false, shift: { padding: 10 } }}
         classNames={{ dropdown: classes.dropdown }}
       >
@@ -110,7 +116,7 @@ export function ClipControls({
             data-preview={clips.file ? true : undefined}
             aria-expanded={opened}
             aria-label={clips.status === 'recording' ? '● Gravando' : undefined}
-            onClick={() => setOpened(v => !v)}
+            onClick={() => { setReturnFocus(true); setOpened(v => !v); }}
           >
             {clips.status === 'recording' || recordings.length > 0 ? (
               <span className={classes.recDot} aria-hidden="true" />
@@ -252,10 +258,21 @@ export function ClipControls({
                   Prévia somente neste dispositivo. Nada é enviado ao servidor. Formato:{' '}
                   {clips.file.extension.toUpperCase()}.
                 </p>
+                {clips.source?.own && <p className={classes.hint} id="clip-send-hint">
+                  {clips.file.blob.size > FILE_LIMITS.maxBytes
+                    ? 'Este clipe excede 20 MiB para envio no Chat. Você ainda pode salvar ou descartar.'
+                    : attachmentPrepared ? 'Já há um anexo preparado no Chat. Remova-o para preparar este clipe.'
+                    : 'Envio privado de até 20 MiB. Selecione os destinatários e confirme no Chat.'}
+                </p>}
                 <div className={classes.previewActions}>
                   <button type="button" className={classes.actionBtn} onClick={clips.save}>
                     Salvar clipe
                   </button>
+                  {clips.source?.own && <button type="button" className={classes.actionBtn} aria-describedby="clip-send-hint"
+                    disabled={!connected || attachmentBusy || attachmentPrepared || clips.file.blob.size > FILE_LIMITS.maxBytes}
+                    onClick={() => { if (onSendClip()) { setReturnFocus(false); setOpened(false); } }}>
+                    Enviar no Chat
+                  </button>}
                   <button
                     type="button"
                     className={`${classes.actionBtn} ${classes.actionSecondary}`}

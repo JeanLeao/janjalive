@@ -2819,6 +2819,7 @@ test('F16 viewer consent, late join, revocation, pause and mobile keyboard contr
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Iniciar gravação', exact: true })).toBeDisabled();
     await viewer.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
@@ -2831,6 +2832,7 @@ test('F16 viewer consent, late join, revocation, pause and mobile keyboard contr
     await host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(host.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).focus();
     await viewer.keyboard.press('Escape');
     await expect(viewer.getByRole('button', { name: /^Clipes/ })).toBeFocused();
@@ -2929,6 +2931,7 @@ for (const width of [1280, 390, 320]) test(`F16 recording source A stays identif
     await a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' }).click();
     await expect(a.getByRole('checkbox', { name: 'Permitir que outros gravem minha transmissão' })).not.toBeChecked();
     await expect(viewer.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Enviar no Chat', exact: true })).toHaveCount(0);
     await expect(viewer.getByText('Fonte do clipe: Fonte A', { exact: true })).toHaveCount(1);
     const downloadPromise = viewer.waitForEvent('download');
     await viewer.getByRole('button', { name: 'Salvar clipe', exact: true }).click();
@@ -3023,4 +3026,109 @@ for (const mobile of [false, true]) test(`F16-C transient feedback and stable an
     if (mobile) expect(box!.height).toBeGreaterThanOrEqual(44);
     await page.screenshot({ path: test.info().outputPath(`f16-c-${mobile}-discarded.png`) });
   } finally { await context.close(); }
+});
+
+for (const width of [1280, 390, 320]) test(`F16 → F15 own clip, explicit consent, discard and byte integrity ${width}px`, async ({ browser }) => {
+  const sender = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500 });
+  const receiver = await browser.newContext();
+  try {
+    const a = await sender.newPage(), b = await receiver.newPage();
+    await syntheticCapture(a);
+    await gotoRoom(a, `/room/clip-chat-${width}`);
+    await gotoRoom(b, `/room/clip-chat-${width}`);
+    await startLive(a);
+    await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
+    if (width === 390) await a.getByRole('button', { name: 'Modo Cinema', exact: true }).click();
+    if (width === 320) await a.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await a.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(a.getByText(/Gravação ativa: [1-9]\d* de 60 segundos\./)).toBeVisible();
+    await a.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+    const preview = a.getByLabel('Prévia local do clipe');
+    await expect(preview).toBeVisible();
+    const original = await preview.evaluate(async v => Array.from(new Uint8Array(await (await fetch((v as HTMLVideoElement).src)).arrayBuffer())));
+    const forward = a.getByRole('button', { name: 'Enviar no Chat', exact: true });
+    await forward.scrollIntoViewIfNeeded();
+    await a.screenshot({ path: test.info().outputPath(`clip-preview-${width}.png`) });
+    expect(await forward.evaluate(n => n.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    if (width < 500) await forward.tap(); else { await forward.focus(); await a.keyboard.press('Enter'); }
+    await expect(preview).toHaveCount(0);
+    await expect(a.getByLabel('Preparar arquivo')).toContainText(/screen-room-.*\.webm/);
+    await expect(a.getByRole('button', { name: /Solicitar envio/ })).toBeDisabled();
+    await expect(a.getByRole('button', { name: 'Remover arquivo', exact: true })).toBeFocused();
+    await expect(b.locator('[data-file-card]')).toHaveCount(0);
+    await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await expect(forward).toBeDisabled();
+    await expect(a.getByText(/Já há um anexo preparado/)).toBeVisible();
+    // Discard before confirmation invalidates the prepared clip.
+    await a.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await a.keyboard.press('Escape');
+    await a.getByRole('button', { name: /Abrir chat/ }).click();
+    await expect(a.getByLabel('Preparar arquivo')).toHaveCount(0);
+    await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
+    // A second native MediaRecorder clip goes through the same attachment form.
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await a.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+    await expect(a.getByText(/Gravação ativa: [1-9]\d* de 60 segundos\./)).toBeVisible();
+    await a.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+    await expect(preview).toBeVisible();
+    const bytes = await preview.evaluate(async v => Array.from(new Uint8Array(await (await fetch((v as HTMLVideoElement).src)).arrayBuffer())));
+    expect(original.length).toBeGreaterThan(100);
+    await forward.click();
+    await a.getByRole('checkbox').first().check();
+    await a.screenshot({ path: test.info().outputPath(`clip-attachment-${width}.png`) });
+    expect(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await a.getByRole('button', { name: /Solicitar envio/ }).click();
+    await expect(a.locator('[data-file-card]')).toHaveCount(1);
+    await a.getByRole('button', { name: 'Fechar chat', exact: true }).click();
+    await a.getByRole('button', { name: /^Clipes/ }).click();
+    await a.getByRole('button', { name: 'Descartar clipe', exact: true }).click();
+    await b.getByRole('button', { name: /Abrir chat/ }).click();
+    await b.getByRole('button', { name: 'Aceitar', exact: true }).click();
+    await expect(b.getByRole('button', { name: 'Baixar arquivo', exact: true })).toBeVisible({ timeout: 30000 });
+    const downloading = b.waitForEvent('download');
+    await b.getByRole('button', { name: 'Baixar arquivo', exact: true }).click();
+    const download = await downloading;
+    expect(fs.readFileSync((await download.path())!)).toEqual(Buffer.from(bytes));
+    expect(await a.evaluate(() => (window as any).testCapture.getVideoTracks()[0].readyState)).toBe('live');
+  } finally { await sender.close(); await receiver.close(); }
+});
+
+for (const bytes of [20 * 1048576, 20 * 1048576 + 1]) test(`F16 → F15 preview size limit ${bytes}`, async ({ page }) => {
+  await syntheticCapture(page);
+  // Synthetic encoder output isolates the boundary without recording 20 MiB of video.
+  await page.addInitScript(bytes => {
+    class Recorder {
+      static isTypeSupported() { return true; }
+      mimeType = 'video/webm'; state = 'inactive';
+      onstart?: () => void; onstop?: () => void; ondataavailable?: (e: { data: Blob }) => void;
+      start() { this.state = 'recording'; queueMicrotask(() => this.onstart?.()); }
+      stop() {
+        this.state = 'inactive';
+        queueMicrotask(() => {
+          this.ondataavailable?.({ data: new Blob([new Uint8Array(bytes)], { type: this.mimeType }) });
+          this.onstop?.();
+        });
+      }
+    }
+    window.MediaRecorder = Recorder as unknown as typeof MediaRecorder;
+  }, bytes);
+  await gotoRoom(page, `/room/clip-boundary-${bytes}`);
+  await startLive(page);
+  await page.getByRole('button', { name: /^Clipes/ }).click();
+  await page.getByRole('button', { name: 'Iniciar gravação', exact: true }).click();
+  await expect(page.getByRole('button', { name: /● Gravando/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Parar gravação', exact: true }).click();
+  const forward = page.getByRole('button', { name: 'Enviar no Chat', exact: true });
+  await expect(page.getByRole('button', { name: 'Salvar clipe', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Descartar clipe', exact: true })).toBeEnabled();
+  if (bytes > 20 * 1048576) {
+    await expect(forward).toBeDisabled();
+    await expect(page.getByText(/Este clipe excede 20 MiB/)).toBeVisible();
+  } else {
+    await forward.click();
+    await expect(page.getByLabel('Preparar arquivo')).toContainText('20.00 MiB');
+    await expect(page.getByRole('button', { name: /Solicitar envio/ })).toBeDisabled();
+  }
 });
