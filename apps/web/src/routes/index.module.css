@@ -76,7 +76,7 @@
 .privacyNote { display: flex; gap: 12px; align-items: flex-start; }
 .privacyNote svg { flex-shrink: 0; color: var(--accent); margin-top: 2px; }
 .footer { border-top: 1px solid #21262d; padding-block: 16px; color: var(--muted); }
-.footerInner { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.footerInner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; }
 .footer a { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: #afb8c1; font-size: 13px; text-underline-offset: 4px; transition: color 150ms ease; }
 .footer a:hover { color: #fff; }
 .modal { scrollbar-color: #484f58 #161b22; }
@@ -119,3 +119,5 @@
   .createArea { padding: 18px; }
   .createArea label { font-size: 13px; }
 }
+
+.legalLinks { display: flex; flex-wrap: wrap; gap: 8px 24px; }
