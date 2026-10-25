@@ -23,6 +23,9 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
+  collapsible?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   onSwitchCapture?: () => void;
   switchPending?: boolean;
   switchRestoring?: boolean;
@@ -46,6 +49,9 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  collapsible = false,
+  expanded = true,
+  onExpandedChange,
   onSwitchCapture,
   switchPending,
   switchRestoring,
@@ -67,6 +73,7 @@ export function FloatingControlDock({
   canShareScreen,
   onOpenQrCode,
 }: FloatingControlDockProps) {
+  const actionsId = React.useId();
   const [copied, setCopied] = useState(false);
   const settingsBtnRef = React.useRef<HTMLButtonElement>(null);
 
@@ -93,6 +100,10 @@ export function FloatingControlDock({
       }}
     >
       <style>{`
+        .floating-dock-wrapper:has(.dock-toggle) { display: flex; align-items: center; gap: 4px; }
+        .floating-dock-wrapper:has(.dock-toggle[aria-expanded="false"]) { bottom: env(safe-area-inset-bottom, 0px) !important; }
+        .dock-toggle { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; color: #e6edf3; background: #161b22; border: 1px solid #484f58; border-radius: 50%; }
+
         .floating-dock-btn {
           width: 42px;
           height: 42px;
@@ -129,9 +140,11 @@ export function FloatingControlDock({
         }
       `}</style>
       <Box
+        id={actionsId}
+        hidden={!expanded}
         className="floating-dock-bar"
         style={{
-          display: 'flex',
+          display: expanded ? 'flex' : 'none',
           alignItems: 'center',
           gap: 8,
           backgroundColor: '#161b22',
@@ -329,6 +342,14 @@ export function FloatingControlDock({
           </UnstyledButton>
         </Tooltip>
       </Box>
+      {collapsible && <Tooltip label={expanded ? 'Ocultar controles da sala' : 'Mostrar controles da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        <UnstyledButton className="dock-toggle" style={{ marginInline: 'auto' }}
+          aria-label={expanded ? 'Ocultar controles da sala' : 'Mostrar controles da sala'}
+          aria-expanded={expanded} aria-controls={actionsId}
+          onClick={() => onExpandedChange?.(!expanded)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={expanded ? 'm6 9 6 6 6-6' : 'm6 15 6-6 6 6'} /></svg>
+        </UnstyledButton>
+      </Tooltip>}
     </Box>
   );
 }

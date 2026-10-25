@@ -71,6 +71,7 @@ test.describe('F10 — Convites por QR Code', () => {
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
     // Open dock menu "Configurações e convite"
+    await page.getByRole('button', { name: 'Mostrar controles da sala', exact: true }).click();
     const dockSettingsBtn = page.getByRole('button', { name: 'Configurações e convite' });
     await expect(dockSettingsBtn).toBeVisible();
     await dockSettingsBtn.click();
@@ -175,6 +176,7 @@ test.describe('F10 — Convites por QR Code', () => {
     await expect(page.locator('.room-header-root')).toBeHidden();
 
     // Floating dock is still available: open QR modal
+    await page.getByRole('button', { name: 'Mostrar controles da sala', exact: true }).click();
     const dockSettingsBtn = page.getByRole('button', { name: 'Configurações e convite' });
     await expect(dockSettingsBtn).toBeVisible();
     await dockSettingsBtn.click();
@@ -197,6 +199,7 @@ test.describe('F10 — Convites por QR Code', () => {
     await expect(page.locator('.stage-main-container')).toBeVisible();
 
     // Open modal from dock
+    await page.getByRole('button', { name: 'Mostrar controles da sala', exact: true }).click();
     const dockSettingsBtn = page.getByRole('button', { name: 'Configurações e convite' });
     await dockSettingsBtn.click();
     await page.getByRole('menuitem', { name: 'Mostrar QR Code' }).click();

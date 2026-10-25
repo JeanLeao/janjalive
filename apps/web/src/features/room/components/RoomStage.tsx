@@ -1,9 +1,10 @@
+import { StageViewControls, CinemaControl, FullscreenControl } from './StageViewControls';
 import { WatchPartyPanel, StageContentSelector } from './WatchParty';
-import watchStyles from './WatchParty.module.css';
+import { createPortal } from 'react-dom';
 import type { WatchParty } from '../hooks/useWatchParty';
 import { COLLABORATION_LIMITS } from '@screen-room/protocol';
 import { AnnotationOverlay, type AnnotationChannel, type AnnotationTool } from './AnnotationOverlay';
-import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useId } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useRoomShortcuts } from '../hooks/useRoomShortcuts';
 import {
   Box,
@@ -33,14 +34,16 @@ import {
   IconCheck,
   IconPlus,
   IconMinus,
-  IconMaximize,
-  IconMinimize,
   IconSignal,
   IconLink,
   IconQrCode,
 } from './Icons';
 
 export interface RoomStageProps {
+  watchMode: boolean;
+  onWatchModeChange: (value: boolean) => void;
+  /** Contêiner do header para as abas do palco. */
+  stageNavSlot?: HTMLElement | null;
   watch?: WatchParty;
   clipControls?: React.ReactNode;
   onVideoPresented?: (peerId: string, stream: MediaStream) => void;
@@ -80,6 +83,9 @@ interface StreamItem {
 }
 
 export function RoomStage({
+  watchMode,
+  onWatchModeChange: setWatchMode,
+  stageNavSlot,
   watch,
   clipControls: originalClipControls,
   onVideoPresented,
@@ -107,14 +113,11 @@ export function RoomStage({
   shortcutsEnabled = false,
   onOpenQrCode,
 }: RoomStageProps) {
-  const [watchMode, setWatchMode] = useState(false);
   const clipControls = originalClipControls;
-  useEffect(() => {
-    if (watch?.createdSessionId) setWatchMode(true);
-  }, [watch?.createdSessionId]);
   const [showStreams, setShowStreams] = useState(false);
   const [comparison, setComparison] = useState(false);
   const [primaryControlsExpanded, setPrimaryControlsExpanded] = useState(true);
+  const [watchControlsExpanded, setWatchControlsExpanded] = useState(true);
   const [secondaryControlsExpanded, setSecondaryControlsExpanded] = useState(true);
   const [secondaryId, setSecondaryId] = useState<string | null>(null);
   const [audioPreferences, setAudioPreferences] = useState<Record<string, { volume: number; muted: boolean }>>({});
@@ -130,7 +133,7 @@ export function RoomStage({
     if (previousWatchMode.current === watchMode) return;
     previousWatchMode.current = watchMode;
     const frame = requestAnimationFrame(() =>
-      stageContainerRef.current?.querySelector<HTMLElement>(
+      document.querySelector<HTMLElement>(
         watchMode
           ? '[data-control-id="watch-back"]'
           : '[data-control-id="watch-party"], [data-control-id="empty-watch-entry"]'
@@ -147,7 +150,8 @@ export function RoomStage({
       if (wasInFullscreenRef.current && !isFs) {
         requestAnimationFrame(() => {
           if (stageContainerRef.current && (!document.activeElement || document.activeElement === document.body)) {
-            const fsBtn = stageContainerRef.current.querySelector<HTMLElement>('[data-control-id="fullscreen-toggle"]');
+            const fsBtn = stageContainerRef.current.querySelector<HTMLElement>('[data-control-id="fullscreen-toggle"]')
+              ?? stageContainerRef.current.querySelector<HTMLElement>('[data-control-id="tools-toggle"]');
             if (fsBtn) {
               fsBtn.focus();
             } else {
@@ -413,24 +417,38 @@ export function RoomStage({
   });
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);
+  const stageNav = stageNavSlot && watch && (watchMode || streamItems.length > 0 || watch.state)
+    ? createPortal(
+        <StageContentSelector
+          watchMode={watchMode}
+          hasSession={!!watch.state}
+          streamCount={streamItems.length}
+          onSelectMode={(mode) => setWatchMode(mode === 'watch')}
+        />,
+        stageNavSlot
+      )
+    : null;
   const showAccess = isCinema || isFullscreen;
 
   if (watchMode && watch) {
     return (
-      <WatchPartyPanel
-        watch={watch}
-        participants={participants}
-        streamCount={streamItems.length}
-        onSelectMode={(mode) => setWatchMode(mode === 'watch')}
-        isCinema={isCinema}
-        onToggleCinema={onToggleCinema}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        showAccess={showAccess}
-        interactionAccess={interactionAccess}
-        interactions={interactions}
-        stageContainerRef={stageContainerRef}
-      />
+      <>
+        {stageNav}
+        <WatchPartyPanel
+          controlsExpanded={watchControlsExpanded}
+          onControlsExpandedChange={setWatchControlsExpanded}
+          watch={watch}
+          participants={participants}
+          isCinema={isCinema}
+          onToggleCinema={onToggleCinema}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          showAccess={showAccess}
+          interactionAccess={interactionAccess}
+          interactions={interactions}
+          stageContainerRef={stageContainerRef}
+        />
+      </>
     );
   }
 
@@ -478,17 +496,8 @@ export function RoomStage({
           }
         `}</style>
         {interactions}
-        {watch && (watch.state || streamItems.length > 0) && (
-          <div className={watchStyles.streamsSelectorHost}>
-            <StageContentSelector
-              watchMode={false}
-              hasSession={!!watch.state}
-              streamCount={streamItems.length}
-              onSelectMode={(mode) => setWatchMode(mode === 'watch')}
-            />
-          </div>
-        )}
-        <Box className={watch?.state ? watchStyles.streamsTools : undefined} style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
+        {stageNav}
+        <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
         {isCinema && <Button onClick={onToggleCinema} mb="md">Sair do Modo Cinema</Button>}
         <Box
           style={{
@@ -753,78 +762,10 @@ export function RoomStage({
           pointer-events: none;
         }
         .stage-main-container :focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-        .stage-view-controls {
-          position: absolute;
-          top: 100px;
-          bottom: max(100px, env(safe-area-inset-bottom, 0px));
-          right: max(8px, env(safe-area-inset-right, 0px));
-          z-index: 20;
-          width: var(--stage-rail-width, 48px);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          pointer-events: none;
-        }
-        @media (min-width: 960px) {
-          /* Keep the rail available beside the existing non-modal interactions panel. */
-          .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-view-controls,
-          .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label="Transmissão secundária"] .stage-view-controls {
-            right: 392px;
-          }
-        }
-        .stage-view-controls :focus-visible { outline-offset: -2px; }
-        .stage-controls-toggle { flex-shrink: 0; }
-        .stage-controls-toggle, .stage-controls-scroll {
-          pointer-events: auto;
-          background: rgba(13, 17, 23, 0.94);
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 12px;
-          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-        }
-        .stage-controls-scroll {
-          min-height: 0;
-          overflow-y: auto;
-          overflow-x: hidden;
-          overscroll-behavior: contain;
-          scrollbar-width: thin;
-          scrollbar-color: #484f58 #0d1117;
-          margin-top: 4px;
-          padding: 1px;
-          width: var(--stage-rail-width, 48px);
-          flex-shrink: 1;
-        }
-        .stage-display-controls, .stage-tools-group, .zoom-controls {
-          display: flex !important;
-          flex-direction: column;
-          align-items: center;
-          gap: 2px;
-        }
-        .stage-tools-group + .stage-display-controls {
-          border-top: 1px solid rgba(255, 255, 255, 0.14);
-          padding-top: 6px;
-          margin-top: 6px;
-        }
-        .stage-view-controls .zoom-controls {
-          border-radius: 10px !important;
-          margin-block: 4px;
-        }
-        .stage-view-controls .stage-streams-btn {
-          width: var(--stage-control-size);
-          padding: 0 !important;
-          font-size: 0 !important;
-        }
         .stage-annotations-menu { max-width: calc(100vw - 24px); }
         .stage-annotations-menu [role="menuitem"], .stage-annotations-menu [role="menuitemcheckbox"] { min-height: 44px; }
-        .stage-view-controls button {
-          min-width: var(--stage-control-size);
-          min-height: var(--stage-control-size);
-          height: var(--stage-control-size);
-          border-radius: 999px;
-          padding: 0;
-        }
-        .stage-view-controls .stage-controls-toggle { min-width: var(--stage-control-size) !important; width: var(--stage-control-size) !important; }
         .zoom-reset-btn {
-          min-width: 38px !important;
+          min-width: 44px !important;
           padding: 0 4px !important;
           font-size: 11px !important;
           font-weight: 600 !important;
@@ -842,7 +783,7 @@ export function RoomStage({
           color: #93c5fd !important;
         }
         @media (max-width: 768px), (pointer: coarse) {
-          .stage-main-container { --stage-control-size: 44px; --stage-rail-width: 56px; }
+          .stage-main-container { --stage-control-size: 44px; }
           .comparison-selector-pill {
             padding: 2px 6px 2px 8px;
           }
@@ -857,7 +798,7 @@ export function RoomStage({
           }
           .stage-comparing {
             overflow-y: auto !important;
-            margin-bottom: 100px;
+            margin-bottom: var(--room-dock-reserve, 100px);
           }
           .stage-comparing .comparison-panel {
             flex: 1 0 420px;
@@ -904,7 +845,6 @@ export function RoomStage({
           .stage-top-right { top: 52px !important; }
           .stage-top-right-access { top: 52px !important; }
           .stage-streamer-badge { top: 52px !important; max-width: calc(100% - 148px); }
-          .stage-main-container:not(.stage-comparing) .stage-view-controls { top: 108px; }
         }
         @media (max-width: 440px) {
           .comparison-header {
@@ -929,16 +869,7 @@ export function RoomStage({
           }
         }
       `}</style>
-      {watch && (
-        <div className={watchStyles.streamsSelectorHost}>
-          <StageContentSelector
-            watchMode={false}
-            hasSession={!!watch.state}
-            streamCount={streamItems.length}
-            onSelectMode={(mode) => setWatchMode(mode === 'watch')}
-          />
-        </div>
-      )}
+      {stageNav}
       <Box className="comparison-panel" role={comparing ? 'region' : undefined} aria-label={comparing ? 'Transmissão principal' : undefined}>
       <Box className={comparing ? 'comparison-header' : (showAccess ? 'stage-top-right stage-top-right-access' : 'stage-top-right')}>
         {comparing && (
@@ -1318,7 +1249,6 @@ function SpotlightVideoPlayer({
   const controlsRef = useRef<HTMLDivElement>(null);
   const audioMuteRef = useRef<HTMLButtonElement>(null);
 
-  const toolsId = useId();
 
   const statusText = connectionState === 'failed'
     ? 'Falha na conexão'
@@ -1330,19 +1260,9 @@ function SpotlightVideoPlayer({
 
   return (
     <>
-    <Box ref={controlsRef} className="stage-view-controls" role="group" aria-label="Visualização da transmissão">
-      <Tooltip label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} position="left" events={{ hover: true, focus: true, touch: false }} withArrow>
-        <Button variant="subtle" color="gray" className="stage-controls-toggle"
-          data-control-id="tools-toggle"
-          aria-label={controlsExpanded ? 'Recolher ferramentas' : 'Expandir ferramentas'} aria-expanded={controlsExpanded}
-          aria-controls={toolsId}
-          onClick={() => { setTool('navigate'); onControlsExpandedChange(!controlsExpanded); }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d={controlsExpanded ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'} />
-          </svg>
-        </Button>
-      </Tooltip>
-      <Box id={toolsId} className="stage-controls-scroll" hidden={!controlsExpanded}>{controlsExpanded && <>
+    <StageViewControls containerRef={controlsRef} expanded={controlsExpanded}
+      onExpandedChange={value => { setTool('navigate'); onControlsExpandedChange(value); }}
+      label="Visualização da transmissão">
       {!secondary && isLocal && annotations && annotationStreamId && <Box className="stage-tools-group" role="group" aria-label="Anotações temporárias" style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
         {(['navigate', 'laser', 'draw'] as const).map((mode) => <Tooltip position="left" key={mode} label={mode === 'navigate' ? 'Navegar: zoom e arraste' : mode === 'laser' ? 'Ponteiro laser · desaparece ao parar' : `Desenhar · traços duram ${COLLABORATION_LIMITS.annotationTtlMs / 1000} segundos`} events={{ hover: true, focus: true, touch: false }} withArrow>
           <Button variant={effectiveTool === mode ? 'filled' : 'subtle'} color={effectiveTool === mode ? 'blue' : 'gray'}
@@ -1484,16 +1404,7 @@ function SpotlightVideoPlayer({
         </Popover.Dropdown>
       </Popover>}
       {comparisonControl}
-      {!secondary && onToggleCinema && (
-        <Tooltip position="left" label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'} events={{ hover: true, focus: true, touch: false }} withArrow>
-          <Button
-            variant={isCinema ? 'filled' : 'subtle'} color={isCinema ? 'blue' : 'gray'}
-            data-control-id="cinema-toggle"
-            aria-pressed={isCinema} aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
-            onClick={onToggleCinema}
-          ><IconCinema size={15} aria-hidden /></Button>
-        </Tooltip>
-      )}
+      {!secondary && onToggleCinema && <CinemaControl active={isCinema} onClick={onToggleCinema} />}
       {isCinema && streamCount > 0 && (
         <Button aria-label="Alternar outras transmissões" title="Outras transmissões" data-control-id="cinema-streams" className="stage-streams-btn" variant="subtle" color="gray" aria-expanded={showStreams} onClick={onToggleStreams} style={{ fontSize: 12, padding: '0 8px' }}>
           <IconScreen size={15} aria-hidden />
@@ -1609,16 +1520,9 @@ function SpotlightVideoPlayer({
           style={{ minWidth: 'var(--stage-control-size)', height: 'var(--stage-control-size)', padding: 0 }}
         ><IconPlus size={14} aria-hidden /></Button>
       </Box>
-      {!secondary && <Tooltip position="left" label={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'} events={{ hover: true, focus: true, touch: false }} withArrow>
-        <Button
-          variant="subtle" color="gray" onClick={onToggleFullscreen}
-          data-control-id="fullscreen-toggle"
-          aria-pressed={isFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-        >{isFullscreen ? <IconMinimize size={15} aria-hidden /> : <IconMaximize size={15} aria-hidden />}</Button>
-      </Tooltip>}
+      {!secondary && <FullscreenControl active={isFullscreen} onClick={onToggleFullscreen} />}
       </Box>
-      </>}</Box>
-    </Box>
+    </StageViewControls>
     {pip.error && <Text role="alert" size="sm" style={{ position: 'absolute', top: overlayTop + 44, right: 12, left: 12, zIndex: 20, background: '#161b22', padding: 8, borderRadius: 8 }}>{pip.error}</Text>}
     {(statusText || connectionState === 'failed' || (audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked) || playback === 'Falha na reprodução') && (
       <Box style={{ position: 'absolute', top: overlayTop, left: 14, zIndex: 12, display: 'flex', alignItems: 'center', gap: 8 }}>

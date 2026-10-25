@@ -36,6 +36,8 @@ export interface RoomHeaderProps {
   /** Acesso social (chat e reações), posicionado junto aos participantes. */
   interactions?: React.ReactNode;
   onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
+  /** Recebe o contêiner das abas do palco (Transmissões / Vídeo compartilhado). */
+  stageNavRef?: (element: HTMLElement | null) => void;
 }
 
 export function RoomHeader({
@@ -50,6 +52,7 @@ export function RoomHeader({
   onLeave,
   interactions,
   onOpenQrCode,
+  stageNavRef,
 }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false);
   const moreMenuBtnRef = React.useRef<HTMLButtonElement>(null);
@@ -116,6 +119,22 @@ export function RoomHeader({
           .room-header-brand-title {
             display: block;
           }
+        }
+        .room-header-root:has(.room-header-stage-nav:not(:empty)) {
+          display: grid !important;
+          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+          column-gap: 12px;
+        }
+        .room-header-stage-nav { justify-self: center; flex-shrink: 0; }
+        .room-header-actions { justify-self: end; }
+        .room-header-stage-nav:empty { display: none; }
+        @media (max-width: 1200px) {
+          /* Sem espaço ao lado: as abas ocupam uma segunda linha do header. */
+          .room-header-root:has(.room-header-stage-nav:not(:empty)) { display: flex !important; flex-wrap: wrap; height: auto !important; padding-block: 6px !important; row-gap: 6px; }
+          .room-header-root:has(.room-header-stage-nav:not(:empty)) .room-header-context { flex-basis: auto; }
+          .room-header-stage-nav { order: 3; flex-basis: 100%; margin: 0; }
+          .room-header-stage-nav > nav { display: flex; width: 100%; }
+          .room-header-stage-nav > nav > button { flex: 1; }
         }
         @media (max-width: 600px) {
           .room-header-root {
@@ -232,6 +251,8 @@ export function RoomHeader({
           </Tooltip>
         )}
       </Group>
+
+      <div ref={stageNavRef} className="room-header-stage-nav" />
 
       {/* Right: Participant Count, Settings, Status */}
       <Group gap="xs" align="center" wrap="nowrap" className="room-header-actions" style={{ flexShrink: 0 }}>
