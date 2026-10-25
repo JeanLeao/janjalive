@@ -12,3 +12,8 @@ test-results/
 
 # Local logs
 *.log
+
+# Local agent tools, prototypes and design evidence
+/.agent/
+/.impeccable/
+/apps/web/.impeccable/

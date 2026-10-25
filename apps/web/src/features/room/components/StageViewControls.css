@@ -1,0 +1,74 @@
+.stage-view-controls {
+  --stage-control-size: 44px;
+  --stage-rail-width: 48px;
+  position: absolute;
+  top: 100px;
+  bottom: max(100px, env(safe-area-inset-bottom, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  z-index: 20;
+  width: var(--stage-rail-width, 48px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+@media (min-width: 960px) {
+  /* Keep the rail available beside the existing non-modal interactions panel. */
+  .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-view-controls,
+  .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label="Transmissão secundária"] .stage-view-controls {
+    right: 392px;
+  }
+}
+.stage-view-controls :focus-visible { outline-offset: -2px; }
+.stage-controls-toggle { flex-shrink: 0; }
+.stage-controls-toggle, .stage-controls-scroll {
+  pointer-events: auto;
+  background: rgba(13, 17, 23, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.stage-controls-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #484f58 #0d1117;
+  margin-top: 4px;
+  padding: 1px;
+  width: var(--stage-rail-width, 48px);
+  flex-shrink: 1;
+}
+.stage-display-controls, .stage-tools-group, .zoom-controls {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.stage-tools-group + .stage-display-controls {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+.stage-view-controls .zoom-controls {
+  border-radius: 10px !important;
+  margin-block: 4px;
+}
+.stage-view-controls .stage-streams-btn {
+  width: var(--stage-control-size);
+  padding: 0 !important;
+  font-size: 0 !important;
+}
+
+.stage-view-controls button {
+  min-width: var(--stage-control-size);
+  min-height: var(--stage-control-size);
+  height: var(--stage-control-size);
+  border-radius: 999px;
+  padding: 0;
+}
+.stage-view-controls .stage-controls-toggle { min-width: var(--stage-control-size) !important; width: var(--stage-control-size) !important; }
+
+@media (max-width: 640px) { .stage-main-container:not(.stage-comparing) .stage-view-controls { top: 108px; } }
+@media (max-width: 768px), (pointer: coarse) { .stage-view-controls { --stage-rail-width: 56px; } }

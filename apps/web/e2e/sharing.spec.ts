@@ -144,6 +144,8 @@ async function mockPausePiP(page: Page) {
 }
 
 async function startLive(page: Page) {
+  const showDock = page.getByRole('button', { name: 'Mostrar controles da sala', exact: true });
+  if (await showDock.isVisible()) await showDock.click();
   await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
   await page.getByRole('button', { name: 'Entrar ao vivo', exact: true }).click();
 }
@@ -255,6 +257,7 @@ test('participants enter before capture; ten start/stop cycles with real WebRTC'
       track.dispatchEvent(new Event('ended')); track.stop();
     });
   }
+  await host.getByRole('button', { name: 'Mostrar controles da sala', exact: true }).click();
   await expect(host.getByRole('button', { name: 'Compartilhar tela', exact: true }).last()).toBeVisible();
   await expect(viewer.locator('video')).toHaveCount(1, { timeout: 1000 });
   await a.close(); await b.close();
@@ -288,6 +291,8 @@ test('spectator and presenter recover after signaling interruption', async ({ br
     await expect(host.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     await startLive(host);
     await frames(viewer);
+    await expect(viewer.locator('.dock-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await viewer.locator('.dock-toggle').click();
     for (const page of [viewer, host]) {
       await page.evaluate(() => {
         const sockets = (window as any).testSockets as WebSocket[];
@@ -296,6 +301,7 @@ test('spectator and presenter recover after signaling interruption', async ({ br
       await expect(page.getByText('Desconectado', { exact: true })).toBeVisible();
       await expect(page.getByText('Conectado', { exact: true })).toBeVisible({ timeout: 10000 });
       await frames(viewer);
+      await expect(viewer.locator('.dock-toggle')).toHaveAttribute('aria-expanded', 'true');
     }
   } finally { await a.close(); await b.close(); }
 });
@@ -2384,6 +2390,14 @@ for (const width of [1440, 1024, 768, 600, 390, 320]) {
       const toggle = primary.locator('.stage-controls-toggle');
       const originalVideo = await page.getByTestId('zoom-viewport').first().boundingBox();
       await inspect('traditional-expanded');
+      await toggle.click();
+      await page.getByRole('button', { name: 'Assistir vídeo com a sala' }).click();
+      const watchRail = page.getByRole('group', { name: 'Visualização do vídeo compartilhado' });
+      await expect(watchRail.getByRole('button', { name: 'Recolher ferramentas' })).toBeVisible();
+      await watchRail.getByRole('button', { name: 'Recolher ferramentas' }).click();
+      await page.getByRole('button', { name: 'Voltar às transmissões' }).click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await toggle.click();
       await primary.getByRole('button', { name: 'Ampliar zoom', exact: true }).click();
       await primary.getByRole('button', { name: 'Desenhar', exact: true }).click();
       await toggle.focus(); await page.keyboard.press('Enter');
