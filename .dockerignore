@@ -9,3 +9,17 @@ pnpm-debug.log*
 .agent
 .impeccable
 screenshots
+
+# Disposable visual evidence, local measurements and historical audit reports
+docs/webcam-b/*.png
+docs/webcam-c/*.png
+docs/webcam-d/*.png
+docs/webcam-d/*-local-measurements.json
+docs/legal/browser-audit.json
+docs/legal/impeccable-findings.json
+docs/legal/design-consistency.md
+docs/legal/visual-review.md
+docs/f14-ui-rebuild/README.md
+docs/f14-ui-rebuild/*.png
+**/playwright-report/
+**/test-results/

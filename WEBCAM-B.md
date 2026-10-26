@@ -55,11 +55,11 @@ Chromium com captura sintética; não representam câmera física:
 
 | Estado | Desktop 1280×800 | Mobile 390×844 |
 | --- | --- | --- |
-| Prévia local | [Imagem](docs/webcam-b/camera-preview.png) | [Imagem](docs/webcam-b/mobile-preview.png) |
-| Câmera ao vivo | [Imagem](docs/webcam-b/camera-live.png) | [Imagem](docs/webcam-b/mobile-live.png) |
-| Troca de origem com câmera ativa | [Imagem](docs/webcam-b/camera-switch.png) | [Imagem](docs/webcam-b/mobile-switch.png) |
+| Prévia local | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/camera-preview.png) | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/mobile-preview.png) |
+| Câmera ao vivo | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/camera-live.png) | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/mobile-live.png) |
+| Troca de origem com câmera ativa | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/camera-switch.png) | [Imagem](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/mobile-switch.png) |
 
-[Dock de 320×740 com áudio de tela e interação por toque](docs/webcam-b/mobile-audio-320.png).
+[Dock de 320×740 com áudio de tela e interação por toque](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-b/mobile-audio-320.png).
 Os testes verificam teclado, foco inicial/retornado, confirmação, cancelamento,
 toque, ausência de overflow e independência do áudio da tela.
 
@@ -74,7 +74,7 @@ toque, ausência de overflow e independência do áudio da tela.
 - `apps/web/src/routes/room.$roomId.tsx`: integração dos controles.
 - `apps/web/src/routes/index.tsx`, `features/legal/documents.ts`, `media/display-media.ts` e `README.md`: textos compatíveis com a captura opcional.
 - `apps/web/test/camera-controller.test.js`, `peer-manager.test.js` e `apps/web/e2e/camera-capture.spec.ts`: regressões.
-- `WEBCAM-B.md` e `docs/webcam-b/*.png`: registro e evidências.
+- `WEBCAM-B.md` e evidências históricas vinculadas acima: registro e capturas fora da árvore atual.
 
 ## Validação
 
@@ -150,3 +150,5 @@ inclui merge, deploy, alteração do GitHub Projects ou início da próxima etap
 A política de redução e suspensão antes fora desta etapa foi implementada em
 [WEBCAM-D.md](WEBCAM-D.md). O limite inicial, a prévia e a confirmação permanecem;
 a webcam suspensa só volta por nova ativação manual.
+
+As evidências vinculadas por permalinks acima pertencem ao histórico Git; capturas e medições locais não integram a árvore atual versionada.

@@ -128,12 +128,12 @@ de limitação do encoder não foi fornecido nessa coleta Firefox; não se infer
 ausência de limitação.
 
 Dados brutos sem SDP/credenciais, da regressão Chromium e da repetição Firefox:
-[Chromium local](docs/webcam-d/chromium-local-measurements.json),
-[Firefox local](docs/webcam-d/firefox-local-measurements.json).
-Evidências de redução: [desktop](docs/webcam-d/reduced-1280.png),
-[mobile](docs/webcam-d/reduced-390.png). Aviso de suspensão com tela ativa:
-[desktop](docs/webcam-d/suspended-1280.png),
-[mobile](docs/webcam-d/suspended-390.png). Capturas inspecionadas visualmente.
+[Chromium local](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/chromium-local-measurements.json),
+[Firefox local](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/firefox-local-measurements.json).
+Evidências de redução: [desktop](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/reduced-1280.png),
+[mobile](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/reduced-390.png). Aviso de suspensão com tela ativa:
+[desktop](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/suspended-1280.png),
+[mobile](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-d/suspended-390.png). Capturas inspecionadas visualmente.
 
 ## Limitações
 
@@ -225,3 +225,5 @@ Logs desta revisão: `/tmp/webcam-d-fix-prepare.log`,
 `/tmp/webcam-d-fix-tests.log`, `/tmp/webcam-d-fix-build.log`,
 `/tmp/webcam-d-fix-e2e.log`, `/tmp/webcam-d-fix-e2e-serial.log` e
 `/tmp/webcam-d-fix-e2e-final.log`.
+
+As evidências vinculadas por permalinks acima pertencem ao histórico Git; capturas e medições locais não integram a árvore atual versionada.

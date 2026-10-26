@@ -53,21 +53,21 @@ Capturas sintéticas inspecionadas em desktop 1280×844 e mobile 390×844/320×8
 
 | Estado | Desktop | Mobile |
 | --- | --- | --- |
-| Sobreposta inferior esquerda | [1280](docs/webcam-c/overlay-bottom-left-1280.png) | [390](docs/webcam-c/overlay-bottom-left-390.png), [320](docs/webcam-c/overlay-bottom-left-320.png) |
-| Sobreposta superior direita | [1280](docs/webcam-c/overlay-top-right-1280.png) | [390](docs/webcam-c/overlay-top-right-390.png), [320](docs/webcam-c/overlay-top-right-320.png) |
-| Outros cantos | [Superior esquerdo](docs/webcam-c/overlay-top-left-1280.png), [inferior direito](docs/webcam-c/overlay-bottom-right-1280.png) | [Superior esquerdo 320](docs/webcam-c/overlay-top-left-320.png), [inferior direito 320](docs/webcam-c/overlay-bottom-right-320.png) |
-| Separada | [1280](docs/webcam-c/separate-1280.png) | [390](docs/webcam-c/separate-390.png), [320](docs/webcam-c/separate-320.png) |
-| Oculta | [1280](docs/webcam-c/hidden-1280.png) | [390](docs/webcam-c/hidden-390.png), [320](docs/webcam-c/hidden-320.png) |
-| Comparar: duas webcams | [Sobrepostas](docs/webcam-c/compare-overlay-1280.png), [separadas](docs/webcam-c/compare-separate-1280.png) | [Sobrepostas](docs/webcam-c/compare-overlay-390.png), [separadas](docs/webcam-c/compare-separate-390.png), [segundo painel após rolar](docs/webcam-c/compare-secondary-390.png) |
-| Cinema | [1280](docs/webcam-c/cinema-1280.png) | [390](docs/webcam-c/cinema-390.png) |
-| Tela cheia | [1280](docs/webcam-c/fullscreen-1280.png) | [390](docs/webcam-c/fullscreen-390.png) |
-| Troca de origem com câmera ativa | [1280](docs/webcam-c/switch-1280.png) | [390](docs/webcam-c/switch-390.png), [320](docs/webcam-c/switch-320.png) |
-| Câmera desligada, tela ativa | [1280](docs/webcam-c/absent-1280.png) | [390](docs/webcam-c/absent-390.png), [320](docs/webcam-c/absent-320.png) |
-| Desconexão do apresentador | [1280](docs/webcam-c/disconnect-1280.png) | [390](docs/webcam-c/disconnect-390.png), [320](docs/webcam-c/disconnect-320.png) |
+| Sobreposta inferior esquerda | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-bottom-left-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-bottom-left-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-bottom-left-320.png) |
+| Sobreposta superior direita | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-top-right-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-top-right-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-top-right-320.png) |
+| Outros cantos | [Superior esquerdo](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-top-left-1280.png), [inferior direito](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-bottom-right-1280.png) | [Superior esquerdo 320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-top-left-320.png), [inferior direito 320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/overlay-bottom-right-320.png) |
+| Separada | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/separate-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/separate-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/separate-320.png) |
+| Oculta | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/hidden-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/hidden-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/hidden-320.png) |
+| Comparar: duas webcams | [Sobrepostas](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-overlay-1280.png), [separadas](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-separate-1280.png) | [Sobrepostas](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-overlay-390.png), [separadas](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-separate-390.png), [segundo painel após rolar](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-secondary-390.png) |
+| Cinema | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/cinema-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/cinema-390.png) |
+| Tela cheia | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/fullscreen-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/fullscreen-390.png) |
+| Troca de origem com câmera ativa | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/switch-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/switch-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/switch-320.png) |
+| Câmera desligada, tela ativa | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/absent-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/absent-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/absent-320.png) |
+| Desconexão do apresentador | [1280](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/disconnect-1280.png) | [390](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/disconnect-390.png), [320](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/disconnect-320.png) |
 
-[Composição local publicada](docs/webcam-c/local-published-1280.png) e
-[PNG exportado contendo somente tela](docs/webcam-c/screen-only.png).
-[Comparar com chat aberto e câmeras afastadas das ferramentas](docs/webcam-c/compare-chat-1280.png).
+[Composição local publicada](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/local-published-1280.png) e
+[PNG exportado contendo somente tela](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/screen-only.png).
+[Comparar com chat aberto e câmeras afastadas das ferramentas](https://github.com/aldomigge/webrtc-shared/blob/6089080f0966f69be4f39a484a68c2af4798c1fc/docs/webcam-c/compare-chat-1280.png).
 A rodada direcionada final repete os sete cenários C da regressão; os totais não
 devem ser somados como casos distintos. Todas as evidências foram inspecionadas.
 
@@ -116,7 +116,7 @@ Arquivos de implementação: `useRoomSession.ts`, `RoomStage.tsx`, `StageCamera.
 `StageCamera.css`, `CameraControl.tsx` e rota `room.$roomId.tsx`. Testes em
 `camera-stage.spec.ts` e helpers compartilhados extraídos de `camera-capture.spec.ts`
 para `e2e/fixtures/camera.ts`. Documentação em README, este registro e
-`docs/webcam-c/*.png`. Protocolo, signaling, PeerManager e infraestrutura intactos.
+capturas históricas vinculadas acima (fora da árvore atual). Protocolo, signaling, PeerManager e infraestrutura intactos.
 
 ## Limites
 
@@ -134,3 +134,5 @@ GitHub Projects ou início da próxima etapa.
 A adaptação independente da câmera foi implementada em [WEBCAM-D.md](WEBCAM-D.md).
 Suspensão remove a câmera do palco pelo estado anunciado existente, preservando
 as fontes exclusivas de tela em screenshots, clipes e PiP.
+
+As evidências vinculadas por permalinks acima pertencem ao histórico Git; capturas e medições locais não integram a árvore atual versionada.
