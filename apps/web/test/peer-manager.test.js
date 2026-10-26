@@ -846,3 +846,67 @@ test('explicit camera stop during screen detachment leaves no reason to offer to
     assert.equal(signals.length, 0, 'no media, remote description, remote sharing or data channel');
   } finally { manager.dispose(); }
 });
+
+test('camera senders retain independent 400 Kbps / 15 FPS limits across quality, late join and reset', async () => {
+  const manager = new PeerManager({ rtcConfig: { iceServers: [] }, localPeerId: 'host',
+    onSendSignal: () => true, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  const screen = new MockMediaStream([new MockMediaStreamTrack('video'),new MockMediaStreamTrack('audio')]);
+  await manager.attachLocalStream(screen);
+  const camera = new MockMediaStream([new MockMediaStreamTrack('video')]);
+  manager.setParticipants(['one']);
+  await manager.attachCameraStream(camera);
+  await manager.applyQuality({ profile: 'ultra', fps: 60, priority: 'motion' });
+  const check = id => {
+    const peer=manager.getPeer(id);
+    assert.equal(peer.cameraSender.getParameters().encodings[0].maxBitrate,400000);
+    assert.equal(peer.cameraSender.getParameters().encodings[0].maxFramerate,15);
+    assert.equal(peer.videoSender.getParameters().encodings[0].maxBitrate,8000000);
+    assert.equal(peer.videoSender.getParameters().encodings[0].maxFramerate,60);
+  };
+  check('one'); manager.addParticipant('two');
+  await manager.createAndSendOffer('two'); check('two');
+  manager.resetPeer('one'); await manager.createAndSendOffer('one'); check('one');
+  await manager.stopCamera();
+  assert.equal(manager.getPeer('one').videoSender.track,screen.getVideoTracks()[0]);
+  assert.equal(manager.getPeer('one').audioSender.track,screen.getAudioTracks()[0]); manager.dispose();
+});
+
+test('camera sender parameter failure stops camera without ending screen negotiation', async () => {
+  let errors=0;
+  const manager = new PeerManager({ rtcConfig: { iceServers: [] }, onCameraError: () => errors++,
+    onSendSignal: () => true, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  const screen = new MockMediaStream([new MockMediaStreamTrack('video')]);
+  await manager.attachLocalStream(screen);
+  const peer=manager.getOrCreatePeer('viewer');
+  const camera=new MockMediaStream([new MockMediaStreamTrack('video')]);
+  await manager.attachCameraStream(camera);
+  peer.cameraSender.setParameters=async()=>{throw new Error('unsupported');};
+  await manager.createAndSendOffer('viewer');
+  // Stable signaling allows another negotiation to apply the new camera limit.
+  peer.pc.signalingState='stable'; await manager.createAndSendOffer('viewer');
+  await peer.signalChain;
+  assert.equal(errors,1); assert.equal(camera.getVideoTracks()[0].readyState,'ended');
+  assert.equal(peer.videoSender.track,screen.getVideoTracks()[0]); manager.dispose();
+});
+
+test('obsolete camera parameter failure cannot stop a newer capture', async () => {
+  let errors=0, rejectLimit;
+  const manager = new PeerManager({ rtcConfig: { iceServers: [] }, onCameraError: () => errors++,
+    onSendSignal: () => true, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  const peer=manager.getOrCreatePeer('viewer');
+  const old=new MockMediaStream([new MockMediaStreamTrack('video')]);
+  await manager.attachCameraStream(old); peer.pc.signalingState='stable';
+  const original=peer.cameraSender.setParameters.bind(peer.cameraSender);
+  const pending=new Promise((_,reject)=>{rejectLimit=reject;});
+  peer.cameraSender.setParameters=()=>pending;
+  const negotiation=manager.createAndSendOffer('viewer');
+  await new Promise(resolve=>setImmediate(resolve));
+  const stopping=manager.stopCamera();
+  const fresh=new MockMediaStream([new MockMediaStreamTrack('video')]);
+  peer.cameraSender.setParameters=original;
+  const publishing=manager.attachCameraStream(fresh);
+  rejectLimit(new Error('late parameter failure'));
+  await Promise.all([negotiation,stopping,publishing]);
+  assert.equal(errors,0); assert.equal(fresh.getVideoTracks()[0].readyState,'live');
+  assert.equal(peer.cameraSender.track,fresh.getVideoTracks()[0]); manager.dispose();
+});

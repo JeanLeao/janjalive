@@ -1,3 +1,4 @@
+import { CameraControl, type CameraControlProps } from './CameraControl';
 import { HandCount } from './HandCount';
 import React, { useState } from 'react';
 import {
@@ -23,6 +24,7 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
+  cameraControl?: CameraControlProps;
   collapsible?: boolean;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -49,6 +51,7 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  cameraControl,
   collapsible = false,
   expanded = true,
   onExpandedChange,
@@ -139,6 +142,11 @@ export function FloatingControlDock({
           .floating-dock-primary .mantine-Button-section { margin: 0; }
         }
       `}</style>
+      {cameraControl?.camera.state === 'live' && <Box role="status" style={{
+        position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+        color: '#7ee787', background: '#161b22', border: '1px solid #484f58', borderRadius: 16,
+        padding: '4px 10px', fontSize: 12, whiteSpace: 'nowrap',
+      }}>● Câmera ao vivo</Box>}
       <Box
         id={actionsId}
         hidden={!expanded}
@@ -146,6 +154,8 @@ export function FloatingControlDock({
         style={{
           display: expanded ? 'flex' : 'none',
           alignItems: 'center',
+          justifyContent: 'center',
+          flexWrap: 'wrap',
           gap: 8,
           backgroundColor: '#161b22',
           border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -197,6 +207,8 @@ export function FloatingControlDock({
             </UnstyledButton>
           </Tooltip>
         )}
+
+        {isSharing && cameraControl && <CameraControl {...cameraControl} />}
 
         {/* Screen Audio Mute / Unmute Toggle (only active if sharing and track exists) */}
         {isSharing && hasAudioTrack && (

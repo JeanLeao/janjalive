@@ -47,7 +47,8 @@ export async function captureDisplayMedia(quality: QualitySelection, onCaptured?
   const profile = resolveQuality(quality);
 
   // IMPORTANT: We only request display media with audio from the screen/tab.
-  // We NEVER call getUserMedia and NEVER request microphone permissions!
+  // This screen capture never requests microphone permissions; optional video-only
+  // camera capture is owned separately by CameraController.
   const constraints: DisplayMediaStreamOptions = {
     video: {
       // Chromium fixes native source capabilities from the initial ideal as well

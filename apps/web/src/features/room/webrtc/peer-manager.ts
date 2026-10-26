@@ -37,6 +37,7 @@ export interface PeerManagerOptions {
   rtcConfig: RTCConfiguration;
   onSendSignal: (target: string, data: any) => boolean | void;
   onRemoteStreamAdd: (peerId: string, stream: MediaStream) => void;
+  onCameraError?: () => void;
   onRemoteCameraStream?: (peerId: string, stream: MediaStream | null) => void;
   onPeerState?: (peerId: string, state: RTCPeerConnectionState) => void;
   onRemoteStreamRemove: (peerId: string) => void;
@@ -369,6 +370,7 @@ export class PeerManager {
         await peer.pc.setLocalDescription(offer);
         if (this.peers.get(peerId) !== peer) return;
         await this.applyQualityToPeer(peer, true);
+        await this.applyCameraLimit(peer, true).catch(() => {});
         if (this.peers.get(peerId) !== peer) return;
         this.options.logger?.log('offer-created', { peer: peerId, negotiationId: peer.negotiationId, elapsedMs: Math.round(performance.now() - peer.createdAt) });
         const sent = this.options.onSendSignal(peerId, {
@@ -432,6 +434,7 @@ export class PeerManager {
         await peer.pc.setLocalDescription(answer);
         if (this.peers.get(from) !== peer) return;
         await this.applyQualityToPeer(peer, true);
+        await this.applyCameraLimit(peer, true).catch(() => {});
         if (this.peers.get(from) !== peer) return;
         this.options.logger?.log('answer-created', { to: from });
         this.options.onSendSignal(from, {
@@ -549,11 +552,37 @@ export class PeerManager {
             peer.cameraSender = peer.pc.addTrack(track, stream);
           }
         } else peer.cameraSender = peer.pc.addTrack(track, stream);
+        await this.applyCameraLimit(peer);
         peer.negotiationPending = true;
       });
       await peer.signalChain;
       if (version === this.cameraVersion && this.peers.get(peer.id) === peer) await this.createAndSendOffer(peer.id);
     }));
+  }
+
+  private async applyCameraLimit(peer: ManagedPeer, negotiated = false): Promise<void> {
+    const sender = peer.cameraSender;
+    if (!sender?.track) return;
+    const version = this.cameraVersion;
+    try {
+      const parameters = sender.getParameters();
+      // Some browsers expose encodings only after setLocalDescription.
+      if (!parameters.encodings?.length) {
+        if (negotiated) throw new Error('Camera encodings unavailable');
+        return;
+      }
+      for (const encoding of parameters.encodings) {
+        encoding.maxBitrate = 400_000;
+        encoding.maxFramerate = 15;
+      }
+      await sender.setParameters(parameters);
+    } catch {
+      if (version !== this.cameraVersion || this.peers.get(peer.id) !== peer) return;
+      // An unsupported camera sender must never interrupt screen negotiation.
+      void this.stopCamera().catch(() => {});
+      this.options.onCameraError?.();
+      throw new Error('Camera sender configuration failed');
+    }
   }
 
   stopCamera(): Promise<void> {
