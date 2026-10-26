@@ -467,6 +467,8 @@ function RoomPageContent() {
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
         onRetryPeer={session.retryPeer}
+        camera={session.camera}
+        remoteCameraStreams={session.remoteCameraStreams}
         localStream={session.localStream}
         isSharing={session.isSharing}
         remoteStreams={isDemo && demoStreams ? demoStreams : session.remoteStreams}

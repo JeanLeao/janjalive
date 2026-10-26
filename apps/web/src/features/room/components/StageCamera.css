@@ -1,0 +1,45 @@
+.stage-camera-composition { position: absolute; inset: 0; container-type: inline-size; pointer-events: none; }
+.stage-camera-screen { inset: 0; pointer-events: auto; }
+.stage-camera-video {
+  position: absolute;
+  width: clamp(80px, 20%, 220px);
+  max-height: calc(100% - 190px);
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #0d1117;
+  border: 1px solid #484f58;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px #0008;
+  pointer-events: none;
+}
+.stage-camera-video[hidden] { display: none; }
+.stage-camera-video[data-position^='top'] { top: 92px; }
+.stage-camera-video[data-position^='bottom'] { bottom: 100px; }
+.stage-camera-video[data-position$='left'] { left: 12px; }
+.stage-camera-video[data-position$='right'] { right: 76px; }
+.stage-camera-composition[data-camera-mode='separate'] .stage-camera-screen { right: 26%; }
+.stage-camera-composition[data-camera-mode='separate'] .stage-camera-video {
+  inset: 92px 76px auto auto;
+  width: calc(26% - 88px);
+  max-height: calc(100% - 190px);
+}
+.stage-camera-menu { background: #161b22; color: #e6edf3; border-color: #484f58; max-width: calc(100vw - 24px); }
+.stage-camera-menu label { display: block; font-size: 13px; margin-top: 12px; }
+.stage-camera-menu select { display: block; width: 100%; min-height: 44px; margin-top: 4px; background: #0d1117; color: #e6edf3; border: 1px solid #484f58; border-radius: 6px; padding: 4px; }
+.stage-camera-menu select:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+@container (max-width: 600px) {
+  .stage-camera-composition[data-camera-mode='separate'] .stage-camera-screen { right: 0; bottom: calc(22% + 88px); }
+  .stage-camera-composition[data-camera-mode='separate'] .stage-camera-video {
+    inset: auto auto 100px 12px;
+    width: min(32%, 160px);
+    max-height: calc(22% - 12px);
+  }
+}
+@media (min-width: 960px) {
+  .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-camera-composition[data-camera-mode='overlay'] .stage-camera-video,
+  .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label='Transmissão secundária'] .stage-camera-composition[data-camera-mode='overlay'] .stage-camera-video { max-width: max(0px, calc(100% - 472px)); }
+  .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-camera-composition[data-camera-mode='separate'],
+  .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label='Transmissão secundária'] .stage-camera-composition[data-camera-mode='separate'] { right: 380px; }
+  .stage-main-container:not(.stage-comparing):has(#room-chat-panel) .stage-camera-composition:not([data-camera-mode='separate']) .stage-camera-video[data-position$='right'],
+  .stage-comparing:has(#room-chat-panel) .comparison-panel[aria-label='Transmissão secundária'] .stage-camera-composition:not([data-camera-mode='separate']) .stage-camera-video[data-position$='right'] { right: 460px; }
+}

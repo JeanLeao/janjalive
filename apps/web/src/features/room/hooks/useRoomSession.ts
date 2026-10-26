@@ -111,6 +111,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [hasAudioTrack, setHasAudioTrack] = useState<boolean>(false);
   const [remoteConnectionStates, setRemoteConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({});
+  const [remoteCameraStreams, setRemoteCameraStreams] = useState<Record<string, MediaStream>>({});
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [quality, setQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
   const preferenceRef = useRef<QualitySelection>(DEFAULT_QUALITY);
@@ -278,6 +279,15 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     // Create PeerManager
     const peerManager = new PeerManager({
+      onRemoteCameraStream: (id, stream) => {
+        if (isDisposed || (stream && signalingRef.current?.getState() !== 'connected')) return;
+        setRemoteCameraStreams(previous => {
+          const next = { ...previous };
+          if (stream) next[id] = stream;
+          else delete next[id];
+          return next;
+        });
+      },
       onCameraError: () => cameraController.publicationFailed(),
       rtcConfigReady: iceConfiguration,
       refreshRtcConfig: () => fetchIceConfiguration(undefined, logger),
@@ -288,7 +298,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       },
       onDataChannel: (id, channel) => files.bind(id, channel),
       onDataDisconnect: id => files.disconnect(id),
-      onPeerState: (id, state) => { cancelPendingRecovery(); statsCollectorRef.current?.resetAdaptation(); if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state })); },
+      onPeerState: (id, state) => {
+        cancelPendingRecovery();
+        statsCollectorRef.current?.resetAdaptation();
+        if (!isDisposed) setRemoteConnectionStates((prev) => ({ ...prev, [id]: state }));
+      },
       onRemoteStreamAdd: (remotePeerId, stream) => {
         setRemoteStreams((prev) => {
           const filtered = prev.filter((item) => item.peerId !== remotePeerId);
@@ -394,7 +408,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           collaborationReadyRef.current = false;
           annotations.reset();
         }
-        if (state !== 'connected') cameraController.stop();
+        if (state !== 'connected') { cameraController.stop(); setRemoteCameraStreams({}); }
         if (state === 'disconnected') {
           peerManager.closeAll();
         }
@@ -592,6 +606,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
             stopSharing();
             statsCollector.stop();
             files.setReady(false);
+            setRemoteCameraStreams({});
             peerManager.dispose();
             collaborationReadyRef.current = false;
             annotations.reset();
@@ -670,6 +685,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       unsubscribeLogger();
       statsCollector.stop();
       files.setReady(false);
+      setRemoteCameraStreams({});
       peerManager.dispose();
       // Route/effect teardown is a voluntary departure, just like leaveRoom.
       // Document reload and involuntary socket loss do not run this cleanup.
@@ -1303,6 +1319,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     isSharing,
     isAudioMuted,
     hasAudioTrack,
+    remoteCameraStreams,
     remoteStreams,
     featuredStreamId,
     selectFeaturedStream,

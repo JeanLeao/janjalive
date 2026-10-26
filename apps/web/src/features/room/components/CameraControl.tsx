@@ -42,7 +42,7 @@ export function CameraControl({ camera, canActivate, onRequest, onPublish, onSto
       <Stack>
         {preview && <CameraPreview stream={camera.stream!} />}
         <Text size="sm" role="status">{camera.error || (camera.state === 'requesting' ? 'Solicitando permissão… Você pode cancelar mesmo com o seletor do navegador aberto.'
-          : camera.state === 'publishing' ? 'Publicando câmera…' : 'Prévia somente neste dispositivo. Ao confirmar, o vídeo será enviado aos participantes, sem microfone. A câmera ainda não aparece no palco. O envio não confirma a recepção por todos os participantes.')}</Text>
+          : camera.state === 'publishing' ? 'Publicando câmera…' : 'Prévia somente neste dispositivo. Ao confirmar, o vídeo será enviado aos participantes, sem microfone. O envio não confirma a recepção por todos os participantes.')}</Text>
         {camera.state === 'preview' && <Button h={44} onClick={onPublish}>Transmitir câmera</Button>}
         {camera.state === 'error' && <Button h={44} disabled={!canActivate} onClick={onRequest}>Tentar novamente</Button>}
         <Button data-autofocus h={44} variant="default" onClick={() => { setDetails(false); onStop(); }}>Cancelar câmera</Button>
