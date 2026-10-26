@@ -50,6 +50,7 @@ export interface ParticipantMeta {
     drawingBySender?: Map<string, SpectatorDrawingSenderBudget>;
     aggregateDrawingTimes?: number[];
   };
+  camera?: { active: boolean };
   sharing?: SharingState;
   nickname?: string;
   reconnectToken: string;
@@ -429,6 +430,7 @@ export class RoomRegistry {
     return Array.from(participants.entries()).map(([peerId, meta]) => ({
       peerId,
       ...(meta.sharing ? { sharing: meta.sharing } : {}),
+      ...(meta.camera ? { camera: meta.camera } : {}),
       ...(meta.selection && this.#validSelection(participants, meta) ? { selection: meta.selection } : {}),
       ...(meta.nickname ? { nickname: meta.nickname } : {}),
     }));
@@ -719,6 +721,13 @@ export class RoomRegistry {
     return cleared;
   }
 
+  updateCamera(roomId: string, peerId: string, active: boolean): { active: boolean } | undefined {
+    const meta = this.#rooms.get(roomId)?.get(peerId);
+    if (!meta) return;
+    meta.camera = { active: active && Boolean(meta.sharing?.active) };
+    return meta.camera;
+  }
+
   updateSharing(roomId: string, peerId: string, sharing: SharingState): SharingState | undefined {
     const meta = this.#rooms.get(roomId)?.get(peerId);
     if (!meta) return undefined;
@@ -747,6 +756,7 @@ export class RoomRegistry {
       meta.collaboration.drawingBySender?.clear();
       meta.collaboration.aggregateDrawingTimes = undefined;
     }
+    if (!nextSharing.active) meta.camera = { active: false };
     meta.sharing = nextSharing;
     return nextSharing;
   }

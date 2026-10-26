@@ -374,7 +374,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           collaborationReadyRef.current = false;
           annotations.reset();
         }
-        if (state === 'disconnected') peerManager.closeAll();
+        if (state === 'disconnected') {
+          void peerManager.stopCamera();
+          peerManager.closeAll();
+        }
         if (state === 'connected') {
           signaling.join(roomId, peerId, nicknameRef.current, reconnectTokenRef.current, storedSession.hostCredential, providedKeyRef.current);
         }
@@ -426,7 +429,10 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           cancelPendingRecovery();
           statsCollector.resetAdaptation();
           peerManager.setParticipants((message.participants?.map((p) => p.peerId) || message.peers).filter((id) => id !== peerId));
-          for (const p of message.participants || []) if (p.peerId !== peerId && p.sharing) peerManager.setRemoteSharing(p.peerId, p.sharing.active);
+          for (const p of message.participants || []) if (p.peerId !== peerId) {
+            if (p.sharing) peerManager.setRemoteSharing(p.peerId, p.sharing.active);
+            peerManager.setRemoteCamera(p.peerId, p.camera?.active ?? false);
+          }
           signaling.updateSharing({ active: Boolean(sharingIdRef.current), paused: Boolean(sharingIdRef.current) && captureStateRef.current !== 'sharing', streamId: sharingIdRef.current, pointingEnabled: Boolean(sharingIdRef.current) ? pointingEnabledRef.current : undefined, drawingEnabled: Boolean(sharingIdRef.current) ? drawingEnabledRef.current : undefined, hasAudio: Boolean(localStreamRef.current?.getAudioTracks().length), audioMuted: switchRef.current?.muted ?? (localStreamRef.current?.getAudioTracks().some((track) => !track.enabled) || false) });
           setParticipantCount(Math.max(1, message.count));
           setParticipants((prev) => {
@@ -529,6 +535,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           } else {
             showToast('Participante removeu o nickname.');
           }
+        } else if (message.type === 'camera-updated') {
+          peerManager.setRemoteCamera(message.peerId, message.active);
         } else if (message.type === 'sharing-updated') {
           if (!message.active) stageSelectionPublisher.invalidate(message.peerId);
           annotations.setCapture(message.peerId, message.active ? message.streamId : undefined);
@@ -690,6 +698,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
 
     // End capture immediately; do not allow a new capture to overtake sender cleanup.
+    void peerManagerRef.current?.stopCamera();
     const detached = peerManagerRef.current?.detachLocalStream() ?? Promise.resolve();
     void detached.catch(() => {
       if (generation === captureGenerationRef.current) setErrorMessage('A captura foi encerrada; houve falha ao limpar a conexão.');
@@ -794,6 +803,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     if (!['sharing', 'publishing', 'resuming'].includes(captureStateRef.current)) return;
     const generation = ++captureGenerationRef.current;
     transition('pausing');
+    signalingRef.current?.updateCamera(false);
+    void peerManagerRef.current?.stopCamera();
     try {
       await peerManagerRef.current?.detachLocalStream();
       if (generation !== captureGenerationRef.current) return;

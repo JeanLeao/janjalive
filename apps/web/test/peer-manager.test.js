@@ -683,3 +683,166 @@ test('peer-manager: higher spectator waits for initial data offer without weaken
   await manager.handleSignal('a', { type: 'offer', generation: 'retired', negotiationId: 'stale', sdp: { type: 'offer', sdp: 'stale-offer' } });
   assert.equal(signals.length, 1); manager.dispose();
 });
+
+test('camera infrastructure: independent senders survive detach, replacement and peer reset', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal() {}, onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  manager.setParticipants(['viewer']);
+  const screen = new MockMediaStream();
+  const camera = new MockMediaStream();
+  await manager.attachLocalStream(screen);
+  await manager.attachCameraStream(camera);
+  let peer = manager.getPeer('viewer');
+  assert.notEqual(peer.videoSender, peer.cameraSender);
+  await manager.detachLocalStream();
+  assert.equal(peer.videoSender.track, null);
+  assert.equal(peer.cameraSender.track, camera.getVideoTracks()[0]);
+  await manager.attachLocalStream(screen);
+  await manager.detachCameraStream();
+  assert.equal(peer.videoSender.track, screen.getVideoTracks()[0]);
+  assert.equal(peer.cameraSender.track, null);
+  await manager.attachCameraStream(camera);
+  manager.resetPeer('viewer');
+  await new Promise(resolve => setImmediate(resolve));
+  peer = manager.getPeer('viewer');
+  assert.equal(peer.cameraSender.track, camera.getVideoTracks()[0]);
+  manager.dispose();
+});
+
+test('camera infrastructure: explicit mids route reordered streamless tracks and reject obsolete answers', async () => {
+  globalThis.MediaStream = class extends MockMediaStream { constructor() { super(); this.tracks = []; } };
+  let screen, camera;
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal() {}, onRemoteStreamAdd(id, stream) { screen = stream; },
+    onRemoteCameraStream(id, stream) { camera = stream; }, onRemoteStreamRemove() {} });
+  await manager.handleOffer('presenter', { type: 'offer', sdp: 'mock' }, 'n1', [
+    { mid: '7', source: 'camera-video' }, { mid: '2', source: 'screen-video' },
+  ]);
+  const peer = manager.getPeer('presenter');
+  manager.setRemoteCamera('presenter', true);
+  const webcam = new MockMediaStreamTrack();
+  const display = new MockMediaStreamTrack();
+  peer.pc.ontrack({ track: webcam, streams: [], transceiver: { mid: '7' } });
+  peer.pc.ontrack({ track: display, streams: [], transceiver: { mid: '2' } });
+  assert.deepEqual(screen.getTracks(), [display]);
+  assert.deepEqual(camera.getTracks(), [webcam]);
+  await manager.handleAnswer('presenter', { type: 'answer' }, 'obsolete', [{ mid: '2', source: 'camera-video' }]);
+  assert.equal(peer.remoteSources[1].source, 'screen-video');
+  manager.removePeer('presenter');
+  assert.equal(camera, null);
+  manager.dispose();
+});
+
+test('camera publication pending RTC configuration cannot outlive detach or disposal', async () => {
+  let ready;
+  const manager = new PeerManager({ rtcConfig: {}, rtcConfigReady: new Promise(resolve => { ready = resolve; }),
+    onSendSignal() {}, onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  manager.setParticipants(['viewer']);
+  const capture = new MockMediaStream();
+  const pending = manager.attachCameraStream(capture);
+  await manager.stopCamera();
+  ready({});
+  await pending;
+  assert.equal(capture.getVideoTracks()[0].readyState, 'ended');
+  assert.equal(manager.getPeers().size, 0);
+  manager.dispose();
+});
+
+test('camera replacement fallback only replaces its sender; failed descriptions keep the accepted source map', async () => {
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal() {}, onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  manager.setParticipants(['viewer']);
+  const screen = new MockMediaStream(), camera = new MockMediaStream(), replacement = new MockMediaStream();
+  await manager.attachLocalStream(screen);
+  await manager.attachCameraStream(camera);
+  const peer = manager.getPeer('viewer');
+  const screenSender = peer.videoSender;
+  const previousCameraSender = peer.cameraSender;
+  const removed = [];
+  peer.pc.removeTrack = sender => { removed.push(sender); };
+  previousCameraSender.replaceTrack = async () => { const error = new Error('New envelope'); error.name = 'InvalidModificationError'; throw error; };
+  await manager.attachCameraStream(replacement);
+  assert.deepEqual(removed, [previousCameraSender]);
+  assert.equal(peer.videoSender, screenSender);
+  assert.equal(screenSender.track, screen.getVideoTracks()[0]);
+  assert.equal(peer.cameraSender.track, replacement.getVideoTracks()[0]);
+  const accepted = [{ mid: '0', source: 'screen-video' }];
+  peer.remoteSources = accepted;
+  peer.pc.signalingState = 'stable';
+  peer.pc.setRemoteDescription = async () => { throw Error('Invalid SDP'); };
+  await manager.handleOffer('viewer', { type: 'offer' }, 'new', [{ mid: '0', source: 'camera-video' }]);
+  assert.equal(peer.remoteSources, accepted);
+  manager.dispose();
+});
+
+for (const entry of ['setParticipants', 'addParticipant', 'resetPeer']) {
+  test(`camera-only source switch: ${entry} negotiates a viewer and restores screen without replacing camera`, async () => {
+    const signals = [];
+    const manager = new PeerManager({ localPeerId: 'presenter', rtcConfig: {}, onSendSignal: (id, data) => signals.push(data), onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+    try {
+      const original = new MockMediaStream(), camera = new MockMediaStream();
+      await manager.attachLocalStream(original);
+      await manager.attachCameraStream(camera);
+      await manager.detachLocalStream();
+      if (entry === 'setParticipants') manager.setParticipants(['viewer']);
+      else manager[entry]('viewer');
+      await new Promise(resolve => setImmediate(resolve));
+      const peer = manager.getPeer('viewer');
+      assert.ok(peer, 'camera is sufficient to create the peer');
+      assert.equal(signals.filter(s => s.type === 'offer').length, 1);
+      assert.equal(peer.cameraSender.track, camera.getVideoTracks()[0]);
+      assert.equal(peer.videoSender?.track ?? null, null);
+      await manager.handleAnswer('viewer', { type: 'answer' }, peer.negotiationId);
+      const cameraSender = peer.cameraSender;
+      // Cancel restores the original capture; confirm publishes a new one.
+      for (const stream of [original, new MockMediaStream()]) {
+        await manager.attachLocalStream(stream);
+        assert.equal(peer.videoSender.track, stream.getVideoTracks()[0]);
+        assert.equal(peer.cameraSender, cameraSender);
+        assert.equal(cameraSender.track, camera.getVideoTracks()[0]);
+        await manager.handleAnswer('viewer', { type: 'answer' }, peer.negotiationId);
+        await manager.detachLocalStream();
+      }
+    } finally { manager.dispose(); }
+  });
+}
+
+test('camera-only offers bypass the data-only initial-offerer rule and retain stale signal guards after reset', async () => {
+  const signals = [];
+  const manager = new PeerManager({ localPeerId: 'z', rtcConfig: {}, onSendSignal: (id, data) => signals.push(data), onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  try {
+    await manager.attachCameraStream(new MockMediaStream());
+    manager.setParticipants(['a']);
+    const peer = manager.getOrCreatePeer('a');
+    peer.dataChannel = { close() {} };
+    await manager.createAndSendOffer('a');
+    assert.equal(signals.filter(s => s.type === 'offer').length, 1);
+    const oldNegotiation = peer.negotiationId;
+    await manager.handleSignal('a', { type: 'answer', generation: 'old-remote', targetGeneration: peer.generation, negotiationId: oldNegotiation, sdp: { type: 'answer' } });
+    manager.resetPeer('a');
+    await new Promise(resolve => setImmediate(resolve));
+    const replacement = manager.getPeer('a');
+    assert.ok(replacement);
+    assert.equal(replacement.cameraSender.track.kind, 'video');
+    const count = signals.length;
+    await manager.handleSignal('a', { type: 'offer', generation: 'old-remote', sdp: { type: 'offer' } });
+    await manager.handleSignal('a', { type: 'answer', targetGeneration: peer.generation, negotiationId: oldNegotiation, sdp: { type: 'answer' } });
+    await manager.handleSignal('a', { type: 'answer', targetGeneration: replacement.generation, negotiationId: oldNegotiation, sdp: { type: 'answer' } });
+    assert.equal(signals.length, count);
+    assert.equal(replacement.pc.remoteDescription, null);
+    assert.equal(replacement.pc.signalingState, 'have-local-offer');
+  } finally { manager.dispose(); }
+});
+
+test('explicit camera stop during screen detachment leaves no reason to offer to new viewers', async () => {
+  const signals = [];
+  const manager = new PeerManager({ rtcConfig: {}, onSendSignal: (id, data) => signals.push(data), onRemoteStreamAdd() {}, onRemoteStreamRemove() {} });
+  try {
+    const camera = new MockMediaStream();
+    await manager.attachCameraStream(camera);
+    await manager.stopCamera();
+    assert.equal(camera.getVideoTracks()[0].readyState, 'ended');
+    manager.setParticipants(['one']); manager.addParticipant('two'); manager.resetPeer('three');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(manager.getPeers().size, 0);
+    await manager.createAndSendOffer('one');
+    assert.equal(signals.length, 0, 'no media, remote description, remote sharing or data channel');
+  } finally { manager.dispose(); }
+});

@@ -135,12 +135,23 @@ export class StatsCollector {
         let pair: any;
         let selectedPairId: string | undefined;
 
+        const selectScreen = (type: string): any => {
+          const candidates: any[] = [];
+          reports.forEach(report => { if (report.type === type && report.kind === 'video' && !report.isRemote) candidates.push(report); });
+          const outbound = type === 'outbound-rtp';
+          const sender = peer.videoSender;
+          const mid = outbound
+            ? peer.pc.getTransceivers?.().find(item => item.sender === sender)?.mid
+            : peer.remoteSources?.find(item => item.source === 'screen-video')?.mid;
+          const trackId = outbound ? sender?.track?.id : peer.remoteStream?.getVideoTracks()[0]?.id;
+          const match = candidates.find(report => (mid != null && report.mid === mid) || (trackId && report.trackIdentifier === trackId));
+          // Missing source evidence with multiple videos must never adapt the screen from camera loss.
+          return match ?? (candidates.length === 1 && !(outbound ? peer.cameraSender : peer.remoteSources?.some(item => item.source === 'camera-video')) ? candidates[0] : undefined);
+        };
+        inbound = selectScreen('inbound-rtp');
+        outbound = selectScreen('outbound-rtp');
         reports.forEach((report) => {
           if (report.type === 'transport') selectedPairId = report.selectedCandidatePairId;
-          if (report.type === 'inbound-rtp' && report.kind === 'video') inbound = report;
-          if (report.type === 'outbound-rtp' && report.kind === 'video' && !report.isRemote) {
-            outbound = report;
-          }
           if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
             pair = report;
           }

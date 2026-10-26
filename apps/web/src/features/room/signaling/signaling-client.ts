@@ -210,6 +210,10 @@ export class SignalingClient {
     });
   }
 
+  updateCamera(active: boolean): boolean {
+    return this.send({ type: 'update-camera', active });
+  }
+
   updateSharing(sharing: SharingState): boolean {
     return this.send({ type: 'update-sharing', ...sharing });
   }

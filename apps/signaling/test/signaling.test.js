@@ -291,3 +291,27 @@ test('sharing updates belong to socket identity and are included in late join sn
   assert.equal((await nextMessage(viewer)).active, false);
   assert.equal((await nextMessage(late)).active, false);
 });
+
+test('camera signaling is independent, eligible, included for late join and cleared on stop', async t => {
+  const app = createSignalServer({ port: 0, host: '127.0.0.1' });
+  await app.ready;
+  const ids = await createTestRooms(app, ['camera']);
+  const url = `ws://127.0.0.1:${app.port}/signal`;
+  const host = await connect(url), viewer = await connect(url);
+  t.after(async () => { host.close(); viewer.close(); await app.close(); });
+  const send = (socket, message) => socket.send(JSON.stringify(message));
+  send(host, { type: 'join', roomId: ids.camera, peerId: 'host' });
+  await nextMessage(host);
+  send(host, { type: 'update-camera', active: true });
+  assert.deepEqual(await nextMessage(host), { type: 'camera-updated', peerId: 'host', active: false });
+  send(host, { type: 'update-sharing', active: true, paused: true, hasAudio: false, audioMuted: false });
+  send(host, { type: 'update-camera', active: true });
+  assert.deepEqual(await nextMessage(host), { type: 'camera-updated', peerId: 'host', active: true });
+  send(viewer, { type: 'join', roomId: ids.camera, peerId: 'viewer' });
+  const snapshot = await nextMessage(viewer);
+  assert.equal(snapshot.participants.find(p => p.peerId === 'host').camera.active, true);
+  assert.equal((await nextMessage(host)).type, 'peer-joined');
+  send(host, { type: 'update-sharing', active: false, hasAudio: false, audioMuted: false });
+  assert.equal((await nextMessage(viewer)).type, 'sharing-updated');
+  assert.deepEqual(await nextMessage(viewer), { type: 'camera-updated', peerId: 'host', active: false });
+});
