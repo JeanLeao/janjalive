@@ -26,7 +26,7 @@ for (const width of [1280, 390]) test(`webcam D: sustained reduction, late viewe
     await expect.poll(limits).toEqual([400000]);
     await expect.poll(()=>viewer.getByTestId('stage-camera').evaluate((v:HTMLVideoElement)=>v.videoWidth)).toBeGreaterThan(0);
     const screenBefore=await host.evaluate(()=>(window as any).peers[0].getSenders().filter((s:RTCRtpSender)=>(window as any).screenTracks.includes(s.track)).map((s:RTCRtpSender)=>s.getParameters().encodings));
-    const inject=async()=>host.evaluate(()=>{
+    const inject=async()=>host.evaluate((lowTraffic:boolean)=>{
       const w=window as any;
       for(const pc of w.peers as RTCPeerConnection[]) {
         if((pc as any).qualityInjected) continue;
@@ -40,18 +40,18 @@ for (const width of [1280, 390]) test(`webcam D: sustained reduction, late viewe
             const id='camera-test', n=++count, timestamp=performance.now();
             for(const [key,r] of result) if((r.type==='outbound-rtp' && r.mid===mid) || (r.type==='remote-inbound-rtp' && r.localId==='camera-test')) result.delete(key);
             result.set(id,{id,type:'outbound-rtp',kind:'video',mid,timestamp,bytesSent:n*40000,framesEncoded:n*30});
-            result.set('camera-remote',{id:'camera-remote',type:'remote-inbound-rtp',kind:'video',localId:id,timestamp,packetsReceived:n*90,packetsLost:n*10,roundTripTime:.1});
+            result.set('camera-remote',{id:'camera-remote',type:'remote-inbound-rtp',kind:'video',localId:id,timestamp,packetsReceived:lowTraffic?n*18:0,packetsLost:lowTraffic?n*2:n*100,roundTripTime:.1});
           }
           return result as unknown as RTCStatsReport;
         };
       }
-    });
+    },width<500);
     const tick=async(n:number)=>{for(let i=0;i<n;i++) {
       const before=await host.evaluate(()=>(window as any).cameraCollections);
       await host.evaluate(()=>{const w=window as any;w.cameraTime+=3000;w.cameraCollect();});
       await expect.poll(()=>host.evaluate(()=>(window as any).cameraCollections)).toBeGreaterThan(before);
     }};
-    await inject(); await tick(4); expect(await limits()).toEqual([400000]);
+    await inject(); await tick(width<500?6:4); expect(await limits()).toEqual([400000]);
     await tick(1); await expect.poll(limits).toEqual([220000]);
     await host.screenshot({path:info.outputPath(`reduced-${width}.png`)});
     await dock(host); await host.getByRole('button',{name:'Trocar tela',exact:true}).click();
@@ -62,7 +62,7 @@ for (const width of [1280, 390]) test(`webcam D: sustained reduction, late viewe
     const late=await context.newPage(); await synthetic(late); await gotoRoom(late,`/room/camera-d-${width}`);
     await expect.poll(limits).toEqual([220000,220000]); await inject();
     await tick(7); await expect.poll(limits).toEqual([120000,120000]);
-    await tick(12);
+    await tick(width<500?14:12);
     await expect(host.getByText(/Câmera suspensa por qualidade de conexão/).first()).toBeVisible();
     await expect.poll(()=>host.evaluate(()=>(window as any).cameraTracks.at(-1).readyState)).toBe('ended');
     expect(await host.evaluate(()=>(window as any).screenTracks.at(-1).readyState)).toBe('live');

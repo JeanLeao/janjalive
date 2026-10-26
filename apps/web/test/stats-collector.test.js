@@ -444,7 +444,8 @@ test('screen stats exclude camera loss even when camera RTP reports arrive last'
   assert.equal(degraded, 0, 'ambiguous reports fail closed');
 });
 
-test('camera adaptation and F34 use independent reports and worst recipients without inbound substitution', async () => {
+for (const [mode, received, lost] of [['normal', 900, 100], ['total loss', 0, 100], ['low traffic', 18, 2]])
+test(`camera adaptation and F34 remain independent with ${mode}`, async () => {
   let now=0, level=0, reductions=0, suspensions=0, screenReductions=0, screenRecoveries=0;
   const cameraTrack={id:'camera',readyState:'live'};
   const peers=new Map();
@@ -456,7 +457,7 @@ test('camera adaptation and F34 use independent reports and worst recipients wit
       ['s',{id:'s',type:'outbound-rtp',kind:'video',mid:'0',timestamp:now,packetsSent:now,bytesSent:now}],
       ['sr',{id:'sr',type:'remote-inbound-rtp',kind:'video',localId:'s',timestamp:now,packetsReceived:now,packetsLost:0}],
       ['c',{id:'c',type:'outbound-rtp',kind:'video',mid:'1',timestamp:now,bytesSent:now,framesEncoded:now}],
-      ['cr',{id:'cr',type:'remote-inbound-rtp',kind:'video',localId:'c',timestamp:now,packetsReceived:now,packetsLost:id==='bad'?now/9:0}],
+      ['cr',{id:'cr',type:'remote-inbound-rtp',kind:'video',localId:'c',timestamp:now,packetsReceived:id==='bad'?now/3000*received:now,packetsLost:id==='bad'?now/3000*lost:0}],
     ]);
     peers.set(id,{pc,videoSender,cameraSender});
   }
@@ -467,4 +468,41 @@ test('camera adaptation and F34 use independent reports and worst recipients wit
   for(let n=1;n<=30;n++){now=n*3000;await collector.collect();}
   assert.equal(reductions,2); assert.equal(suspensions,1); assert.equal(screenReductions,0);
   assert.equal(screenRecoveries,1,'camera loss does not block F34 recovery');
+});
+
+for (const change of ['generation', 'topology', 'camera', 'delayed', 'disconnected'])
+test(`camera accumulated loss cannot decide from ${change} collection`, async () => {
+  let now = 0, decisions = 0;
+  let track = { id: 'camera', readyState: 'live' };
+  const cameraSender = { track };
+  const pc = new MockRTCPeerConnection(); pc.connectionState = 'connected';
+  pc.getTransceivers = () => [{ mid: '1', sender: cameraSender }];
+  pc.getStats = async () => new Map([
+    ['c', { id: 'c', type: 'outbound-rtp', kind: 'video', mid: '1', timestamp: now, bytesSent: now, framesEncoded: now }],
+    ['r', { id: 'r', type: 'remote-inbound-rtp', kind: 'video', localId: 'c', timestamp: now, packetsReceived: 0, packetsLost: now / 3000 * 20 }],
+  ]);
+  const peers = new Map([['viewer', { pc, cameraSender }]]);
+  const collector = new StatsCollector({ now: () => now,
+    peerManager: { getPeers: () => peers, getCameraTrack: () => track, getCameraLevel: () => 2 },
+    isPublishing: () => true, isCameraPublishing: () => true, onStats() {}, onDegradation() {},
+    onCameraSuspension() { decisions++; },
+  });
+  // Next fresh observation would complete the eleven-sample minimum-profile window.
+  for (let n = 1; n <= 13; n++) { now = n * 3000; await collector.collect(); }
+  assert.equal(decisions, 0);
+  const reports = await pc.getStats();
+  now += 3000;
+  for (const report of reports.values()) report.timestamp = now;
+  reports.get('c').bytesSent = now; reports.get('c').framesEncoded = now;
+  reports.get('r').packetsLost = now / 3000 * 20;
+  let resolve;
+  pc.getStats = () => new Promise(done => { resolve = done; });
+  const pending = collector.collect();
+  if (change === 'generation') collector.resetAdaptation();
+  if (change === 'topology') peers.clear();
+  if (change === 'camera') track = { id: 'new-camera', readyState: 'live' };
+  if (change === 'delayed') now += 9000;
+  if (change === 'disconnected') pc.connectionState = 'disconnected';
+  resolve(reports); await pending;
+  assert.equal(decisions, 0);
 });

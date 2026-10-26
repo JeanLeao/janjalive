@@ -73,3 +73,65 @@ test('camera quality: sustained fresh remote RTT can reduce; low FPS and bitrate
   }
   for(let n=6;n<=12;n++) assert.equal(sample(n,{framesPerSecond:1,bytesSent:n}, {packetsLost:0,roundTripTime:.1}).degraded,false);
 });
+
+for (const [name, received, lost, firstBad] of [
+  ['total loss', 0, 60, 5], ['low traffic', 18, 2, 7],
+]) test(`camera quality: ${name} needs sustained evidence at every profile`, () => {
+  const { sample, observer } = fixture();
+  let n = 0;
+  const next = () => { n++; return sample(n, {}, { packetsReceived: n * received, packetsLost: n * lost }); };
+  for (let level = 0; level <= 2; level++) {
+    let result;
+    for (let i = 1; i <= (level === 2 ? firstBad + 7 : firstBad); i++) {
+      result = next();
+      if (i < firstBad) assert.equal(result.degraded, false);
+      if (level === 2) {
+        assert.equal(result.persistent, i === firstBad + 7);
+        if (!result.persistent) assert.equal(observer.decide(n * 3000, result.degraded, result.persistent, level), null);
+      }
+    }
+    assert.equal(observer.decide(n * 3000, result.degraded, result.persistent, level), level === 2 ? 'suspend' : 'reduce');
+  }
+});
+
+test('camera quality: healthy current reports immediately break loss persistence and allow fresh evidence later', () => {
+  const { sample } = fixture();
+  for (let n = 1; n <= 9; n++) sample(n, {}, { packetsReceived: 0, packetsLost: n * 20 });
+  const healthy = sample(10, {}, { packetsReceived: 20, packetsLost: 180 });
+  assert.equal(healthy.degraded, false);
+  assert.equal(healthy.persistent, false);
+  for (let n = 11; n <= 13; n++) assert.equal(sample(n, {}, { packetsReceived: 20, packetsLost: 180 + (n - 10) * 20 }).degraded, false);
+  assert.equal(sample(14, {}, { packetsReceived: 20, packetsLost: 260 }).degraded, true);
+});
+
+for (const [name, received, lost] of [['no traffic', 0, 0], ['insufficient within bounded window', 1, 1]])
+test(`camera quality: ${name} never proves degradation even over a long session`, () => {
+  const { sample } = fixture();
+  for (let n = 1; n <= 60; n++) {
+    const result = sample(n, {}, { packetsReceived: n * received, packetsLost: n * lost, roundTripTime: 1 });
+    assert.equal(result.degraded, false);
+    assert.equal(result.persistent, false);
+    assert.equal(result.lossPercent, undefined);
+  }
+});
+
+for (const [name, outbound, remote, disconnected] of [
+  ['stopped counters', {}, { packetsReceived: 54, packetsLost: 6 }],
+  ['reset counters', {}, { packetsReceived: 0, packetsLost: 0 }],
+  ['stale report', {}, { timestamp: 3000 }],
+  ['missing report counters', {}, { packetsLost: undefined }],
+  ['other sender', {}, { localId: 'screen' }],
+  ['other report generation', {}, { id: 'replacement' }],
+  ['other outbound generation', { id: 'replacement' }, {}],
+  ['disconnected', {}, {}, true],
+]) test(`camera quality: ${name} discards low-volume accumulated evidence`, () => {
+  const { sample, pc } = fixture();
+  const counters = n => ({ packetsReceived: n * 18, packetsLost: n * 2 });
+  for (let n = 1; n <= 3; n++) sample(n, {}, counters(n));
+  if (disconnected) pc.connectionState = 'disconnected';
+  const result = sample(4, outbound, { ...counters(4), ...remote });
+  assert.equal(result.degraded, false);
+  assert.equal(result.lossPercent, undefined);
+  pc.connectionState = 'connected';
+  for (let n = 5; n <= 7; n++) assert.equal(sample(n, {}, counters(n)).degraded, false);
+});

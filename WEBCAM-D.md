@@ -162,3 +162,66 @@ Rodadas direcionadas finais: `/tmp/webcam-d-e2e-final.log` e
 ser somados como casos distintos.
 
 PR deve permanecer draft para revisão técnica, sem merge ou deploy.
+
+## Correção da revisão do PR #47 — perda total e baixo tráfego
+
+O observador aceita deltas remotos com zero recebimentos e perdas positivas.
+O mínimo de 50 pacotes passa a ser acumulado em uma janela móvel de 12 s
+(deltas com idade estritamente menor que 12 s), em vez de exigido por coleta.
+A janela usa somente intervalos consecutivos com timestamps frescos, contadores
+monotônicos, tráfego positivo e associação ao mesmo sender/track/conexão/relatório.
+Um intervalo inválido ou sem tráfego descarta a acumulação e a persistência de
+perda. Cada decisão continua limpando toda a evidência. Uma coleta atual com
+perda abaixo de 8% interrompe a persistência da perda, mesmo se a janela ainda
+contiver perdas anteriores; RTT atual e limitação do encoder seguem independentes.
+A recuperação de relatórios não reativa nem eleva automaticamente a câmera.
+
+Mantidos os perfis, quatro amostras/9 s para redução, onze amostras/30 s no
+mínimo para suspensão e cooldown de 15 s. A janela precisa reunir volume antes
+de começar a contar evidência: com 20 pacotes/coleta de 3 s, a primeira redução
+ocorre somente na sétima coleta; após reset no mínimo, a suspensão ocorre somente
+na décima quarta. Dois pacotes/coleta nunca atingem volume suficiente nessa janela.
+Nenhuma alteração de produção no coletor, na tela ou na F34.
+
+Regressões novas: perda de 100%, perda de 10% com 20 pacotes/coleta,
+recuperação seguida de nova degradação, contadores parados/reiniciados, relatórios
+antigos/ausentes/desassociados, gerações de RTP, desconexão e ausência/escassez de
+tráfego. No coletor, resultados pendentes não suspendem após reset de geração,
+mudança de topologia/câmera, desconexão ou atraso superior a duas cadências.
+Os cenários integrados de perda total e baixo volume também verificam duas
+reduções, suspensão, ausência de redução da tela e recuperação independente F34.
+
+Validação desta correção:
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm --filter @screen-room/signaling... build` | Aprovado |
+| `pnpm --filter @screen-room/web exec node --test test/camera-quality.test.js test/stats-collector.test.js` | 66 aprovados |
+| `pnpm typecheck` | Aprovado, incluindo E2E alterado |
+| `pnpm test` | 467 aprovados: protocol 21, signaling 128, web 318 |
+| `pnpm build` | Aprovado; avisos do bundler sobre diretivas de módulo |
+| `pnpm --filter @screen-room/web test:e2e --grep 'webcam D:|F34' --workers=1` | Rodada final Chromium: 5/5 aprovados |
+| `git diff --check` | Aprovado |
+
+O E2E D desktop agora injeta perda total; o mobile (390px/toque) injeta 20
+pacotes por coleta com perda de 10%. Ambos validam redução, entrada tardia,
+suspensão, tela ativa com parâmetros preservados e reinício manual. A rodada
+final inclui a carga de dez participantes e F34 em 1280px/390px.
+
+Duas rodadas anteriores tiveram interferência de builds/edição concorrentes ao
+Vite, portanto não isolam a correção. Primeira rodada (dois workers): 2/5,
+com falhas na espera pela coleta D desktop, indicação visual F34 desktop e
+fontes ausentes na carga. Segunda (um worker): 3/5, com falhas na espera pela
+coleta D desktop e conexão inicial D mobile. A trace da segunda registra
+fechamento/recriação de conexões durante a edição do fonte; também ocorreram
+builds durante essas execuções. A rodada final, sem builds ou edições concorrentes,
+passou em 5/5. Não se classificam as falhas intermediárias como preexistentes nem
+se afirma que todas têm a mesma causa. Nenhuma investigação já comparada à base
+foi repetida. Firefox não foi repetido nesta correção; suíte E2E completa e
+condições nativas/rede real continuam não verificadas.
+
+Logs desta revisão: `/tmp/webcam-d-fix-prepare.log`,
+`/tmp/webcam-d-fix-unit.log`, `/tmp/webcam-d-fix-types.log`,
+`/tmp/webcam-d-fix-tests.log`, `/tmp/webcam-d-fix-build.log`,
+`/tmp/webcam-d-fix-e2e.log`, `/tmp/webcam-d-fix-e2e-serial.log` e
+`/tmp/webcam-d-fix-e2e-final.log`.

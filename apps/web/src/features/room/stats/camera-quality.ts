@@ -5,8 +5,11 @@ export const CAMERA_PROFILES = [
   { maxBitrate: 120_000, maxFramerate: 7, scaleResolutionDownBy: 2 },
 ] as const;
 
+interface PacketInterval { time: number; received: number; lost: number }
+
 interface History {
   pc: RTCPeerConnection; track: MediaStreamTrack; id: string; timestamp: number;
+  packets: PacketInterval[];
   observed: number; bytes: number; frames: number; remoteId?: string;
   remoteTime?: number; received?: number; lost?: number; badSince?: number; badCount: number;
 }
@@ -39,23 +42,34 @@ export class CameraQualityObserver {
       Math.abs(out.timestamp - remote.timestamp) <= 6000 && finite(remote.packetsReceived) && finite(remote.packetsLost);
     let loss: number | undefined;
     let rtt: number | undefined;
+    let packets: PacketInterval[] = [];
+    let currentLoss: number | undefined;
     if (fresh && remoteValid && old.remoteId === remote.id && old.remoteTime !== undefined &&
       remote.timestamp > old.remoteTime && remote.timestamp - old.remoteTime <= 6000 &&
       old.received !== undefined && old.lost !== undefined) {
       const received = remote.packetsReceived - old.received;
       const lost = remote.packetsLost - old.lost;
-      if (received > 0 && lost >= 0 && received + lost >= 50) {
-        loss = lost / (received + lost) * 100;
-        if (finite(remote.roundTripTime)) rtt = remote.roundTripTime * 1000;
+      if (received >= 0 && lost >= 0 && received + lost > 0) {
+        // Bound evidence by time, not collection count. Invalid/no-traffic intervals
+        // leave this empty so old packets cannot bridge an observation gap.
+        packets = [...old.packets.filter(interval => now - interval.time < 12000), { time: now, received, lost }];
+        const total = packets.reduce((sum, interval) => sum + interval.received + interval.lost, 0);
+        currentLoss = lost / (received + lost) * 100;
+        if (total >= 50) {
+          loss = packets.reduce((sum, interval) => sum + interval.lost, 0) / total * 100;
+          if (finite(remote.roundTripTime)) rtt = remote.roundTripTime * 1000;
+        }
       }
     }
     const encoderLimited = fresh && ['cpu', 'bandwidth'].includes(out.qualityLimitationReason);
     const valid = Boolean(fresh && (loss !== undefined || encoderLimited));
-    const bad = valid && (encoderLimited || (loss !== undefined && loss >= 8) || (rtt !== undefined && rtt >= 450));
+    // A healthy current loss interval breaks persistence even while the window
+    // still contains preceding losses. RTT and encoder evidence remain independent.
+    const bad = valid && (encoderLimited || (loss !== undefined && loss >= 8 && currentLoss! >= 8) || (rtt !== undefined && rtt >= 450));
     const badSince = bad ? old?.badSince ?? now : undefined;
     const badCount = bad ? (old?.badCount ?? 0) + 1 : 0;
     this.histories.set(peerId, { pc, track: track!, id: out.id, timestamp: out.timestamp, observed: now,
-      bytes: out.bytesSent, frames: out.framesEncoded, remoteId: remoteValid ? remote.id : undefined,
+      packets, bytes: out.bytesSent, frames: out.framesEncoded, remoteId: remoteValid ? remote.id : undefined,
       remoteTime: remoteValid ? remote.timestamp : undefined, received: remoteValid ? remote.packetsReceived : undefined,
       lost: remoteValid ? remote.packetsLost : undefined, badSince, badCount });
     return { status: valid ? 'measured' : 'insufficient-or-stale', degraded: badCount >= 4 && now - badSince! >= 9000,
