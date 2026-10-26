@@ -1025,6 +1025,14 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'update-camera') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
+          const camera = rooms.updateCamera(meta.roomId, meta.peerId, message.active);
+          if (camera) broadcast(meta.roomId, { type: 'camera-updated', peerId: meta.peerId, ...camera });
+          return;
+        }
+
         if (message.type === 'update-sharing') {
           if (!socket.meta) {
             send(socket, { type: 'error', message: 'Envie join primeiro.' });
@@ -1038,6 +1046,7 @@ export function createSignalServer({
           clips.sharing(roomId, peerId, effective);
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           if (!effective.active) {
+            broadcast(roomId, { type: 'camera-updated', peerId, active: false });
             for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {
               broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
             }

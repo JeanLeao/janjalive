@@ -275,3 +275,21 @@ test('room-state: paused metadata survives late join independently of other pres
   assert.deepEqual(participants.find(p => p.peerId === 'host').sharing, paused);
   assert.deepEqual(participants.find(p => p.peerId === 'other').sharing, live);
 });
+
+test('camera state requires a presentation, survives temporary pause, clears on stop and reconnect', () => {
+  const rooms = new RoomRegistry();
+  rooms.createRoom('camera');
+  rooms.join('camera', 'host');
+  assert.deepEqual(rooms.updateCamera('camera', 'host', true), { active: false });
+  const sharing = { active: true, hasAudio: false, audioMuted: false };
+  rooms.updateSharing('camera', 'host', sharing);
+  assert.deepEqual(rooms.updateCamera('camera', 'host', true), { active: true });
+  rooms.updateSharing('camera', 'host', { ...sharing, paused: true });
+  assert.equal(rooms.getParticipants('camera')[0].camera.active, true);
+  const token = rooms.getReconnectToken('camera', 'host');
+  rooms.join('camera', 'host', undefined, token);
+  assert.equal(rooms.getParticipants('camera')[0].camera, undefined, 'replaced socket must republish camera');
+  rooms.updateCamera('camera', 'host', true);
+  rooms.updateSharing('camera', 'host', { ...sharing, active: false });
+  assert.equal(rooms.getParticipants('camera')[0].camera.active, false);
+});

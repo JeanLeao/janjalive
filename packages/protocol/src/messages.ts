@@ -13,6 +13,19 @@ export type SharingState = z.infer<typeof SharingStateSchema>;
 export const UpdateSharingMessageSchema = SharingStateSchema.extend({ type: z.literal('update-sharing') });
 export const SharingUpdatedMessageSchema = SharingStateSchema.extend({ type: z.literal('sharing-updated'), peerId: z.string().min(1) });
 
+// Camera publication belongs to the presenter, independently of temporary screen pause.
+export const CameraStateSchema = z.object({ active: z.boolean() }).strict();
+export type CameraState = z.infer<typeof CameraStateSchema>;
+export const UpdateCameraSchema = CameraStateSchema.extend({ type: z.literal('update-camera') });
+export const CameraUpdatedSchema = CameraStateSchema.extend({ type: z.literal('camera-updated'), peerId: z.string().min(1) });
+export const MediaSourcesSchema = z.array(z.object({
+  mid: z.string().min(1).max(64), source: z.enum(['screen-video', 'screen-audio', 'camera-video']),
+}).strict()).max(3).superRefine((sources, ctx) => {
+  if (new Set(sources.map(s => s.mid)).size !== sources.length || new Set(sources.map(s => s.source)).size !== sources.length)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Duplicate media source or mid' });
+});
+export type MediaSources = z.infer<typeof MediaSourcesSchema>;
+
 // F29: a presenter's current stage selection. `seq` is assigned by the server and only grows per presenter.
 export const StageSelectionSchema = z.object({
   targetPeerId: z.string().min(1).max(64),
@@ -167,6 +180,7 @@ export const PollAcceptedSchema = z.object({
 export const ParticipantInfoSchema = z.object({
   peerId: z.string().min(1),
   sharing: SharingStateSchema.optional(),
+  camera: CameraStateSchema.optional(),
   selection: StageSelectionSchema.optional(),
   nickname: z.string().trim().min(1).max(32).optional(),
 });
@@ -451,6 +465,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   CreateRoomSchema, ModerateRoomSchema,
   JoinMessageSchema,
   UpdateSharingMessageSchema,
+  UpdateCameraSchema,
   SelectStageMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
@@ -571,6 +586,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   InteractionRejectedSchema,
   PeersMessageSchema,
   SharingUpdatedMessageSchema,
+  CameraUpdatedSchema,
   StageSelectedMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,
@@ -582,12 +598,14 @@ export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
 export const OfferSignalPayloadSchema = z.object({
   type: z.literal('offer'),
+  sources: MediaSourcesSchema.optional(),
   sdp: z.unknown(),
 });
 export type OfferSignalPayload = z.infer<typeof OfferSignalPayloadSchema>;
 
 export const AnswerSignalPayloadSchema = z.object({
   type: z.literal('answer'),
+  sources: MediaSourcesSchema.optional(),
   sdp: z.unknown(),
 });
 export type AnswerSignalPayload = z.infer<typeof AnswerSignalPayloadSchema>;

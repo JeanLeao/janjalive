@@ -418,3 +418,28 @@ test('a getStats result delayed more than two cadences cannot finish the stabili
   resolve(); await pending;
   assert.deepEqual(h.events, []);
 });
+
+test('screen stats exclude camera loss even when camera RTP reports arrive last', async () => {
+  let sample = 0;
+  let degraded = 0;
+  const pc = new MockRTCPeerConnection();
+  pc.connectionState = 'connected';
+  const videoSender = { track: { id: 'screen' } };
+  pc.getTransceivers = () => [{ mid: '0', sender: videoSender }];
+  pc.getStats = async () => {
+    sample++;
+    return new Map([
+      ['screen', { id: 'screen', type: 'outbound-rtp', kind: 'video', mid: '0', timestamp: sample * 3000, packetsSent: sample * 100, bytesSent: sample * 1000 }],
+      ['screen-remote', { id: 'screen-remote', type: 'remote-inbound-rtp', kind: 'video', localId: 'screen', timestamp: sample * 3000, packetsReceived: sample * 100, packetsLost: 0 }],
+      ['camera', { id: 'camera', type: 'outbound-rtp', kind: 'video', mid: '1', timestamp: sample * 3000, packetsSent: sample * 100, bytesSent: sample * 1000 }],
+      ['camera-remote', { id: 'camera-remote', type: 'remote-inbound-rtp', kind: 'video', localId: 'camera', timestamp: sample * 3000, packetsReceived: sample * 50, packetsLost: sample * 50 }],
+    ]);
+  };
+  const peers = new Map([['viewer', { pc, videoSender, cameraSender: { track: { id: 'camera' } } }]]);
+  const collector = new StatsCollector({ peerManager: { getPeers: () => peers }, onStats() {}, onDegradation() { degraded++; } });
+  await collector.collect(); await collector.collect();
+  assert.equal(degraded, 0);
+  pc.getTransceivers = () => [];
+  await collector.collect(); await collector.collect();
+  assert.equal(degraded, 0, 'ambiguous reports fail closed');
+});

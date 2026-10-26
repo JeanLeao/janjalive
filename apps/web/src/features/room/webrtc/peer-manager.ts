@@ -1,5 +1,5 @@
 import { applyCaptureQuality } from '../media/display-media.ts';
-import { DEFAULT_QUALITY, normalizeQuality, resolveQuality, type QualitySelection } from '@screen-room/protocol';
+import { MediaSourcesSchema, type MediaSources, DEFAULT_QUALITY, normalizeQuality, resolveQuality, type QualitySelection } from '@screen-room/protocol';
 import type { DiagnosticsLogger } from '../diagnostics/diagnostics-logger';
 
 export interface ManagedPeer {
@@ -8,6 +8,9 @@ export interface ManagedPeer {
   generation: string;
   remoteGeneration?: string;
   pc: RTCPeerConnection;
+  cameraSender?: RTCRtpSender | null;
+  remoteCameraStream?: MediaStream;
+  remoteSources?: MediaSources;
   videoSender?: RTCRtpSender | null;
   audioSender?: RTCRtpSender | null;
   pendingIceCandidates: RTCIceCandidateInit[];
@@ -34,6 +37,7 @@ export interface PeerManagerOptions {
   rtcConfig: RTCConfiguration;
   onSendSignal: (target: string, data: any) => boolean | void;
   onRemoteStreamAdd: (peerId: string, stream: MediaStream) => void;
+  onRemoteCameraStream?: (peerId: string, stream: MediaStream | null) => void;
   onPeerState?: (peerId: string, state: RTCPeerConnectionState) => void;
   onRemoteStreamRemove: (peerId: string) => void;
   onDataChannel?: (peerId: string, channel: RTCDataChannel) => void;
@@ -47,6 +51,7 @@ export class PeerManager {
   private peerVersions = new Map<string, number>();
   private retiredGenerations = new Set<string>();
   private participants = new Set<string>();
+  private cameras = new Map<string, boolean>();
   private sharing = new Map<string, boolean>();
 
   setParticipants(ids: string[]): void {
@@ -62,20 +67,28 @@ export class PeerManager {
     // addressed to a retired connection or relaxing the stale-signal checks.
     if (this.participants.has(id)) {
       this.resetPeer(id);
+      this.setRemoteCamera(id, false);
       return;
     }
     this.participants.add(id);
     if (this.localStream) void this.createAndSendOffer(id);
   }
 
+  setRemoteCamera(id: string, active: boolean): void {
+    this.cameras.set(id, active);
+    this.options.onRemoteCameraStream?.(id, active ? this.peers.get(id)?.remoteCameraStream ?? null : null);
+  }
+
   setRemoteSharing(id: string, active: boolean): void {
     this.sharing.set(id, active);
     const stream = this.peers.get(id)?.remoteStream;
-    if (!active) this.options.onRemoteStreamRemove(id);
+    if (!active) { this.options.onRemoteStreamRemove(id); this.setRemoteCamera(id, false); }
     else if (stream) this.options.onRemoteStreamAdd(id, stream);
   }
 
   private peers = new Map<string, ManagedPeer>();
+  private cameraStream: MediaStream | null = null;
+  private cameraVersion = 0;
   private localStream: MediaStream | null = null;
   private currentQuality: QualitySelection = DEFAULT_QUALITY;
   private qualityChain: Promise<unknown> = Promise.resolve();
@@ -165,6 +178,11 @@ export class PeerManager {
       }
     }
 
+    if (this.cameraStream) {
+      try { peer.cameraSender = pc.addTrack(this.cameraStream.getVideoTracks()[0], this.cameraStream); }
+      catch (err: any) { this.options.logger?.log('camera-attach-error', { peer: peerId, message: err?.message }); }
+    }
+
     if (!this.localStream && this.sharing.get(peerId)) {
       pc.addTransceiver?.('video', { direction: 'recvonly' });
       pc.addTransceiver?.('audio', { direction: 'recvonly' });
@@ -186,14 +204,20 @@ export class PeerManager {
         kind: event.track.kind,
       });
       if (this.peers.get(peerId) !== peer) return;
-      // A newly added audio sender may carry a different stream ID from reused video.
-      // Keep one receiver stream per presenter so renegotiation cannot discard their video.
-      peer.remoteStream ||= event.streams[0] || new MediaStream();
-      for (const track of peer.remoteStream.getTracks()) {
-        if (track.kind === event.track.kind && track !== event.track) peer.remoteStream.removeTrack(track);
+      const source = peer.remoteSources?.find(item => item.mid === event.transceiver?.mid)?.source;
+      // Explicit maps fail closed. Legacy screen-only peers retain their existing behavior.
+      if (peer.remoteSources && !source) return;
+      if (source && event.track.kind !== (source === 'screen-audio' ? 'audio' : 'video')) return;
+      const camera = source === 'camera-video';
+      const key = camera ? 'remoteCameraStream' : 'remoteStream';
+      peer[key] ||= (!peer.remoteSources && event.streams[0]) || new MediaStream();
+      const stream = peer[key]!;
+      for (const track of stream.getTracks()) {
+        if (track.kind === event.track.kind && track !== event.track) stream.removeTrack(track);
       }
-      if (!peer.remoteStream.getTracks().includes(event.track)) peer.remoteStream.addTrack(event.track);
-      if (this.sharing.get(peerId) !== false) this.options.onRemoteStreamAdd(peerId, peer.remoteStream);
+      if (!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
+      if (camera) { if (this.cameras.get(peerId)) this.options.onRemoteCameraStream?.(peerId, stream); }
+      else if (this.sharing.get(peerId) !== false) this.options.onRemoteStreamAdd(peerId, stream);
     };
 
     pc.onsignalingstatechange = () => {
@@ -258,8 +282,8 @@ export class PeerManager {
       if (peer.remoteGeneration && peer.remoteGeneration !== data.generation) return;
       peer.remoteGeneration = data.generation;
     }
-    if (data.type === 'offer') await this.handleOffer(from, data.sdp, data.negotiationId);
-    else if (data.type === 'answer') await this.handleAnswer(from, data.sdp, data.negotiationId);
+    if (data.type === 'offer') await this.handleOffer(from, data.sdp, data.negotiationId, data.sources);
+    else if (data.type === 'answer') await this.handleAnswer(from, data.sdp, data.negotiationId, data.sources);
     else if (data.type === 'ice') await this.handleRemoteIce(from, data.candidate, data.negotiationId);
   }
 
@@ -295,10 +319,12 @@ export class PeerManager {
   }
 
   resetPeer(id: string): void {
+    const camera = this.cameras.get(id);
     const active = this.sharing.get(id);
     this.removePeer(id);
     this.participants.add(id);
     if (active !== undefined) this.sharing.set(id, active);
+    if (camera !== undefined) this.cameras.set(id, camera);
     if (this.localStream || active) void this.createAndSendOffer(id);
   }
 
@@ -346,6 +372,7 @@ export class PeerManager {
           targetGeneration: peer.remoteGeneration,
           negotiationId: peer.negotiationId,
           sdp: peer.pc.localDescription,
+          sources: this.localSources(peer),
         });
         if (peer.negotiationTimer) clearTimeout(peer.negotiationTimer);
         peer.negotiationTimer = setTimeout(() => {
@@ -367,7 +394,7 @@ export class PeerManager {
     await peer.signalChain;
   }
 
-  async handleOffer(from: string, sdp: RTCSessionDescriptionInit, negotiationId?: string): Promise<void> {
+  async handleOffer(from: string, sdp: RTCSessionDescriptionInit, negotiationId?: string, sources?: unknown): Promise<void> {
     const peer = this.getOrCreatePeer(from);
     if (!peer) return;
 
@@ -382,12 +409,18 @@ export class PeerManager {
           peer.candidateNegotiations.clear();
           return;
         }
+        const parsed = sources === undefined ? undefined : MediaSourcesSchema.safeParse(sources);
+        if (parsed && !parsed.success) return;
+        const previousSources = peer.remoteSources;
+        peer.remoteSources = parsed?.success ? parsed.data : undefined;
         peer.remoteNegotiationId = negotiationId;
         peer.negotiationId = negotiationId;
         // setRemoteDescription performs the polite rollback atomically, avoiding a
         // transient stable state that could launch another local offer.
         if (collision) this.options.logger?.log('offer-rollback', { peer: from });
-        await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        try { await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp)); }
+        catch (error) { peer.remoteSources = previousSources; throw error; }
+        if (this.peers.get(from) !== peer) return;
         this.options.logger?.log('offer-received', { from });
         await this.flushPendingIce(peer);
         const answer = await peer.pc.createAnswer();
@@ -402,6 +435,7 @@ export class PeerManager {
           targetGeneration: peer.remoteGeneration,
           negotiationId,
           sdp: peer.pc.localDescription,
+          sources: this.localSources(peer),
         });
       } catch (err: any) {
         this.options.logger?.log('handle-offer-error', { from, message: err?.message });
@@ -411,14 +445,20 @@ export class PeerManager {
     await peer.signalChain;
   }
 
-  async handleAnswer(from: string, sdp: RTCSessionDescriptionInit, negotiationId?: string): Promise<void> {
+  async handleAnswer(from: string, sdp: RTCSessionDescriptionInit, negotiationId?: string, sources?: unknown): Promise<void> {
     const peer = this.peers.get(from);
     if (!peer) return;
 
     peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
       try {
         if (this.peers.get(from) !== peer || peer.pc.signalingState !== 'have-local-offer' || (negotiationId && negotiationId !== peer.negotiationId)) return;
-        await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const parsed = sources === undefined ? undefined : MediaSourcesSchema.safeParse(sources);
+        if (parsed && !parsed.success) return;
+        const previousSources = peer.remoteSources;
+        peer.remoteSources = parsed?.success ? parsed.data : undefined;
+        try { await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp)); }
+        catch (error) { peer.remoteSources = previousSources; throw error; }
+        if (this.peers.get(from) !== peer) return;
         peer.remoteNegotiationId = negotiationId;
         this.options.logger?.log('answer-received', { from, elapsedMs: Math.round(performance.now() - peer.createdAt) });
         await this.flushPendingIce(peer);
@@ -470,6 +510,63 @@ export class PeerManager {
     if (pending.length > 0) {
       this.options.logger?.log('ice-flushed', { from: peer.id, count: pending.length });
     }
+  }
+
+  private localSources(peer: ManagedPeer): MediaSources | undefined {
+    if (typeof peer.pc.getTransceivers !== 'function') return undefined;
+    const sources: MediaSources = [];
+    for (const [sender, source] of [[peer.videoSender, 'screen-video'], [peer.audioSender, 'screen-audio'], [peer.cameraSender, 'camera-video']] as const) {
+      const transceiver = peer.pc.getTransceivers?.().find(item => item.sender === sender);
+      if (transceiver?.mid != null) sources.push({ mid: transceiver.mid, source });
+    }
+    return sources;
+  }
+
+  /** Internal publication seam. Caller owns capture, eligibility and track lifetime. */
+  async attachCameraStream(stream: MediaStream): Promise<void> {
+    if (this.disposed) return;
+    if (stream.getVideoTracks().length !== 1 || stream.getAudioTracks().length) throw new Error('Camera requires one video track and no audio');
+    const version = ++this.cameraVersion;
+    this.cameraStream = stream;
+    await this.configReady;
+    if (version !== this.cameraVersion || this.disposed) return;
+    for (const id of this.participants) this.getOrCreatePeer(id);
+    await Promise.all([...this.peers.values()].map(async peer => {
+      peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
+        if (this.peers.get(peer.id) !== peer || version !== this.cameraVersion) return;
+        const track = stream.getVideoTracks()[0];
+        if (peer.cameraSender) {
+          try { await peer.cameraSender.replaceTrack(track); }
+          catch (error) {
+            if ((error as Error).name !== 'InvalidModificationError') throw error;
+            if (version !== this.cameraVersion || this.peers.get(peer.id) !== peer) return;
+            peer.pc.removeTrack(peer.cameraSender);
+            peer.cameraSender = peer.pc.addTrack(track, stream);
+          }
+        } else peer.cameraSender = peer.pc.addTrack(track, stream);
+        peer.negotiationPending = true;
+      });
+      await peer.signalChain;
+      if (version === this.cameraVersion && this.peers.get(peer.id) === peer) await this.createAndSendOffer(peer.id);
+    }));
+  }
+
+  stopCamera(): Promise<void> {
+    this.cameraStream?.getTracks().forEach(track => track.stop());
+    return this.detachCameraStream();
+  }
+
+  async detachCameraStream(): Promise<void> {
+    this.cameraVersion++;
+    this.cameraStream = null;
+    await Promise.all([...this.peers.values()].map(peer => {
+      peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
+        if (this.peers.get(peer.id) !== peer) return;
+        try { await peer.cameraSender?.replaceTrack(null); }
+        catch { if (peer.cameraSender) peer.pc.removeTrack(peer.cameraSender); peer.cameraSender = null; peer.negotiationPending = true; }
+      });
+      return peer.signalChain;
+    }));
   }
 
   async attachLocalStream(stream: MediaStream): Promise<void> {
@@ -577,7 +674,7 @@ export class PeerManager {
     const run = async () => {
       if (this.peers.get(peer.id) !== peer) return false;
       const profile = resolveQuality(this.currentQuality);
-      const sender = peer.videoSender || peer.pc.getSenders().find(item => item.track?.kind === 'video');
+      const sender = peer.videoSender;
       if (!sender?.track) return true;
       if (!sender.getParameters || !sender.setParameters) return false;
       const configure = async (preference: boolean) => {
@@ -614,6 +711,7 @@ export class PeerManager {
     this.peerVersions.set(peerId, (this.peerVersions.get(peerId) || 0) + 1);
     this.participants.delete(peerId);
     this.sharing.delete(peerId);
+    this.cameras.delete(peerId);
     this.options.onDataDisconnect?.(peerId);
     if (!peer) return;
     if (peer.dataChannel) { peer.dataChannel.close(); peer.dataChannel = undefined; }
@@ -636,10 +734,14 @@ export class PeerManager {
 
     this.options.onPeerState?.(peerId, 'closed');
     this.options.onRemoteStreamRemove(peerId);
+    this.options.onRemoteCameraStream?.(peerId, null);
     this.options.logger?.log('pc-closed', { peer: peerId });
   }
 
   dispose(): void {
+    this.cameraStream?.getTracks().forEach(track => track.stop());
+    this.cameraVersion++;
+    this.cameraStream = null;
     this.disposed = true;
     this.localStream = null;
     this.closeAll();
@@ -652,5 +754,6 @@ export class PeerManager {
     }
     this.participants.clear();
     this.sharing.clear();
+    this.cameras.clear();
   }
 }
