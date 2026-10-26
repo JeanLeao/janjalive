@@ -12,10 +12,11 @@ Monorepo TypeScript: `apps/web` (interface e WebRTC), `apps/signaling` (WebSocke
 - Commit e push exigem autorização explícita do proprietário ou do handoff recebido. Quando autorizados, devem se limitar à branch, aos arquivos e ao escopo definidos. Correções de um PR existente podem ser publicadas na mesma branch, desde que essa publicação esteja autorizada no handoff.
 - Merge, deploy, force-push e operações destrutivas de Git exigem autorização específica e não são consequência automática da autorização de commit ou push.
 - Não edite manualmente arquivos gerados, como `apps/web/src/routeTree.gen.ts`; altere a fonte e use a geração existente.
+- Não versione relatórios extensos de feature, screenshots de revisão, logs, medições locais ou documentos temporários de agentes. Use a descrição do PR, os testes e o histórico Git como registro da entrega.
 
 ## Invariantes a preservar
 
-- **Mídia:** capture exclusivamente por `getDisplayMedia()`. O áudio, quando disponível, é da aba/sistema; não introduza captura de câmera, microfone ou `getUserMedia()` sem decisão explícita de produto.
+- **Mídia:** tela e áudio da aba/sistema usam `getDisplayMedia()`. A webcam opcional do apresentador usa `getUserMedia()` somente para vídeo (`audio: false`), subordinada à apresentação de tela, com prévia local e confirmação explícita antes da publicação. Não capture microfone. Pausar ou encerrar a tela e desconectar encerra a câmera; não a reative automaticamente.
 - **Transporte:** mantenha WebRTC mesh P2P e a separação entre sinalização e mídia. Em produção, web e signaling são serviços distintos sob a mesma origem via proxy reverso.
 - **Compartilhamento:** iniciar, parar pela interface ou pelo navegador, reiniciar, entrar tardiamente e reconectar devem funcionar sem recarregar a página. Mantenha o estado anunciado (`update-sharing` / `sharing-updated`) consistente com as tracks recebidas e preserve múltiplos apresentadores e seleção do palco.
 - **Recursos e concorrência:** parar a captura encerra as tracks locais e desanexa a mídia dos senders, mantendo conexões reutilizáveis. Encerrar a sessão limpa listeners, timers, conexões e referências, inclusive quando a autorização de captura ainda está pendente. Ao alterar negociação ou recuperação, preserve proteção equivalente contra ofertas concorrentes e ofertas, respostas ou ICE obsoletos; não remova rollback, serialização ou controle de gerações sem verificar os cenários que protegem.

@@ -150,7 +150,7 @@ Configure as variáveis de ambiente antes de inicializar os serviços.
 | `TRUSTED_PROXIES` | Opcional | `127.0.0.1,::1,127.0.0.0/8` | Lista separada por vírgula de IPs ou faixas CIDR de proxies reversos confiáveis (ex.: `127.0.0.1,172.17.0.1,172.16.0.0/12`). Essencial em contêineres Docker atrás de proxy no host. |
 
 > [!WARNING]
-> - **Formatação de `ALLOWED_ORIGINS`:** Nunca insira barra no final (`/`). O navegador envia `Origin: https://screen.exemplo.com`. Se a variável for configurada como `https://screen.exemplo.com/`, o teste de igualdade falhará e as conexões retornarão `403 Forbidden`.
+> - **Formatação de `ALLOWED_ORIGINS`:** Use origens completas, como `https://screen.exemplo.com`, com esquema e porta quando necessária, sem caminhos. A configuração é normalizada pelo servidor antes da comparação; confira a origem pública efetiva ao investigar respostas `403 Forbidden`.
 > - **Definição de `TURN_HOST`:** Se `TURN_SECRET` estiver configurado, sempre forneça `TURN_HOST` explicitamente com o endereço do seu coturn. Caso ausente quando um segredo for definido, o servidor de sinalização falhará imediatamente na inicialização (CFG-01).
 
 ### 2. Serviço Web e SSR (`apps/web`)
@@ -340,9 +340,9 @@ Para evitar substituições indevidas de participantes e negações de serviço 
      - **Sem token ou com token inválido:** A conexão concorrente ou hostil é rejeitada com erro `{ type: 'error', code: 'UNAUTHORIZED_RECONNECT' }` e seu socket é encerrado com código terminal `4401` (`WS_CLOSE_CODES.UNAUTHORIZED_RECONNECT`). A sessão legítima do participante permanece conectada e inalterada.
 
 3. **Ciclo de Vida Efêmero e Códigos de Fechamento:**
-   - O token é mantido estritamente em memória RAM (no cliente e no servidor). Não é armazenado em `localStorage`, cookies ou banco de dados.
+   - O servidor mantém o token em memória. O cliente o guarda no `sessionStorage` da aba, isolado por sala, junto das credenciais de sessão; não o inclua em convites ou logs. Não há armazenamento em `localStorage`, cookies ou banco de dados.
    - Quando o participante sai definitivamente (`signaling.disconnect()`) ou a sala é encerrada, o registro e o token são destruídos imediatamente, liberando a vaga.
-   - Ambos os códigos `4000` (`SUPERSEDED`), `4401` (`UNAUTHORIZED_RECONNECT`), `4009` (`ROOM_FULL`) e `4403` (`FORBIDDEN_ORIGIN`) são códigos de encerramento terminais (`isTerminalCloseCode`). Quando recebidos, o cliente desativa o reagendamento automático de conexão, evitando loops infinitos de reconexão.
+   - Os códigos `4000` (`SUPERSEDED`), `4401` (`UNAUTHORIZED_RECONNECT`), `4009` (`ROOM_FULL`) e `4403` (`FORBIDDEN_ORIGIN`) são exemplos de encerramentos terminais (`isTerminalCloseCode`); a lista atual está em `packages/protocol/src/messages.ts` e no [guia de diagnóstico](DEBUG.md#encerramentos-websocket). Quando recebidos, o cliente desativa o reagendamento automático de conexão, evitando loops infinitos de reconexão.
 
 ---
 
@@ -637,65 +637,10 @@ docker run -d --name screen-room-web --restart unless-stopped \
 
 ---
 
-## 10. Hardening Técnico e Mitigações Concluídas (Pré-MVP)
+## 10. Compatibilidade e recuperação
 
-Todas as recomendações da auditoria técnica do MVP de produção foram implementadas e validadas:
+Web, signaling e protocol devem usar contratos compatíveis. Atualize os serviços em conjunto e recarregue clientes antigos ao validar uma atualização; abas antigas não devem ser presumidas compatíveis com mudanças de protocolo.
 
-1. **Heartbeat WebSocket e Reconexão Resiliente (REL-01):**
-   - O servidor executa ping/pong a cada 30 segundos, detecta sockets inativos e encerra conexões zumbis, notificando os participantes da sala.
-   - O cliente reconecta automaticamente após quedas inesperadas usando backoff exponencial com jitter e teto, preservando o nickname e `peerId`, renegociando conexões WebRTC e restaurando streams sem requerer novamente permissão de captura de tela.
-   - Timers e reconexões são cancelados deterministicamente na saída voluntária da sala ou desmontagem de componentes.
+Reiniciar o signaling elimina salas, reservas e autoridades administrativas em memória. Informe os participantes antes de uma manutenção. Uma queda involuntária reserva identidade e vaga por 30 segundos; saída voluntária libera ambas imediatamente. A presença conta conectados, enquanto a capacidade considera conectados mais reservas.
 
-2. **Segurança de Origens e Eliminação de Bypass via Host (SEC-01 & CFG-02):**
-   - O bypass de autorização originado na comparação entre `Origin` e `Host` foi totalmente eliminado.
-   - Origens são normalizadas (esquema, porta, remoção de trailing slashes) e validadas estritamente contra `ALLOWED_ORIGINS`.
-   - Cabeçalhos `Host`, `X-Forwarded-Host` e `X-Forwarded-For` não são mais utilizados como autenticadores de origem.
-   - Requisições sem cabeçalho `Origin` são tratadas explicitamente como requisições internas/mesma-origem.
-
-3. **Validação de Payloads e Proteção Contra DoS (DOS-01):**
-   - Limite de mensagem recebida no WebSocketServer fixado em 64 KiB (`maxPayload`).
-   - Validação estrita de contratos via Zod (`ClientMessageSchema`), rejeição de mensagens antes de `join`, mensagens malformadas e relays para participantes inexistentes.
-   - Proteção proporcional de taxa de requisições em `/turn-credentials` e mensagens WebSocket.
-
-4. **Resolução Determinística de Colisões de peerId (BUG-01):**
-   - WebSockets que assumem o mesmo par `roomId:peerId` têm a conexão anterior substituída de forma determinística com dissociação de metadados, impedindo eventos falsos de saída (`peer-left`) ou corrupção do registro da sala.
-
-5. **Configuração TURN Segura e Alta Performance (CFG-01 & PERF-01):**
-   - Fallback de IP hardcoded (`169.58.238.52`) removido do código.
-   - A configuração de `TURN_HOST` é estritamente obrigatória quando o segredo TURN estiver configurado, falhando na inicialização caso ausente.
-   - Modo STUN-only preservado quando nenhum segredo for fornecido.
-   - Segredo carregado e mantido em cache de memória na inicialização, eliminando leituras repetitivas do disco.
-
-6. **Health Check Dedicado do Web (OPS-01):**
-   - Endpoint `/healthz-web` (e alias `/health-web`) implementado no serviço web, retornando HTTP 200 JSON imediatamente sem renderizar árvores React/SSR, sem conflito com o `/healthz` do signaling.
-
-7. **Docker Hardening e Otimização de Imagens (DOCKER-01 & DOCKER-02):**
-   - Ambos os contêineres (`signaling` e `web`) executam com usuário não-privilegiado (`USER node`, UID 1000).
-   - Health checks embutidos nos Dockerfiles usando `node -e fetch(...)`, sem dependência de `curl`.
-   - A imagem Docker do `apps/signaling` foi otimizada via `pnpm deploy --prod`, reduzindo de 480 MB para 244 MB em disco.
-
-8. **Correção de Dependência Vulnerável (SEC-02):**
-   - A vulnerabilidade de negação de serviço no `source-map-js` (<1.2.2) foi resolvida com override fixo para a versão `1.2.2`. Auditoria (`pnpm audit`) zerada.
-
-9. **Regra de Capacidade de 10 Participantes e Reserva Efêmera de Vaga por 30s — Política A (CAP-01):**
-   - Limite operacional padrão de **10 participantes simultâneos por sala** (incluindo o apresentador), aplicado diretamente no servidor de sinalização e não apenas na interface.
-   - Configurável operacionalmente via variável de ambiente `MAX_PARTICIPANTS_PER_ROOM` sem requerer alteração de código.
-   - **Reserva simultânea de identidade e vaga por 30 segundos (Política A):** ao ocorrer uma desconexão involuntária (queda abrupta de rede, terminação de socket ou timeout de heartbeat), a identidade (`peerId` + `reconnectToken`) e a vaga física do participante permanecem estritamente reservadas por até 30 segundos.
-   - **Invariante obrigatório de capacidade:** $\text{participantes ativos} + \text{reservas de vaga válidas} \le \text{capacidade máxima}$.
-   - **Distinção entre presença e controle de admissão:** a contagem de presença exibida aos usuários (`count`) contabiliza apenas participantes efetivamente conectados no momento. Já o controle de admissão (`occupiedSlots`) contabiliza a soma de participantes conectados e reservas ativas de vaga.
-   - **Rejeição atômica de novos entrantes:** enquanto a soma de ativos e reservas atingir a capacidade (ex.: 9 ativos + 1 reserva em sala de 10), novos visitantes são rejeitados imediatamente com mensagem clara (`Sala cheia: capacidade máxima de 10 participantes atingida.`, code: `ROOM_FULL`) e fechamento com código terminal `4009`, impedindo que terceiros ocupem a vaga de quem está reconectando.
-   - **Recuperação garantida:** o participante original reconectando com `reconnectToken` válido dentro da janela de 30 segundos recupera sua própria vaga reservada sem consumir espaço adicional e sem risco de encontrar a sala lotada.
-   - **Expiração da reserva:** se o participante não reconectar dentro do prazo de 30 segundos, a reserva expira automaticamente, liberando a vaga para novos participantes. Salas vazias sem participantes nem reservas ativas são eliminadas da memória.
-   - **Saída voluntária:** o envio de mensagem explícita `leave` ou o encerramento limpo do WebSocket (códigos `1000` ou `1005`) destrói o `reconnectToken` e libera a vaga e a identidade imediatamente para novos entrantes, sem reter reserva de 30 segundos.
-
-### Atualização do protocolo de compartilhamento
-
-Publique primeiro o servidor com suporte a `update-sharing`/`sharing-updated` e
-estado de transmissão nos snapshots, depois o cliente. Atualize todas as abas
-para validar parada remota, renegociação e recuperação. A atualização do cliente
-não exige aumentar o limite de dez participantes nem adicionar microfone.
-
-Antes de concluir a publicação, execute os testes locais descritos em DEBUG.md,
-depois confirme primeiro frame em até cinco segundos e parada em até um segundo
-no site publicado, em Chrome/Edge, redes distintas e relay obrigatório (TURN.md).
-Faça também uma verificação complementar em Firefox e Safari.
+Antes de concluir uma publicação, siga as verificações da seção 8 e os procedimentos de [diagnóstico](DEBUG.md). Confirme captura, primeiro frame, parada/reinício, entrada tardia, múltiplos apresentadores e reconexão; valide áudio e webcam opcionais separadamente. Exercite dispositivos/redes distintos e [relay obrigatório](TURN.md#validação-do-caminho-relay). Testes locais sintéticos não substituem essa validação.
