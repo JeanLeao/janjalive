@@ -1,3 +1,5 @@
+import { StageCamera, StageCameraControls, type CameraView } from './StageCamera';
+import type { CameraSnapshot } from '../media/camera-controller';
 import { StageViewControls, CinemaControl, FullscreenControl } from './StageViewControls';
 import { WatchPartyPanel, StageContentSelector } from './WatchParty';
 import { createPortal } from 'react-dom';
@@ -60,6 +62,8 @@ export interface RoomStageProps {
   onToggleCinema?: () => void;
   remoteConnectionStates?: Record<string, RTCPeerConnectionState>;
   onRetryPeer?: (peerId: string) => void;
+  camera?: CameraSnapshot;
+  remoteCameraStreams?: Record<string, MediaStream>;
   localStream: MediaStream | null;
   isSharing: boolean;
   remoteStreams: RemoteStreamEntry[];
@@ -101,6 +105,8 @@ export function RoomStage({
   onToggleCinema,
   remoteConnectionStates = {},
   onRetryPeer,
+  camera,
+  remoteCameraStreams = {},
   localStream,
   isSharing,
   remoteStreams,
@@ -180,6 +186,12 @@ export function RoomStage({
       console.error('Fullscreen toggle failed:', err);
     }
   };
+
+  const [cameraView, setCameraView] = useState<CameraView>({ mode: 'overlay', position: 'bottom-left' });
+  const cameraFor = (item: StreamItem) => item.isLocal
+    ? camera?.state === 'live' ? camera.stream : null
+    : remoteConnectionStates[item.id] === 'failed' || remoteConnectionStates[item.id] === 'closed'
+      ? null : remoteCameraStreams[item.id] ?? null;
 
   // Build stream items list
   const streamItems: StreamItem[] = [];
@@ -937,6 +949,8 @@ export function RoomStage({
         {/* Spotlight Video Element */}
         <SpotlightVideoPlayer
           key={activeStream.id}
+          cameraStream={cameraFor(activeStream)} cameraView={cameraView} onCameraViewChange={setCameraView}
+          cameraName={activeStream.displayName}
           audio={audioFor(activeStream)}
           controlsExpanded={primaryControlsExpanded} onControlsExpandedChange={setPrimaryControlsExpanded}
           onVideoPresented={onVideoPresented}
@@ -1061,7 +1075,7 @@ export function RoomStage({
           <span className="comparison-meta-badge">{sourceId === secondaryStream.id && !suspended ? 'Fonte de áudio' : 'Áudio secundário'}</span>
         </Box>
         <Box className="comparison-canvas" style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-          <SpotlightVideoPlayer key={secondaryStream.id} secondary audio={audioFor(secondaryStream)}
+          <SpotlightVideoPlayer cameraStream={cameraFor(secondaryStream)} cameraView={cameraView} onCameraViewChange={setCameraView} cameraName={secondaryStream.displayName} key={secondaryStream.id} secondary audio={audioFor(secondaryStream)}
             controlsExpanded={secondaryControlsExpanded} onControlsExpandedChange={setSecondaryControlsExpanded}
             stream={secondaryStream.paused ? null : secondaryStream.stream} isLocal={secondaryStream.isLocal}
             remotePeerId={secondaryStream.isLocal ? undefined : secondaryStream.id} onVideoPresented={onVideoPresented}
@@ -1140,6 +1154,7 @@ type AudioControl = {
 };
 
 function SpotlightVideoPlayer({
+  cameraStream, cameraView, onCameraViewChange, cameraName,
   audio,
   controlsExpanded, onControlsExpandedChange,
   secondary = false, comparisonControl,
@@ -1163,6 +1178,10 @@ function SpotlightVideoPlayer({
   isFullscreen,
   onToggleFullscreen,
 }: {
+  cameraStream: MediaStream | null;
+  cameraView: CameraView;
+  onCameraViewChange: (view: CameraView) => void;
+  cameraName: string;
   audio: AudioControl;
   controlsExpanded: boolean;
   onControlsExpandedChange: (expanded: boolean) => void;
@@ -1403,6 +1422,7 @@ function SpotlightVideoPlayer({
           {audioAvailable && audio.selected && !audio.preference.muted && videoRef.audioBlocked && <Button style={{ minHeight: 44 }} fullWidth mt="xs" onClick={() => { void videoRef.enableAudio(); audioMuteRef.current?.focus(); }}>Ativar áudio</Button>}
         </Popover.Dropdown>
       </Popover>}
+      {cameraStream && <StageCameraControls view={cameraView} onChange={onCameraViewChange} target={controlsRef.current?.closest<HTMLElement>('.stage-main-container') ?? undefined} />}
       {comparisonControl}
       {!secondary && onToggleCinema && <CinemaControl active={isCinema} onClick={onToggleCinema} />}
       {isCinema && streamCount > 0 && (
@@ -1536,7 +1556,9 @@ function SpotlightVideoPlayer({
         {playback === 'Falha na reprodução' && <Button size="xs" data-control-id="playback-retry-btn" onClick={() => videoRef.current?.play().catch(() => {})}>Tentar novamente</Button>}
       </Box>
     )}
+    <div className="stage-camera-composition" data-camera-mode={cameraStream ? cameraView.mode : 'hidden'}>
     <Box
+      className="stage-camera-screen"
       ref={zoom.viewportRef}
       tabIndex={effectiveTool !== 'navigate' ? 0 : undefined}
       aria-label={
@@ -1549,7 +1571,7 @@ function SpotlightVideoPlayer({
       onKeyDown={event => { if (event.key === 'Escape') setTool('navigate'); }}
       data-testid="zoom-viewport"
       data-control-id="zoom-viewport"
-      style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
+      style={{ position: 'absolute', overflow: 'hidden' }}
     >
     {!stream && <Box role="status" style={{ textAlign: 'center', padding: 24, position: 'absolute', inset: 0, display: 'grid', placeContent: 'center' }}>
       <Text c="white">Transmissão pausada</Text>
@@ -1584,6 +1606,8 @@ function SpotlightVideoPlayer({
     )}
     </div>
     </Box>
+    {cameraStream && cameraView.mode !== 'hidden' && <StageCamera stream={cameraStream} name={cameraName} position={cameraView.position} />}
+    </div>
     </>
   );
 }
