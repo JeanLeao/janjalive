@@ -492,12 +492,13 @@ function RoomPageContent() {
 
       {session.pendingStream && (
         <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
-          stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
+          stream={session.pendingStream} replacing cameraLive={session.camera.state === 'live'} pending={session.captureState === 'switch-publishing'}
           onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
       )}
 
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
+        cameraControl={{ camera: session.camera, canActivate: session.captureState === 'sharing' && session.connectionStatus === 'connected', onRequest: session.requestCamera, onPublish: session.publishCamera, onStop: session.stopCamera }}
         collapsible={dockCollapsible}
         expanded={dockExpanded}
         onExpandedChange={setDockPreference}

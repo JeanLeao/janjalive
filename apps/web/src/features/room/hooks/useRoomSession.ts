@@ -1,3 +1,4 @@
+import { CameraController, type CameraSnapshot } from '../media/camera-controller';
 import { useWatchParty } from './useWatchParty';
 import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
 import { useLocalClips } from './useLocalClips';
@@ -179,6 +180,24 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const signalingRoomRef = useRef<string | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
   const statsCollectorRef = useRef<StatsCollector | null>(null);
+  const [camera, setCamera] = useState<CameraSnapshot>({ state: 'off', stream: null, error: null });
+  const cameraController = useMemo(() => new CameraController({
+    eligible: () => !terminalSessionRef.current && Boolean(sharingIdRef.current) &&
+      (captureStateRef.current === 'sharing' || captureStateRef.current.startsWith('switch-')) &&
+      signalingRef.current?.getState() === 'connected',
+    capture: constraints => {
+      if (!navigator.mediaDevices?.getUserMedia) return Promise.reject(new DOMException('Camera unavailable', 'NotFoundError'));
+      return navigator.mediaDevices.getUserMedia(constraints);
+    },
+    attach: stream => {
+      if (!peerManagerRef.current) return Promise.reject(new Error('Session unavailable'));
+      return peerManagerRef.current.attachCameraStream(stream);
+    },
+    stop: () => peerManagerRef.current?.stopCamera() ?? Promise.resolve(),
+    announce: active => signalingRef.current?.updateCamera(active),
+    changed: setCamera,
+  }), [roomId]);
+
   const [fileDeliveries, setFileDeliveries] = useState<FileDelivery[]>([]);
   const files = useMemo(() => new FileTransferManager({
     send: message => signalingRef.current?.send(message) ?? false,
@@ -259,6 +278,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
 
     // Create PeerManager
     const peerManager = new PeerManager({
+      onCameraError: () => cameraController.publicationFailed(),
       rtcConfigReady: iceConfiguration,
       refreshRtcConfig: () => fetchIceConfiguration(undefined, logger),
       localPeerId: peerId,
@@ -374,8 +394,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           collaborationReadyRef.current = false;
           annotations.reset();
         }
+        if (state !== 'connected') cameraController.stop();
         if (state === 'disconnected') {
-          void peerManager.stopCamera();
           peerManager.closeAll();
         }
         if (state === 'connected') {
@@ -622,6 +642,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       annotations.reset();
       signalingRef.current = null;
       interactionsRef.current.resetConnection();
+      cameraController.stop();
       captureGenerationRef.current++;
       qualityOperationRef.current = null;
       setQualityPending(false);
@@ -655,7 +676,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       clearRoomSession(roomId);
       signaling.disconnect();
     };
-  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery, files]);
+  }, [roomId, showToast, enabled, annotations, stageSelectionPublisher, cancelPendingRecovery, files, cameraController]);
 
   const stopSharing = useCallback(() => {
     stageSelectionPublisher.cancel();
@@ -698,7 +719,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     });
 
     // End capture immediately; do not allow a new capture to overtake sender cleanup.
-    void peerManagerRef.current?.stopCamera();
+    cameraController.stop();
     const detached = peerManagerRef.current?.detachLocalStream() ?? Promise.resolve();
     void detached.catch(() => {
       if (generation === captureGenerationRef.current) setErrorMessage('A captura foi encerrada; houve falha ao limpar a conexão.');
@@ -706,7 +727,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (generation === captureGenerationRef.current) transition('idle');
     });
     loggerRef.current?.log('screen-stopped');
-  }, [annotations, stageSelectionPublisher]);
+  }, [annotations, stageSelectionPublisher, cameraController]);
 
   const startSharing = useCallback(async () => {
     if (terminalSessionRef.current || captureStateRef.current !== 'idle') return;
@@ -747,7 +768,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       // Listen for browser native stop button
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        const handler = () => { if (localStreamRef.current === stream && !switchRef.current) stopSharing(); };
+        const handler = () => { if (localStreamRef.current === stream) { if (switchRef.current) cameraController.stop(); else stopSharing(); } };
         endedHandlerRef.current = { track: videoTrack, handler };
         videoTrack.addEventListener('ended', handler, { once: true });
       }
@@ -760,7 +781,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       showToast(msg);
       loggerRef.current?.log('screen-capture-error', { error: err?.name, message: err?.message });
     }
-  }, [stopSharing, showToast]);
+  }, [stopSharing, showToast, cameraController]);
 
   const publishCapture = useCallback(async () => {
     const state = captureStateRef.current;
@@ -803,8 +824,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     if (!['sharing', 'publishing', 'resuming'].includes(captureStateRef.current)) return;
     const generation = ++captureGenerationRef.current;
     transition('pausing');
-    signalingRef.current?.updateCamera(false);
-    void peerManagerRef.current?.stopCamera();
+    cameraController.stop();
     try {
       await peerManagerRef.current?.detachLocalStream();
       if (generation !== captureGenerationRef.current) return;
@@ -818,7 +838,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       stopSharing();
       setErrorMessage('Falha ao pausar. A captura foi encerrada por segurança.');
     }
-  }, [stopSharing]);
+  }, [stopSharing, cameraController]);
 
   const cancelSwitch = useCallback(async () => {
     const change = switchRef.current;
@@ -921,7 +941,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       }
       change.removePendingListener?.();
       const track = stream.getVideoTracks()[0];
-      const handler = () => { if (localStreamRef.current === stream && !switchRef.current) stopSharing(); };
+      const handler = () => { if (localStreamRef.current === stream) { if (switchRef.current) cameraController.stop(); else stopSharing(); } };
       track.addEventListener('ended', handler, { once: true });
       endedHandlerRef.current = { track, handler };
       localStreamRef.current = stream;
@@ -944,7 +964,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       stopSharing();
       setErrorMessage('Falha ao publicar a nova origem. Compartilhamento encerrado por segurança.');
     }
-  }, [cancelSwitch, stopSharing, annotations]);
+  }, [cancelSwitch, stopSharing, annotations, cameraController]);
 
   const selectFeaturedStream = useCallback((streamId: string) => {
     // Only this explicit UI action publishes a choice. Remote follow and automatic fallback
@@ -1220,7 +1240,11 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setModerationPending(Boolean(sent));
       if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
     },
-    leaveRoom: () => { clipsRef.current.reset(); watchRef.current.reset(); setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
+    camera,
+    requestCamera: cameraController.request,
+    publishCamera: cameraController.publish,
+    stopCamera: cameraController.stop,
+    leaveRoom: () => { cameraController.stop(); clipsRef.current.reset(); watchRef.current.reset(); setKeyStatus(null); clearRoomSession(roomId); signalingRef.current?.disconnect(); },
     onVideoPresented: (peerId: string, stream: MediaStream) => {
       if (remoteStreams.some(entry => entry.peerId === peerId && entry.stream === stream)) {
         loggerRef.current?.log('first-frame-presented', { peer: peerId, stream: stream.id, evidence: 'video-frame-callback' });

@@ -6,7 +6,8 @@ import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import classes from './CapturePreview.module.css';
 import { IconChevronDown, IconInfo, IconVolume, IconVolumeMute } from './Icons';
 
-export function CapturePreview({ stream, pending, replacing = false, onConfirm, onCancel, quality, onChangeQuality, qualityPending = false, qualityNotice }: {
+export function CapturePreview({ stream, pending, replacing = false, onConfirm, onCancel, quality, onChangeQuality, qualityPending = false, qualityNotice, cameraLive = false }: {
+  cameraLive?: boolean;
   quality: QualitySelection; onChangeQuality?: (quality: QualitySelection) => void; qualityPending?: boolean; qualityNotice?: string | null;
   replacing?: boolean; stream: MediaStream; pending: boolean; onConfirm: () => void; onCancel: () => void;
 }) {
@@ -26,6 +27,7 @@ export function CapturePreview({ stream, pending, replacing = false, onConfirm, 
       }}>
       <div className={classes.scrollArea}>
         <PreviewVideo stream={stream} />
+        {cameraLive && <Text role="status" c="#7ee787" size="sm">Câmera continua ao vivo durante a troca de tela.</Text>}
         <Group className={classes.metadata} justify="space-between" gap="xs" aria-live="polite">
           <Text size="xs" c="#c9d1d9">{pending ? 'Entrando ao vivo…' : replacing ? 'Nova origem — não está ao vivo' : 'Não está ao vivo'}</Text>
           <Group gap={6} c="#9da7b3">
@@ -95,7 +97,7 @@ export function CapturePreview({ stream, pending, replacing = false, onConfirm, 
           {qualityPending && <Text size="xs" c="#c9d1d9">Aplicando qualidade…</Text>}
           {!qualityPending && qualityNotice && <Text size="xs" c="#e3b341">{qualityNotice}</Text>}
         </div>
-        {replacing && <Text size="sm" c="#c9d1d9" mt="xs">{pending ? 'Publicando a nova origem. Você pode parar o compartilhamento.' : 'A transmissão está suspensa. Confirme para transmitir a nova origem ou cancele para voltar à anterior.'}</Text>}
+        {replacing && <Text size="sm" c="#c9d1d9" mt="xs">{pending ? 'Publicando a nova origem. Você pode parar o compartilhamento.' : 'A transmissão da tela está suspensa. Confirme para transmitir a nova origem ou cancele para voltar à anterior.'}</Text>}
       </div>
       <Group className={classes.footer} justify="flex-end" gap="sm" wrap="nowrap">
         <Button variant="default" h={44} onClick={onCancel}>{replacing && pending ? 'Parar' : 'Cancelar'}</Button>
