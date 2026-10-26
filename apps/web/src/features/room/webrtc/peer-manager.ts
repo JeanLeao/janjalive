@@ -58,7 +58,7 @@ export class PeerManager {
     const next = new Set(ids);
     for (const id of this.participants) if (!next.has(id)) this.removePeer(id);
     this.participants = next;
-    if (this.localStream) for (const id of next) void this.createAndSendOffer(id);
+    if (this.hasLocalMedia()) for (const id of next) void this.createAndSendOffer(id);
   }
 
   addParticipant(id: string): void {
@@ -71,7 +71,7 @@ export class PeerManager {
       return;
     }
     this.participants.add(id);
-    if (this.localStream) void this.createAndSendOffer(id);
+    if (this.hasLocalMedia()) void this.createAndSendOffer(id);
   }
 
   setRemoteCamera(id: string, active: boolean): void {
@@ -90,6 +90,11 @@ export class PeerManager {
   private cameraStream: MediaStream | null = null;
   private cameraVersion = 0;
   private localStream: MediaStream | null = null;
+  // A source switch detaches the screen while the independent camera stays published.
+  private hasLocalMedia(): boolean {
+    return Boolean(this.localStream || this.cameraStream);
+  }
+
   private currentQuality: QualitySelection = DEFAULT_QUALITY;
   private qualityChain: Promise<unknown> = Promise.resolve();
   private readonly configReady: Promise<void>;
@@ -325,7 +330,7 @@ export class PeerManager {
     this.participants.add(id);
     if (active !== undefined) this.sharing.set(id, active);
     if (camera !== undefined) this.cameras.set(id, camera);
-    if (this.localStream || active) void this.createAndSendOffer(id);
+    if (this.hasLocalMedia() || active) void this.createAndSendOffer(id);
   }
 
   async createAndSendOffer(peerId: string): Promise<void> {
@@ -347,12 +352,12 @@ export class PeerManager {
         // Data-only peers use a deterministic initial offerer. This avoids
         // rolling back the very first SCTP offer and retiring its gathered ICE.
         // Media negotiations continue to use the existing perfect-negotiation path.
-        if (peer.dataChannel && !this.localStream && !this.sharing.get(peerId) && !peer.pc.remoteDescription &&
+        if (peer.dataChannel && !this.hasLocalMedia() && !this.sharing.get(peerId) && !peer.pc.remoteDescription &&
             this.options.localPeerId && this.options.localPeerId > peerId) {
           peer.negotiationPending = false;
           return;
         }
-        if ((!this.localStream && !peer.pc.remoteDescription && !this.sharing.get(peerId) && !peer.dataChannel) || peer.pc.signalingState !== 'stable') {
+        if ((!this.hasLocalMedia() && !peer.pc.remoteDescription && !this.sharing.get(peerId) && !peer.dataChannel) || peer.pc.signalingState !== 'stable') {
           this.options.logger?.log('offer-skip', { peer: peerId, signalingState: peer.pc.signalingState });
           return;
         }

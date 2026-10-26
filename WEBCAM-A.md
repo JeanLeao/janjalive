@@ -115,3 +115,54 @@ A implementação local foi concluída na `main`, no HEAD de referência acima.
 Nenhuma decisão adicional de produto é necessária para integrar estes contratos. A Etapa B precisa de sua
 própria autorização e deverá implementar captura sem microfone, elegibilidade,
 publicação manual, tratamento isolado de falhas e limites iniciais de qualidade.
+
+## Correção de negociação durante troca de origem — PR #44
+
+A decisão de iniciar mídia considera agora `localStream || cameraStream` nos
+caminhos `setParticipants()`, `addParticipant()`, `resetPeer()` e nas duas
+condições iniciais de `createAndSendOffer()`. Uma câmera ainda publicada durante
+a desanexação temporária da tela permite criar e recriar a conexão, inclusive se
+houver canal de dados. Sem mídia, a regra determinística da oferta inicial apenas
+de dados continua aplicada; descrições remotas, apresentação remota e canal de
+dados continuam motivos legítimos para negociar.
+
+Não há alterações de protocolo, signaling, captura, interface, filas, rollback ou
+controles de geração. Pausa explícita continua usando `stopCamera()`, enquanto
+troca de origem desanexa somente a tela.
+
+Regressões novas em `peer-manager.test.js` cobrem as três entradas, confirmação e
+cancelamento da troca, oferta de câmera com canal de dados, rejeição de ofertas e
+respostas obsoletas após reset e ausência de ofertas após desligar a câmera. Antes
+da correção, quatro testes novos falharam nos caminhos afetados.
+
+Os dois E2E novos usam canvas e exigem quadros de câmera decodificados antes de
+restaurar a tela, inclusive após recriar a conexão. Verificam confirmação e
+cancelamento, restauração da tela com câmera preservada e desligamento explícito
+sem criar conexão para outro espectador.
+
+Validação desta correção:
+
+- `pnpm --filter @screen-room/signaling... build` e `pnpm typecheck`: aprovados.
+- `pnpm test`: 409 aprovados (protocol 21, signaling 128, web 260).
+- E2E Chromium de webcam/compartilhamento: 8 aprovados e 1 falha no cenário com
+  nove espectadores, por timeout de reprodução. Ambos os novos cenários passaram.
+  O histórico anterior já registra esse cenário falhando no HEAD de referência;
+  não foi feita nova comparação nesta correção nem determinada a causa.
+- E2E F15: 3/3 aprovados, cobrindo negociação entre espectadores sem mídia,
+  consentimento, download binário, cancelamento, reutilização da conexão do
+  apresentador, solicitações bidirecionais, desconexão e entrada tardia.
+
+Comandos E2E desta correção:
+
+```sh
+pnpm --filter @screen-room/web test:e2e --grep 'camera infrastructure|concurrent presenters keep|camera-only source switch|simultaneous initial offers|spectator and presenter recover|F27 detach barrier|F27 first audio|late join and a presenter'
+pnpm --filter @screen-room/web test:e2e --grep 'F15: spectators|F15: presenter connection reuse'
+```
+
+Os limites anteriores de validação física, navegadores e TURN continuam válidos.
+F34 não foi reexecutado nesta correção. Nenhuma alteração da Etapa B foi iniciada.
+
+`pnpm build` e `git diff --check` também foram aprovados para esta correção.
+Logs locais: `/tmp/webcam-fix-types.log`, `/tmp/webcam-fix-tests2.log`,
+`/tmp/webcam-fix-e2e.log`, `/tmp/webcam-fix-data-e2e.log` e
+`/tmp/webcam-fix-build.log`.
