@@ -1,4 +1,4 @@
-# F20 — benchmark local
+# Benchmark local
 
 Usar Node 22+ e pnpm da raiz (packageManager). Instalar dependências com
 `pnpm install --frozen-lockfile` e Chromium com
@@ -27,7 +27,7 @@ dos senders registram o resultado efetivamente aplicado; não representam FPS me
 
 O início do tempo de publicação é performance.now() do Node imediatamente antes
 do click Playwright em Entrar ao vivo (inclui despacho/actionability do click).
-O primeiro callback remoto do observador F18 é comunicado via exposed binding;
+O primeiro callback remoto do observador de apresentação é comunicado via exposed binding;
 o Node registra sua chegada usando o mesmo relógio monotônico. Não há subtração
 de relógios entre processos. Esse tempo inclui transporte e agendamento do
 harness, não mede latência interna de mídia. O observador é armado antes da
@@ -87,22 +87,9 @@ novo. O processo pode aprovar esse caso, mas a campanha fica running/incompleta;
 nenhum resumo completo é gerado. Interrupções e falhas também não são retomadas
 ou completadas com resultados antigos. Não compartilhar arquivos brutos sem revisão.
 
-Os resultados históricos em /tmp/screen-f20-results e as tabelas de F20.md foram
-preservados. Eles antecedem o manifesto: continuam evidência histórica, mas são
-recusados pelos novos consumidores. Não há migração que atribua retroativamente
-uma identidade verificada, nem modo permissivo para incorporá-los silenciosamente.
-Uma futura campanha medida deve usar o comando acima e um novo diretório.
-
 CPU/memória de processos não são coletadas: o browser e seu processo de rede são
 compartilhados, junto com renderer/GPU, signaling e Vite no host. Memória livre e
 load do SO são somente contexto no início da rodada, não consumo atribuído.
-Veja F20.md na raiz para ambiente e resultados desta campanha.
-
-Depois do summarizer, validar integridade com:
-
-```sh
-node apps/web/benchmark/validate.mjs "$F20_OUTPUT"
-```
 
 Controle negativo reproduzível, separado da campanha: descarta somente a
 notificação ao harness, preservando mídia e callback nativos. O Playwright deve

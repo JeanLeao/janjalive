@@ -28,3 +28,18 @@ test-results/
 /docs/legal/design-consistency.md
 /docs/legal/visual-review.md
 /docs/f14-ui-rebuild/README.md
+
+# Retired implementation reports kept only in the local workspace
+/F13.md
+/F14.md
+/F16.md
+/F19.md
+/F20.md
+/F27.md
+/F29-REVIEW.md
+/FILES.md
+/TEST-STABILITY.md
+/WEBCAM-A.md
+/WEBCAM-B.md
+/WEBCAM-C.md
+/WEBCAM-D.md
