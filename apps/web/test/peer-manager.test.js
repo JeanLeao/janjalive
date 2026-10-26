@@ -910,3 +910,55 @@ test('obsolete camera parameter failure cannot stop a newer capture', async () =
   assert.equal(errors,0); assert.equal(fresh.getVideoTracks()[0].readyState,'live');
   assert.equal(peer.cameraSender.track,fresh.getVideoTracks()[0]); manager.dispose();
 });
+
+test('camera adaptation retains reduced ceiling for late and recreated peers and never modifies screen or audio', async () => {
+  const manager = new PeerManager({ rtcConfig: { iceServers: [] }, localPeerId: 'host',
+    onSendSignal: () => true, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {} });
+  const screen=new MockMediaStream([new MockMediaStreamTrack('video'),new MockMediaStreamTrack('audio')]);
+  await manager.attachLocalStream(screen); manager.setParticipants(['one']);
+  await manager.attachCameraStream(new MockMediaStream());
+  const peer=manager.getPeer('one');
+  const screenParameters=structuredClone(peer.videoSender.getParameters());
+  const audio=peer.audioSender.track;
+  const sent=[]; manager.options.onSendSignal=(...args)=>sent.push(args);
+  await manager.reduceCameraQuality();
+  assert.equal(sent.length,0,'sender adjustments do not negotiate');
+  const check=id=>{
+    const encoding=manager.getPeer(id).cameraSender.getParameters().encodings[0];
+    assert.equal(encoding.maxBitrate,220000); assert.equal(encoding.maxFramerate,10); assert.equal(encoding.scaleResolutionDownBy,1.5);
+  };
+  check('one'); manager.addParticipant('two'); await manager.createAndSendOffer('two'); check('two');
+  manager.resetPeer('two'); await manager.createAndSendOffer('two'); check('two');
+  assert.deepEqual(peer.videoSender.getParameters(),screenParameters); assert.equal(peer.audioSender.track,audio);
+  await manager.applyQuality({profile:'ultra',fps:60,priority:'motion'}); check('one');
+  await manager.reduceCameraQuality(); assert.equal(manager.getCameraLevel(),2);
+  const low=peer.cameraSender.getParameters().encodings[0];
+  assert.equal(low.maxBitrate,120000); assert.equal(low.maxFramerate,7); assert.equal(low.scaleResolutionDownBy,2);
+  await manager.stopCamera(); await manager.attachCameraStream(new MockMediaStream());
+  assert.equal(manager.getCameraLevel(),0); manager.dispose();
+});
+
+test('camera adaptation queued before stop cannot modify a new publication', async () => {
+  const manager = new PeerManager({rtcConfig:{iceServers:[]},onSendSignal:()=>true,onRemoteStreamAdd:()=>{},onRemoteStreamRemove:()=>{}});
+  manager.setParticipants(['one']); await manager.attachCameraStream(new MockMediaStream());
+  const peer=manager.getPeer('one'); let release;
+  peer.signalChain=new Promise(resolve=>{release=resolve;});
+  const adapting=manager.reduceCameraQuality(); const stopping=manager.stopCamera();
+  const fresh=new MockMediaStream(); const publishing=manager.attachCameraStream(fresh);
+  release(); await Promise.all([adapting,stopping,publishing]);
+  assert.equal(manager.getCameraLevel(),0); assert.equal(peer.cameraSender.track,fresh.getVideoTracks()[0]);
+  assert.equal(peer.cameraSender.getParameters().encodings[0].maxBitrate,400000); manager.dispose();
+});
+
+test('camera adaptation setParameters failure releases only camera and preserves presentation', async () => {
+  let errors=0;
+  const manager=new PeerManager({rtcConfig:{iceServers:[]},onSendSignal:()=>true,onRemoteStreamAdd:()=>{},onRemoteStreamRemove:()=>{},onCameraError:()=>errors++});
+  const screen=new MockMediaStream([new MockMediaStreamTrack('video'),new MockMediaStreamTrack('audio')]);
+  await manager.attachLocalStream(screen); manager.setParticipants(['one']);
+  const camera=new MockMediaStream(); await manager.attachCameraStream(camera);
+  const peer=manager.getPeer('one'); peer.cameraSender.setParameters=async()=>{throw new Error('unsupported');};
+  await manager.reduceCameraQuality();
+  assert.equal(errors,1); assert.equal(camera.getVideoTracks()[0].readyState,'ended');
+  assert.equal(peer.videoSender.track,screen.getVideoTracks()[0]); assert.equal(peer.audioSender.track,screen.getAudioTracks()[0]);
+  assert.equal(peer.pc.connectionState==='closed',false); manager.dispose();
+});

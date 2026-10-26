@@ -142,6 +142,11 @@ export function FloatingControlDock({
           .floating-dock-primary .mantine-Button-section { margin: 0; }
         }
       `}</style>
+      {cameraControl?.camera.state === 'suspended' && <Box role="status" style={{
+        position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+        width: 'min(300px, calc(100vw - 24px))', padding: '8px 12px', fontSize: 12,
+        color: '#e6edf3', background: '#161b22', border: '1px solid #484f58', borderRadius: 12,
+      }}>{cameraControl.camera.error}</Box>}
       {cameraControl?.camera.state === 'live' && <Box role="status" style={{
         position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
         color: '#7ee787', background: '#161b22', border: '1px solid #484f58', borderRadius: 16,

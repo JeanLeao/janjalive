@@ -79,3 +79,18 @@ test('camera: duplicate requests never trigger a second permission prompt', asyn
   const first=f.controller.request(); await f.controller.request(); assert.equal(calls,1);
   pending.resolve(f.captured); await first; await f.controller.request(); assert.equal(calls,1); f.controller.stop();
 });
+
+test('camera: quality suspension releases capture, announces false and requires new preview and confirmation', async () => {
+  const f=fixture(); await f.controller.request(); await f.controller.publish();
+  f.controller.suspendForQuality();
+  assert.equal(f.states.at(-1).state,'suspended');
+  assert.match(f.states.at(-1).error,/qualidade de conexão/);
+  assert.equal(f.captured.track.readyState,'ended');
+  assert.deepEqual(f.announcements,[true,false]);
+  await f.controller.publish(); assert.equal(f.states.at(-1).state,'suspended');
+  assert.equal(f.constraints.length,1);
+  f.captured.track.readyState='live';
+  await f.controller.request(); assert.equal(f.states.at(-1).state,'preview');
+  assert.deepEqual(f.announcements,[true,false]);
+  await f.controller.publish(); assert.equal(f.states.at(-1).state,'live');
+});

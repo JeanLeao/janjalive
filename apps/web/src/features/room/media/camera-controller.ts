@@ -1,4 +1,4 @@
-export type CameraState = 'off' | 'requesting' | 'preview' | 'publishing' | 'live' | 'error';
+export type CameraState = 'off' | 'requesting' | 'preview' | 'publishing' | 'live' | 'error' | 'suspended';
 export interface CameraSnapshot { state: CameraState; stream: MediaStream | null; error: string | null }
 
 /** Owns capture lifetime; a generation invalidates permission and publication continuations. */
@@ -41,8 +41,14 @@ export class CameraController {
     this.change('error', null, message);
   }
   publicationFailed = () => { this.fail(new Error('Camera publication failed')); };
+  suspendForQuality = () => {
+    if (this.snapshot.state !== 'live') return;
+    this.stop();
+    this.change('suspended', null, 'Câmera suspensa por qualidade de conexão. A tela continua ativa. Ative novamente quando desejar.');
+  };
+  isLive = () => this.snapshot.state === 'live';
   request = async () => {
-    if (!this.options.eligible() || !['off', 'error'].includes(this.snapshot.state)) return;
+    if (!this.options.eligible() || !['off', 'error', 'suspended'].includes(this.snapshot.state)) return;
     const generation = ++this.generation;
     this.change('requesting');
     try {

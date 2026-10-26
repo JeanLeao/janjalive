@@ -67,3 +67,77 @@ Cada apresentador envia uma cópia por espectador. Upload aproximado de vídeo �
 Múltiplos apresentadores controlam independentemente suas transmissões. Com N participantes e M apresentadores, existem até M × (N − 1) fluxos. Espectadores podem receber vários vídeos simultaneamente, elevando download e decodificação mesmo que apenas um esteja no palco.
 
 O limite padrão permanece 10 participantes, incluindo reservas temporárias de reconexão de 30 segundos para quedas involuntárias. Saídas voluntárias liberam a vaga imediatamente. Não há garantia de desempenho para dez apresentadores simultâneos; este slice não introduz SFU, simulcast ou negociação avançada de codecs.
+
+## Webcam opcional — Etapa D
+
+A webcam tem observação e adaptação próprias, sem alimentar ou substituir as
+métricas da tela/F34. O teto inicial da captura continua 640×360 a 15 FPS. Os
+perfis de **envio por destinatário** são centralizados em
+`stats/camera-quality.ts`:
+
+| Nível | Bitrate máximo | FPS máximo | `scaleResolutionDownBy` |
+| --- | ---: | ---: | ---: |
+| Inicial | 400 Kbps | 15 | 1 |
+| Reduzido | 220 Kbps | 10 | 1,5 |
+| Mínimo | 120 Kbps | 7 | 2 |
+
+O fator se aplica à resolução capturada, que pode ser menor que 640×360. São
+solicitações ao sender, sem nova captura ou renegociação; não garantem qualidade
+entregue. Novos peers e peers recriados recebem o nível vigente. Alterar a
+qualidade manual da tela não altera os limites da webcam. Uma nova publicação
+manual da câmera reinicia no nível inicial. Não há recuperação automática da
+webcam, nem reativação automática após suspensão.
+
+A coleta a cada 3 s associa exatamente um outbound da câmera ao `cameraSender`
+por `mid` ou `trackIdentifier`. Sem associação inequívoca não adapta. Exige conexão
+ativa, mesma track/conexão/ID, timestamps avançando em até 6 s, intervalo local
+positivo de até 6 s, bytes monotônicos e aumento de `framesEncoded`. A primeira
+amostra cria a referência. Relatórios remotos precisam ter `localId` correto,
+identidade e timestamp avançando em até 6 s, estar a até 6 s do outbound e fornecer
+contadores monotônicos de recebidos/perdidos, com ao menos 50 pacotes no intervalo
+e recebidos positivos. RTT só é usado desse relatório validado; não usa média de
+RTT acumulada nem perda de recepção de outro apresentador.
+
+Uma amostra ruim exige **perda ≥8%**, **RTT remoto ≥450 ms** (com intervalo de
+pacotes válido), ou motivo de limitação do encoder **cpu/bandwidth** com atividade
+de codificação válida. Limitação do encoder pode fornecer evidência independente
+mesmo sem relatório remoto; nesse caso perda/RTT continuam indisponíveis. FPS ou
+bitrate baixos isolados não são tratados como congestionamento. Ausência de
+estatísticas não equivale a qualidade boa, e interrompe a janela daquele peer.
+
+Quatro amostras ruins consecutivas do **mesmo destinatário** ao longo de pelo
+menos **9 s** autorizam uma redução. Não há média que esconda esse destinatário.
+Cada decisão descarta as referências e exige nova evidência no nível seguinte;
+há cooldown global de **15 s**. No nível mínimo, são necessárias pelo menos
+**11 amostras ruins em 30 s**, novamente nesse nível, para suspender. Amostras
+boas/insuficientes, lacunas, troca de track/peer, mudança de topologia e transições
+da captura descartam a continuidade. Coleta obsoleta ou que demora mais de 6 s
+não decide. As filas de sinalização e versões da publicação protegem ajustes
+assíncronos contra desligamento e uma câmera posterior.
+
+A decisão sobre a câmera é enfileirada antes da decisão F34 da mesma coleta,
+para aliviar primeiro a fonte secundária quando houver evidência sustentada.
+Isso **não adia a proteção necessária da tela**: a F34 continua usando sua própria
+perda, cooldown, estabilidade e preferência manual. Tela e áudio não são alterados
+pelos ajustes da câmera. Pausa/desconexão encerram a câmera; troca de tela preserva
+o perfil da câmera e invalida a observação anterior. Não há limite global de
+webcams nem mudança de protocolo.
+
+Suspensão encerra a track, desanexa os senders e anuncia `update-camera: false`.
+O dock exibe um aviso persistente de suspensão por qualidade, inclusive recolhido.
+O apresentador pode ativar novamente pelo fluxo normal de prévia e confirmação.
+Falha de `setParameters()` continua isolada: encerra a câmera com aviso de falha
+de publicação, preservando tela, áudio e negociação.
+
+`camera-quality-requested`, `camera-quality-accepted`, `camera-quality-stats`,
+`camera-quality-reduction`, `camera-quality-suspension` e `camera-quality-obsolete`
+distinguem solicitação, parâmetros retornados, medições disponíveis, decisões,
+indisponibilidade e resultados descartados. Aceitação não comprova FPS, resolução
+ou bitrate entregues. Histórico e política são separados da F34.
+
+**Calibração experimental:** 8%, 450 ms, 50 pacotes, 9/15/30 s e os níveis
+intermediários são hipóteses conservadoras explícitas, não limites derivados de
+medições em redes reais. Os testes de estatísticas verificam a máquina de estados,
+sem reproduzir congestionamento. Medições locais e limitações estão em
+[WEBCAM-D.md](WEBCAM-D.md); não demonstram desempenho garantido para dez pessoas
+em redes e dispositivos diferentes.

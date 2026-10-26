@@ -166,3 +166,9 @@ F34 não foi reexecutado nesta correção. Nenhuma alteração da Etapa B foi in
 Logs locais: `/tmp/webcam-fix-types.log`, `/tmp/webcam-fix-tests2.log`,
 `/tmp/webcam-fix-e2e.log`, `/tmp/webcam-fix-data-e2e.log` e
 `/tmp/webcam-fix-build.log`.
+
+## Continuidade — Etapa D
+
+A observação e adaptação independentes da câmera agora usam os senders e a
+identificação por fonte desta infraestrutura. Ver [WEBCAM-D.md](WEBCAM-D.md)
+para política, validação integrada e comparação atual do cenário de nove espectadores.

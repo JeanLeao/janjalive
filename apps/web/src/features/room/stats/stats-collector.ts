@@ -1,3 +1,4 @@
+import { CameraQualityObserver } from './camera-quality.ts';
 import type { NetworkMetrics, PeerDiagnostics } from '../types';
 import type { PeerManager } from '../webrtc/peer-manager';
 import type { DiagnosticsLogger } from '../diagnostics/diagnostics-logger';
@@ -6,6 +7,8 @@ export interface StatsCollectorOptions {
   peerManager: PeerManager;
   onStats: (metrics: NetworkMetrics | null) => void;
   onRecovery?: () => void;
+  isCameraPublishing?: () => boolean;
+  onCameraSuspension?: () => void;
   isPublishing?: () => boolean;
   now?: () => number;
   onDegradation?: (lossPercent: number) => void;
@@ -28,6 +31,7 @@ export class StatsCollector {
   private readonly statsByPeer = new Map<string, PeerHistory>();
   private readonly outboundHistory = new Map<string, { pc: RTCPeerConnection; id: string; sent: number; lost: number; timestamp: number; observedAt: number }>();
   private readonly trafficHistory = new Map<string, { pc: RTCPeerConnection; id: string; bytes: number; timestamp: number }>();
+  private readonly cameraObserver = new CameraQualityObserver();
   private collecting = false;
   private epoch = 0;
   private lastAutoDowngradeTime = -Infinity;
@@ -39,6 +43,7 @@ export class StatsCollector {
   // Invalidates in-flight stats as well as the continuous stability window.
   resetAdaptation(): void {
     this.epoch++;
+    this.cameraObserver.reset();
     this.outboundHistory.clear();
     this.stableSince = null;
     this.lastObservation = null;
@@ -86,6 +91,7 @@ export class StatsCollector {
       });
       if (changed) {
         this.stableSince = null;
+        this.cameraObserver.reset();
         this.outboundHistory.clear();
       }
       this.topology = new Map([...peers].map(([id, peer]) => [id, { pc: peer.pc, state: peer.pc.connectionState }]));
@@ -101,6 +107,9 @@ export class StatsCollector {
         return;
       }
 
+      const cameraTrack = this.options.peerManager.getCameraTrack?.();
+      let cameraDegraded = false;
+      let cameraPersistent = false;
       let worstOutboundLoss = 0;
       const samples: Array<{ bitrate: number | null; loss: number | null; rtt: number | null }> = [];
       const diagnostics: PeerDiagnostics[] = [];
@@ -122,13 +131,23 @@ export class StatsCollector {
           reports = await peer.pc.getStats();
         } catch {
           recoverySafe = false;
+          this.cameraObserver.reset();
+          this.options.logger?.log('camera-quality-stats', { peer: peerId, status: 'collection-failed' });
           this.outboundHistory.delete(peerId);
           continue;
         }
 
-        if (epoch !== this.epoch) return;
+        if (epoch !== this.epoch) {
+          this.options.logger?.log('camera-quality-obsolete', { reason: 'collection-generation' }); return;
+        }
         if (this.options.peerManager.getPeers().get(peerId)?.pc !== peer.pc || (peer.pc.connectionState as string) === 'closed') { recoverySafe = false; diagnostics.pop(); continue; }
         diagnostic.stats = 'available';
+        if (this.options.isCameraPublishing?.() && cameraTrack === this.options.peerManager.getCameraTrack()) {
+          const camera = this.cameraObserver.observe(peerId, peer.pc, peer.cameraSender, reports, now);
+          cameraDegraded ||= camera.degraded;
+          cameraPersistent ||= camera.persistent;
+          this.options.logger?.log('camera-quality-stats', { peer: peerId, ...camera });
+        } else this.cameraObserver.reset();
         let inbound: any;
         let outbound: any;
         let remoteInbound: any;
@@ -272,7 +291,19 @@ export class StatsCollector {
         peers: diagnostics,
       };
 
-      if (epoch !== this.epoch) return;
+      if (epoch !== this.epoch) {
+          this.options.logger?.log('camera-quality-obsolete', { reason: 'collection-generation' }); return;
+        }
+      const cameraPeers = this.options.peerManager.getPeers();
+      const cameraTopologyValid = cameraPeers.size === peers.size && [...peers].every(([id, peer]) => cameraPeers.get(id)?.pc === peer.pc && peer.pc.connectionState === 'connected');
+      if (cameraTopologyValid && this.options.isCameraPublishing?.() && cameraTrack === this.options.peerManager.getCameraTrack() && this.now() - now <= 6000) {
+        const decision = this.cameraObserver.decide(now, cameraDegraded, cameraPersistent, this.options.peerManager.getCameraLevel());
+        if (decision === 'reduce') void this.options.peerManager.reduceCameraQuality();
+        if (decision === 'suspend') {
+          this.options.logger?.log('camera-quality-suspension', {});
+          this.options.onCameraSuspension?.();
+        }
+      } else this.cameraObserver.reset();
       this.options.onStats(metrics);
       this.options.logger?.log('network-stats', {
         bitrateKbps: metrics.bitrateKbps,

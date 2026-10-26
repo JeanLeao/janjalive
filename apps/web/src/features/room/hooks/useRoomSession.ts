@@ -363,6 +363,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         && !qualityOperationRef.current && signalingRef.current?.getState() === 'connected'
         && participantsRef.current.filter(p => !p.isLocal).every(p => peerManager.getPeers().get(p.peerId)?.pc.connectionState === 'connected')
         && Boolean(localStreamRef.current?.getVideoTracks().some(track => track.readyState === 'live' && track.enabled)),
+      isCameraPublishing: () => !isDisposed && cameraController.isLive() && captureStateRef.current === 'sharing' && signalingRef.current?.getState() === 'connected',
+      onCameraSuspension: cameraController.suspendForQuality,
       onStats: (metrics) => { if (!isDisposed) setNetworkStats(metrics); },
       onDegradation: loss => { void adaptQuality(false, loss); },
       onRecovery: () => { void adaptQuality(true); },
