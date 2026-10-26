@@ -144,3 +144,9 @@ palco, PiP, screenshots ou clipes. Suspensão automática D8 permanece fora do e
 
 O PR deve permanecer draft para revisão técnica e visual. Esta entrega não
 inclui merge, deploy, alteração do GitHub Projects ou início da próxima etapa.
+
+## Continuidade — Etapa D
+
+A política de redução e suspensão antes fora desta etapa foi implementada em
+[WEBCAM-D.md](WEBCAM-D.md). O limite inicial, a prévia e a confirmação permanecem;
+a webcam suspensa só volta por nova ativação manual.

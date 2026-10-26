@@ -128,3 +128,9 @@ Não há adaptação automática de qualidade de câmera.
 
 O PR permanece draft para revisão técnica e aprovação visual. Sem merge, deploy,
 GitHub Projects ou início da próxima etapa.
+
+## Continuidade — Etapa D
+
+A adaptação independente da câmera foi implementada em [WEBCAM-D.md](WEBCAM-D.md).
+Suspensão remove a câmera do palco pelo estado anunciado existente, preservando
+as fontes exclusivas de tela em screenshots, clipes e PiP.

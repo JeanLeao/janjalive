@@ -23,7 +23,7 @@ export function CameraControl({ camera, canActivate, onRequest, onPublish, onSto
   return <>
     <Tooltip label={label} events={{ hover: true, focus: true, touch: false }} withArrow>
       <UnstyledButton className="floating-dock-btn" aria-label={label} aria-pressed={camera.state === 'live'}
-        disabled={!canActivate && ['off', 'error'].includes(camera.state)}
+        disabled={!canActivate && ['off', 'error', 'suspended'].includes(camera.state)}
         onClick={() => {
           if (camera.state === 'live' || camera.state === 'requesting') onStop();
           else if (preview) setDetails(true);
@@ -37,7 +37,7 @@ export function CameraControl({ camera, canActivate, onRequest, onPublish, onSto
     <span role="status" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>
       {camera.state === 'live' ? 'Câmera ao vivo, inclusive durante a troca de tela.' : camera.state === 'off' ? 'Câmera desligada.' : camera.state === 'requesting' ? 'Solicitando permissão da câmera.' : camera.error}
     </span>
-    <Modal opened={opened && camera.state !== 'live' && camera.state !== 'off'}
+    <Modal opened={opened && camera.state !== 'live' && camera.state !== 'off' && camera.state !== 'suspended'}
       onClose={() => { setDetails(false); onStop(); }} title="Câmera do apresentador" closeButtonProps={{ 'aria-label': 'Fechar prévia e desligar câmera', size: 44 }} centered>
       <Stack>
         {preview && <CameraPreview stream={camera.stream!} />}

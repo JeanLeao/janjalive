@@ -443,3 +443,28 @@ test('screen stats exclude camera loss even when camera RTP reports arrive last'
   await collector.collect(); await collector.collect();
   assert.equal(degraded, 0, 'ambiguous reports fail closed');
 });
+
+test('camera adaptation and F34 use independent reports and worst recipients without inbound substitution', async () => {
+  let now=0, level=0, reductions=0, suspensions=0, screenReductions=0, screenRecoveries=0;
+  const cameraTrack={id:'camera',readyState:'live'};
+  const peers=new Map();
+  for(const id of ['good','bad']) {
+    const pc=new MockRTCPeerConnection(); pc.connectionState='connected';
+    const videoSender={track:{id:'screen'}}, cameraSender={track:cameraTrack};
+    pc.getTransceivers=()=>[{mid:'0',sender:videoSender},{mid:'1',sender:cameraSender}];
+    pc.getStats=async()=>new Map([
+      ['s',{id:'s',type:'outbound-rtp',kind:'video',mid:'0',timestamp:now,packetsSent:now,bytesSent:now}],
+      ['sr',{id:'sr',type:'remote-inbound-rtp',kind:'video',localId:'s',timestamp:now,packetsReceived:now,packetsLost:0}],
+      ['c',{id:'c',type:'outbound-rtp',kind:'video',mid:'1',timestamp:now,bytesSent:now,framesEncoded:now}],
+      ['cr',{id:'cr',type:'remote-inbound-rtp',kind:'video',localId:'c',timestamp:now,packetsReceived:now,packetsLost:id==='bad'?now/9:0}],
+    ]);
+    peers.set(id,{pc,videoSender,cameraSender});
+  }
+  const collector=new StatsCollector({now:()=>now,peerManager:{getPeers:()=>peers,getCameraTrack:()=>cameraTrack,
+    getCameraLevel:()=>level,reduceCameraQuality:async()=>{level++;reductions++;}},
+    isPublishing:()=>true,isCameraPublishing:()=>true,onStats(){},onDegradation(){screenReductions++;},
+    onRecovery(){screenRecoveries++;},onCameraSuspension(){suspensions++;}});
+  for(let n=1;n<=30;n++){now=n*3000;await collector.collect();}
+  assert.equal(reductions,2); assert.equal(suspensions,1); assert.equal(screenReductions,0);
+  assert.equal(screenRecoveries,1,'camera loss does not block F34 recovery');
+});

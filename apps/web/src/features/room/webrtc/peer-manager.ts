@@ -1,3 +1,4 @@
+import { CAMERA_PROFILES } from '../stats/camera-quality.ts';
 import { applyCaptureQuality } from '../media/display-media.ts';
 import { MediaSourcesSchema, type MediaSources, DEFAULT_QUALITY, normalizeQuality, resolveQuality, type QualitySelection } from '@screen-room/protocol';
 import type { DiagnosticsLogger } from '../diagnostics/diagnostics-logger';
@@ -90,6 +91,25 @@ export class PeerManager {
   private peers = new Map<string, ManagedPeer>();
   private cameraStream: MediaStream | null = null;
   private cameraVersion = 0;
+  private cameraLevel = 0;
+  getCameraLevel(): number { return this.cameraLevel; }
+  getCameraTrack(): MediaStreamTrack | undefined { return this.cameraStream?.getVideoTracks()[0]; }
+
+  async reduceCameraQuality(): Promise<void> {
+    if (!this.cameraStream || this.disposed) return;
+    const version = this.cameraVersion;
+    this.cameraLevel = Math.min(2, this.cameraLevel + 1);
+    this.options.logger?.log('camera-quality-reduction', { level: this.cameraLevel });
+    await Promise.all([...this.peers.values()].map(peer => {
+      peer.signalChain = peer.signalChain.catch(() => {}).then(async () => {
+        if (version !== this.cameraVersion || this.peers.get(peer.id) !== peer) {
+          this.options.logger?.log('camera-quality-obsolete', {}); return;
+        }
+        await this.applyCameraLimit(peer, true).catch(() => {});
+      });
+      return peer.signalChain;
+    }));
+  }
   private localStream: MediaStream | null = null;
   // A source switch detaches the screen while the independent camera stays published.
   private hasLocalMedia(): boolean {
@@ -535,6 +555,7 @@ export class PeerManager {
     if (this.disposed) return;
     if (stream.getVideoTracks().length !== 1 || stream.getAudioTracks().length) throw new Error('Camera requires one video track and no audio');
     const version = ++this.cameraVersion;
+    this.cameraLevel = 0;
     this.cameraStream = stream;
     await this.configReady;
     if (version !== this.cameraVersion || this.disposed) return;
@@ -572,10 +593,14 @@ export class PeerManager {
         return;
       }
       for (const encoding of parameters.encodings) {
-        encoding.maxBitrate = 400_000;
-        encoding.maxFramerate = 15;
+        Object.assign(encoding, CAMERA_PROFILES[this.cameraLevel]);
       }
+      this.options.logger?.log('camera-quality-requested', { peer: peer.id, level: this.cameraLevel, ...CAMERA_PROFILES[this.cameraLevel] });
       await sender.setParameters(parameters);
+      if (version !== this.cameraVersion || this.peers.get(peer.id) !== peer) {
+        this.options.logger?.log('camera-quality-obsolete', { peer: peer.id }); return;
+      }
+      this.options.logger?.log('camera-quality-accepted', { peer: peer.id, encodings: JSON.stringify(sender.getParameters().encodings) });
     } catch {
       if (version !== this.cameraVersion || this.peers.get(peer.id) !== peer) return;
       // An unsupported camera sender must never interrupt screen negotiation.
