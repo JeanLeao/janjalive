@@ -41,6 +41,8 @@ for (const mobile of [false, true]) test(`F14: P2P consent, playback, late join,
     await expect(a.getByRole('button', { name: 'Reproduzir para todos' })).toBeVisible();
     await expect(b.getByRole('button', { name: 'Aceitar vídeo' })).toBeVisible();
     expect(await b.getByTestId('watch-video').count()).toBe(0);
+    await expect(a.locator('.floating-dock-bar')).toBeVisible();
+    await expect(b.locator('.floating-dock-bar')).toBeVisible();
     await b.screenshot({ path: test.info().outputPath('invitation.png') });
     // Both recipients receive through actual local RTCDataChannels.
     await Promise.all([b, c].map(ready));
@@ -203,6 +205,8 @@ test('F14: existing captures, local audio, output routing and stage modes coexis
     await Promise.all([a, b].map(p => gotoRoom(p, '/room/f14-coexist')));
     await expect(a.getByRole('button', { name: 'Ver participantes (2)', exact: true }).first()).toBeVisible();
     for (const page of [a, b]) {
+      const showDock = page.getByRole('button', { name: 'Mostrar controles da sala', exact: true });
+      if (await showDock.isVisible()) await showDock.click();
       await page.getByRole('button', { name: 'Compartilhar tela', exact: true }).last().click();
       await page.getByRole('button', { name: 'Entrar ao vivo', exact: true }).click();
     }

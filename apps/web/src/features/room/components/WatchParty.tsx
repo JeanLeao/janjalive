@@ -1,3 +1,4 @@
+import { StageViewControls, CinemaControl, FullscreenControl } from './StageViewControls';
 import { ParticipantsContent } from './WatchPartyParticipants';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, Drawer, FileButton, Progress, Text } from '@mantine/core';
@@ -18,8 +19,6 @@ import {
   IconLock,
   IconAlertTriangle,
   IconShield,
-  IconMaximize,
-  IconMinimize,
 } from './Icons';
 import { formatDisplayName } from '../utils/avatar';
 import styles from './WatchParty.module.css';
@@ -93,10 +92,10 @@ export function StageContentSelector({
 }
 
 export interface WatchPartyPanelProps {
+  controlsExpanded: boolean;
+  onControlsExpandedChange: (expanded: boolean) => void;
   watch: WatchParty;
   participants: RoomParticipant[];
-  streamCount?: number;
-  onSelectMode?: (mode: 'streams' | 'watch') => void;
   isCinema?: boolean;
   onToggleCinema?: () => void;
   isFullscreen?: boolean;
@@ -108,10 +107,10 @@ export interface WatchPartyPanelProps {
 }
 
 export function WatchPartyPanel({
+  controlsExpanded,
+  onControlsExpandedChange,
   watch,
   participants,
-  streamCount = 0,
-  onSelectMode = () => {},
   isCinema = false,
   onToggleCinema,
   isFullscreen = false,
@@ -166,25 +165,21 @@ export function WatchPartyPanel({
       role="region"
       aria-label="Vídeo compartilhado"
       data-session={!!state}
+      data-contextual-access={showAccess || undefined}
       className={`stage-main-container ${styles.watchStage}`}
       style={{
-        marginBottom: isFullscreen ? 0 : 'calc(88px + env(safe-area-inset-bottom, 0px))',
+        marginBottom: isFullscreen ? 0 : 'var(--room-dock-reserve, calc(88px + env(safe-area-inset-bottom, 0px)))',
       }}
     >
       {interactions}
 
-      {/* Top Bar integrada */}
-      <div className={styles.stageTopbar}>
-        <div className={styles.topbarCenter}>
-          <StageContentSelector
-            watchMode={true}
-            hasSession={!!state}
-            streamCount={streamCount}
-            onSelectMode={onSelectMode}
-          />
+      <StageViewControls expanded={controlsExpanded} onExpandedChange={onControlsExpandedChange} label="Visualização do vídeo compartilhado">
+        <div className="stage-display-controls" role="group" aria-label="Controles de visualização">
+          {onToggleCinema && <CinemaControl active={isCinema} onClick={onToggleCinema} />}
+          {onToggleFullscreen && <FullscreenControl active={isFullscreen} onClick={onToggleFullscreen} />}
         </div>
-
-        <div className={styles.topbarRight}>
+      </StageViewControls>
+      <div className={styles.stageAccess}>
           {state && watch.blob && (
             <Button variant="subtle"
               type="button"
@@ -203,33 +198,7 @@ export function WatchPartyPanel({
             </Button>
           )}
 
-          {onToggleCinema && (
-            <Button variant="subtle"
-              type="button"
-              className={styles.glassBtn}
-              onClick={onToggleCinema}
-              aria-label={isCinema ? 'Sair do Modo Cinema' : 'Modo Cinema'}
-            >
-              <IconCinema size={16} aria-hidden="true" />
-              <span className={styles.w}>{isCinema ? 'Sair do Cinema' : 'Cinema'}</span>
-            </Button>
-          )}
-
-          {onToggleFullscreen && (
-            <Button variant="subtle"
-              type="button"
-              data-control-id="fullscreen-toggle"
-              className={styles.glassBtn}
-              onClick={onToggleFullscreen}
-              aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-            >
-              {isFullscreen ? <IconMinimize size={16} aria-hidden="true" /> : <IconMaximize size={16} aria-hidden="true" />}
-              <span className={styles.w}>{isFullscreen ? 'Sair' : 'Tela cheia'}</span>
-            </Button>
-          )}
-
           {showAccess && interactionAccess}
-        </div>
       </div>
 
         <div className={styles.topbarLeft}>

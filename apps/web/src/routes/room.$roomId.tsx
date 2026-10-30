@@ -39,6 +39,7 @@ function RoomPageContent() {
   );
 
   const [isCinema, setIsCinema] = useState(false);
+  const [stageNavSlot, setStageNavSlot] = useState<HTMLElement | null>(null);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>('quality');
@@ -181,6 +182,42 @@ function RoomPageContent() {
     enabled: !isDemo,
   });
 
+  const [watchMode, setWatchMode] = useState(false);
+  // null applies the initial automatic collapse once; explicit choices last for this room.
+  const [dockPreference, setDockPreference] = useState<boolean | null>(null);
+  const [dockInteractionActive, setDockInteractionActive] = useState(false);
+  useEffect(() => {
+    if (session.watch.createdSessionId) setWatchMode(true);
+  }, [session.watch.createdSessionId]);
+  useEffect(() => {
+    const check = () => setDockInteractionActive(Boolean(
+      document.activeElement?.closest('.floating-dock-bar') ||
+      document.querySelector('[role="dialog"], [role="menu"], [data-popover-dropdown]')
+    ));
+    document.addEventListener('focusin', check);
+    const afterBlur = () => queueMicrotask(check);
+    document.addEventListener('focusout', afterBlur);
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true });
+    check();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('focusin', check);
+      document.removeEventListener('focusout', afterBlur);
+    };
+  }, []);
+  const hasStageContent = watchMode
+    ? Boolean(session.watch.blob && !session.watch.busy && !session.watch.pending && !session.watch.inviting &&
+        !session.watch.deliveries.some(delivery => ['waiting', 'offered', 'queued', 'transferring', 'verifying'].includes(delivery.state)))
+    : Boolean(isDemo ? demoStreams?.length : session.remoteStreams.length || session.participants.some(p => p.isSharing));
+  const dockCollapsible = session.captureState === 'idle' && hasStageContent;
+  useEffect(() => {
+    if (dockCollapsible && dockPreference === null && !dockInteractionActive &&
+        !isParticipantsOpen && !isSettingsOpen && !isQrModalOpen && !(session.storedRoomKey && showCreatorKeyModal)) {
+      setDockPreference(false);
+    }
+  }, [dockCollapsible, dockPreference, dockInteractionActive, isParticipantsOpen, isSettingsOpen, isQrModalOpen, showCreatorKeyModal, session.storedRoomKey]);
+  const dockExpanded = !dockCollapsible || dockPreference !== false || dockInteractionActive;
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
     const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -260,6 +297,7 @@ function RoomPageContent() {
   return (
     <Box
       style={{
+        '--room-dock-reserve': dockExpanded ? undefined : 'calc(44px + env(safe-area-inset-bottom, 0px))',
         height: '100dvh',
         width: '100vw',
         display: 'flex',
@@ -268,7 +306,7 @@ function RoomPageContent() {
         color: '#e6edf3',
         overflow: 'hidden',
         position: 'relative',
-      }}
+      } as React.CSSProperties}
     >
       {/* Live status announcement for screen readers */}
       <Box
@@ -376,11 +414,15 @@ function RoomPageContent() {
           onLeave={handleLeave}
           interactions={isFullscreen ? null : interactionActions('header')}
           onOpenQrCode={handleOpenQrCode}
+          stageNavRef={setStageNavSlot}
         />
       )}
 
       {/* Main Streaming Stage (Empty State or Spotlight + Previews) */}
       <RoomStage
+        watchMode={watchMode}
+        onWatchModeChange={setWatchMode}
+        stageNavSlot={stageNavSlot}
         watch={isDemo ? undefined : session.watch}
         clipControls={<ClipControls
           clips={session.clips}
@@ -425,6 +467,8 @@ function RoomPageContent() {
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
         onRetryPeer={session.retryPeer}
+        camera={session.camera}
+        remoteCameraStreams={session.remoteCameraStreams}
         localStream={session.localStream}
         isSharing={session.isSharing}
         remoteStreams={isDemo && demoStreams ? demoStreams : session.remoteStreams}
@@ -450,12 +494,16 @@ function RoomPageContent() {
 
       {session.pendingStream && (
         <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
-          stream={session.pendingStream} replacing pending={session.captureState === 'switch-publishing'}
+          stream={session.pendingStream} replacing cameraLive={session.camera.state === 'live'} pending={session.captureState === 'switch-publishing'}
           onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
       )}
 
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
+        cameraControl={{ camera: session.camera, canActivate: session.captureState === 'sharing' && session.connectionStatus === 'connected', onRequest: session.requestCamera, onPublish: session.publishCamera, onStop: session.stopCamera }}
+        collapsible={dockCollapsible}
+        expanded={dockExpanded}
+        onExpandedChange={setDockPreference}
         onSwitchCapture={['sharing', 'paused'].includes(session.captureState) ? session.switchCapture : undefined}
         switchPending={session.captureState.startsWith('switch-')}
         switchRestoring={session.captureState === 'switch-restoring'}

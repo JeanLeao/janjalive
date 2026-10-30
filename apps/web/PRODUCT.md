@@ -8,12 +8,12 @@ web
 
 ## Product Purpose
 
-Janjalive oferece salas efêmeras sem cadastro para compartilhar tela e áudio da aba/sistema. A Watch Party permite assistir juntos a um vídeo local, com reprodução compartilhada.
+Janjalive oferece salas efêmeras sem cadastro para compartilhar tela e áudio da aba/sistema, com múltiplos apresentadores, colaboração e mídia P2P.
 
 ## Capabilities and Constraints
 
-Confirmado pelo handoff F14: distribuição P2P, consentimento individual, integridade, autoridade do controlador, sincronização, entrada tardia e reconexão devem ser preservados. MP4 e WebM de até 20 MiB. Volume individual. Não capturar câmera ou microfone. Esta tarefa modifica somente a UI da F14.
+Tela/áudio usam `getDisplayMedia()`. Webcam opcional do apresentador usa somente vídeo (`getUserMedia()` com `audio: false`), subordinada à tela, com prévia privada e confirmação explícita. Não há captura de microfone. Arquivos e Watch Party usam consentimento individual; clipes de terceiros exigem autorização. A interface deve preservar privacidade, seleção de palco, reconexão e limpeza da sessão.
 
 ## Brand Commitments
 
-Manter a linguagem visual, tipografia, componentes e padrões do Janjalive. Vídeo como prioridade; controles acessíveis em desktop e mobile. A aprovação visual do proprietário precede qualquer merge.
+Vídeo em primeiro plano, linguagem escura e azul, tipografia do sistema e componentes Mantine. Controles acessíveis em desktop/mobile, foco visível, rótulos claros e respeito a movimento reduzido. Consulte [DESIGN.md](DESIGN.md) e as [regras de contribuição](../../AGENTS.md).

@@ -123,6 +123,7 @@ test('PiP errors, concurrent requests, external closure and late completion afte
   await enterPiP(page).click();
   await expect(enterPiP(page)).toBeDisabled();
   expect(await page.evaluate(() => (window as any).pipCalls)).toBe(4);
+  await page.getByRole('button', { name: 'Mostrar controles da sala', exact: true }).click();
   await page.getByRole('button', { name: 'Sair da sala', exact: true }).click();
   await page.evaluate(() => (window as any).resolvePiP());
   await expect.poll(() => page.evaluate(() => document.pictureInPictureElement === null)).toBe(true);

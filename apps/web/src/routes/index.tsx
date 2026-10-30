@@ -179,7 +179,7 @@ function LobbyPage() {
           <aside className={styles.notes} aria-label="Privacidade e compatibilidade">
             <div className={styles.privacyNote}>
               <IconShield size={20} />
-              <Text>Conexões de mídia via WebRTC. Sem captura de câmera ou microfone pessoal.</Text>
+              <Text>Conexões de mídia via WebRTC. Câmera opcional com confirmação. Sem microfone pessoal.</Text>
             </div>
             <Text>Captura de tela e áudio variam conforme o navegador e o sistema. Em celulares, a captura pode não estar disponível.</Text>
           </aside>
@@ -295,7 +295,7 @@ function LobbyPage() {
           <Text size="sm"><strong>Conexões via WebRTC.</strong> Transmissões e transferências de arquivos e vídeos usam conexões entre navegadores, com criptografia de transporte. Quando necessário, TURN pode retransmitir esse tráfego. O servidor mantém a sinalização, a presença e recursos de colaboração.</Text>
           <Text size="sm"><strong>Controle sobre suas mídias.</strong> Você escolhe a tela e encerra o compartilhamento quando quiser. Arquivos e Watch Party exigem aceite individual; clipes exigem permissão do apresentador. Esse consentimento controla o gravador integrado e não impede gravações externas.</Text>
           <Text size="sm"><strong>Salas temporárias.</strong> As salas são efêmeras; participantes podem salvar explicitamente arquivos e clipes no próprio dispositivo.</Text>
-          <Text size="sm"><strong>Sem microfone pessoal.</strong> A captura usa apenas a tela e, quando disponível, o áudio da aba ou do sistema. Não solicitamos câmera ou microfone.</Text>
+          <Text size="sm"><strong>Sem microfone pessoal.</strong> O compartilhamento de tela usa a tela e, quando disponível, o áudio da aba ou do sistema. A câmera é opcional durante a apresentação, com prévia local e confirmação antes do envio. Não solicitamos microfone.</Text>
           <Button fullWidth variant="default" onClick={() => setIsAboutModalOpen(false)}>Entendido</Button>
         </Stack>
       </Modal>

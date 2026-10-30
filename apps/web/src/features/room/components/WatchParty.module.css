@@ -17,17 +17,13 @@
 .watchStage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--watch-bg); color: var(--watch-text); }
 .watchStage p, .watchStage h2, .watchStage h3, .watchStage h4 { margin: 0; }
 .watchStage :focus-visible, .stageNav :focus-visible { outline: 2px solid var(--watch-focus); outline-offset: 2px; }
-.stageTopbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px; background: var(--watch-deep); border-bottom: 1px solid var(--watch-border); flex-shrink: 0; z-index: 10; }
-.topbarCenter { min-width: 0; }
-.topbarRight { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-.stageNav { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
-.stageTab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; min-height: 44px; border: 0; border-radius: var(--mantine-radius-md); background: transparent; color: var(--watch-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-.stageTab:hover, .glassBtn:hover, .crewPill:hover, .muteBtn:hover { background: var(--watch-elev); }
-.selected { background: var(--mantine-primary-color-light); color: var(--mantine-primary-color-light-color); }
+.stageNav { display: inline-flex; align-items: center; gap: 2px; min-width: 0; padding: 3px; border: 1px solid #30363d; border-radius: 12px; background: #0d1117; flex-shrink: 0; }
+.stageTab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: #afb8c1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.stageTab:hover, .crewPill:hover, .muteBtn:hover { background: var(--watch-elev); }
+.stageTab.selected { background: #21262d; color: #e6edf3; box-shadow: inset 0 0 0 1px #30363d; }
 .countTag { font-size: 12px; color: var(--watch-muted); }
 .livePip { width: 6px; height: 6px; border-radius: 50%; background: var(--watch-ok); }
 .shortLabel { display: none; }
-.glassBtn, .crewPill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 0; border-radius: var(--mantine-radius-md); background: transparent; color: var(--watch-text); font: inherit; font-size: 13px; cursor: pointer; }
 .warnDot { width: 6px; height: 6px; border-radius: 50%; background: var(--watch-warn); }
 .topbarLeft { padding: 8px 16px; flex-shrink: 0; min-width: 0; }
 .topbarLeft:empty { display: none; }
@@ -63,8 +59,6 @@
 .xferBlock { width: 100%; text-align: left; }
 .xferLabel { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
 .stepTrail { display: none; }
-.streamsSelectorHost { position: relative; flex-shrink: 0; display: flex; align-items: center; padding: 6px 12px; background: var(--mantine-color-dark-8); border-bottom: 1px solid var(--mantine-color-dark-5); z-index: 20; }
-:global(.stage-empty-container):has(.streamsSelectorHost) .streamsSelectorHost { position: absolute; top: 0; left: 0; right: 0; }
 .peopleEmpty { padding: 16px 0; color: var(--watch-muted); font-size: 14px; line-height: 1.5; }
 .endActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .endActions button { min-height: 44px; }
@@ -73,9 +67,7 @@
 @media (max-width: 900px) {
   .w, .fullLabel { display: none; }
   .shortLabel { display: inline; }
-  .stageTopbar { padding: 4px 8px; }
   .stageTab { padding: 0 8px; }
-  .glassBtn { padding: 0; width: 44px; }
   .controlsRow { flex-wrap: wrap; gap: 4px; }
   .statusMsg { order: 3; flex-basis: 100%; }
   .localAudio small, .fe { display: none; }
@@ -87,10 +79,8 @@
   .watchStage:has(:global(#room-chat-panel)) .theaterStage { margin-right: 396px; }
 }
 @media (max-width: 380px) {
-  .topbarCenter { flex-basis: 100%; }
   .stageNav { width: 100%; }
   .stageTab { flex: 1; }
-  .topbarRight { margin-left: 0; width: 100%; justify-content: flex-end; }
 }
 
 .rng {
@@ -361,15 +351,27 @@
 /* Keep the volume target compact after the shared range rules. */
 .vol { width: 88px; min-height: 44px; }
 @media (max-width: 900px) { .vol { width: 72px; } }
-/* The stream stage keeps its mesh/comparison layout; navigation joins its top edge. */
-:global(.stage-main-container) > .streamsSelectorHost { position: absolute; inset: 0 0 auto; height: 56px; pointer-events: none; }
-.streamsSelectorHost .stageNav { pointer-events: auto; }
-:global(.stage-main-container):has(> .streamsSelectorHost) > :global(.comparison-panel) { padding-top: 56px; }
-:global(.stage-main-container):has(> .streamsSelectorHost) :global(.stage-top-right),
-:global(.stage-main-container):has(> .streamsSelectorHost) :global(.comparison-header),
-:global(.stage-main-container):has(> .streamsSelectorHost) :global(.stage-streamer-badge) { top: 68px !important; }
-:global(.stage-main-container):has(> .streamsSelectorHost):not(:global(.stage-comparing)) :global(.stage-view-controls) { top: 124px; }
 
-.streamsTools { top: 68px !important; }
+/* Contextual actions float above the stage without reserving a header row. */
+.stageAccess { position: absolute; top: 8px; right: 12px; z-index: 28; display: flex; gap: 4px; align-items: center; }
+.crewPill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 0; border-radius: var(--mantine-radius-md); background: rgba(13, 17, 23, .94); color: #e6edf3; font: inherit; font-size: 13px; cursor: pointer; }
+.crewPill :global(.mantine-Button-label), .playBtn :global(.mantine-Button-label) { gap: 6px; }
+.watchStage .theaterCenter { padding-right: 64px; }
+.watchStage .topbarLeft { padding-right: 120px; }
+@media (min-width: 960px) {
+  .watchStage:has(:global(#room-chat-panel)) .stageAccess { right: 396px; }
+}
+@media (max-width: 959px) {
+  .watchStage:has(:global(#room-chat-panel)) :global(.stage-view-controls) { right: auto; left: 8px; }
+  .watchStage :global(#room-chat-panel) { top: 60px; left: 64px; right: 8px; width: auto; }
+}
 
-.glassBtn :global(.mantine-Button-label), .crewPill :global(.mantine-Button-label), .playBtn :global(.mantine-Button-label) { gap: 6px; }
+.watchStage[data-contextual-access] .topbarLeft { padding-right: 320px; }
+@media (min-width: 960px) {
+  .watchStage:has(:global(#room-chat-panel)) .topbarLeft { margin-right: 396px; }
+}
+@media (max-width: 959px) {
+  .watchStage[data-contextual-access] .stageAccess { top: 44px; }
+  .watchStage[data-contextual-access] .topbarLeft { padding-right: 16px; }
+  .watchStage[data-contextual-access] :global(#room-chat-panel) { top: 96px; }
+}

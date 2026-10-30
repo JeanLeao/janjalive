@@ -1,3 +1,4 @@
+import { CameraControl, type CameraControlProps } from './CameraControl';
 import { HandCount } from './HandCount';
 import React, { useState } from 'react';
 import {
@@ -23,6 +24,10 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
+  cameraControl?: CameraControlProps;
+  collapsible?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   onSwitchCapture?: () => void;
   switchPending?: boolean;
   switchRestoring?: boolean;
@@ -46,6 +51,10 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  cameraControl,
+  collapsible = false,
+  expanded = true,
+  onExpandedChange,
   onSwitchCapture,
   switchPending,
   switchRestoring,
@@ -67,6 +76,7 @@ export function FloatingControlDock({
   canShareScreen,
   onOpenQrCode,
 }: FloatingControlDockProps) {
+  const actionsId = React.useId();
   const [copied, setCopied] = useState(false);
   const settingsBtnRef = React.useRef<HTMLButtonElement>(null);
 
@@ -93,6 +103,10 @@ export function FloatingControlDock({
       }}
     >
       <style>{`
+        .floating-dock-wrapper:has(.dock-toggle) { display: flex; align-items: center; gap: 4px; }
+        .floating-dock-wrapper:has(.dock-toggle[aria-expanded="false"]) { bottom: env(safe-area-inset-bottom, 0px) !important; }
+        .dock-toggle { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; color: #e6edf3; background: #161b22; border: 1px solid #484f58; border-radius: 50%; }
+
         .floating-dock-btn {
           width: 42px;
           height: 42px;
@@ -128,11 +142,25 @@ export function FloatingControlDock({
           .floating-dock-primary .mantine-Button-section { margin: 0; }
         }
       `}</style>
+      {cameraControl?.camera.state === 'suspended' && <Box role="status" style={{
+        position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+        width: 'min(300px, calc(100vw - 24px))', padding: '8px 12px', fontSize: 12,
+        color: '#e6edf3', background: '#161b22', border: '1px solid #484f58', borderRadius: 12,
+      }}>{cameraControl.camera.error}</Box>}
+      {cameraControl?.camera.state === 'live' && <Box role="status" style={{
+        position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+        color: '#7ee787', background: '#161b22', border: '1px solid #484f58', borderRadius: 16,
+        padding: '4px 10px', fontSize: 12, whiteSpace: 'nowrap',
+      }}>● Câmera ao vivo</Box>}
       <Box
+        id={actionsId}
+        hidden={!expanded}
         className="floating-dock-bar"
         style={{
-          display: 'flex',
+          display: expanded ? 'flex' : 'none',
           alignItems: 'center',
+          justifyContent: 'center',
+          flexWrap: 'wrap',
           gap: 8,
           backgroundColor: '#161b22',
           border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -184,6 +212,8 @@ export function FloatingControlDock({
             </UnstyledButton>
           </Tooltip>
         )}
+
+        {isSharing && cameraControl && <CameraControl {...cameraControl} />}
 
         {/* Screen Audio Mute / Unmute Toggle (only active if sharing and track exists) */}
         {isSharing && hasAudioTrack && (
@@ -329,6 +359,14 @@ export function FloatingControlDock({
           </UnstyledButton>
         </Tooltip>
       </Box>
+      {collapsible && <Tooltip label={expanded ? 'Ocultar controles da sala' : 'Mostrar controles da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>
+        <UnstyledButton className="dock-toggle" style={{ marginInline: 'auto' }}
+          aria-label={expanded ? 'Ocultar controles da sala' : 'Mostrar controles da sala'}
+          aria-expanded={expanded} aria-controls={actionsId}
+          onClick={() => onExpandedChange?.(!expanded)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={expanded ? 'm6 9 6 6 6-6' : 'm6 15 6-6 6 6'} /></svg>
+        </UnstyledButton>
+      </Tooltip>}
     </Box>
   );
 }

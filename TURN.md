@@ -11,7 +11,7 @@ O WebRTC prioriza conexões diretas P2P (ponto a ponto) entre navegadores atrav�
 - Roteadores com filtragem estrita de portas;
 - Firewalls corporativos que bloqueiam tráfego UDP direto não originado pelo cliente;
 
-A conexão direta pode falhar na fase de checagem ICE (`pc-ice state=checking` -> `failed`). Nesses cenários, um servidor TURN atua como relay (retransmissor intermediário) de mídia para garantir que a transmissão ocorra normalmente.
+A conexão direta pode falhar na fase de checagem ICE (`pc-ice state=checking` -> `failed`). Nesses cenários, um servidor TURN pode atuar como relay (retransmissor intermediário) de mídia, desde que esteja acessível e corretamente configurado.
 
 ---
 
@@ -25,17 +25,18 @@ O serviço de sinalização expõe o endpoint `GET /turn-credentials`, que gera 
 |---|---|---|
 | `TURN_SECRET_FILE` | Caminho no sistema de arquivos para o arquivo contendo a chave secreta compartilhada do coturn | `/etc/screen-room/turn-secret` |
 | `TURN_SECRET` | Chave secreta em string (utilizada caso o arquivo especificado não exista) | `""` (vazio) |
-| `TURN_HOST` | Endereço IP público ou hostname do servidor coturn | Obrigatório quando TURN estiver configurado (sem fallback hardcoded) |
+| `TURN_HOST` | Endereço IP público ou hostname do servidor coturn | Obrigatório quando TURN estiver configurado |
+| `TURN_TTL_SECONDS` | Validade das credenciais temporárias em segundos | `3600` |
 
 > [!IMPORTANT]
-> - O segredo TURN é validado e carregado em cache na inicialização do serviço (PERF-01). A substituição ou rotação do segredo exige reinicialização do serviço de sinalização.
+> - O segredo TURN é validado e carregado em cache na inicialização do serviço. A substituição ou rotação do segredo exige reinicialização do serviço de sinalização.
 > - Se houver segredo TURN configurado (`TURN_SECRET` ou `TURN_SECRET_FILE`) sem a definição de `TURN_HOST`, o servidor de sinalização falhará explicitamente na inicialização (CFG-01), evitando o anúncio silencioso de relays inexistentes.
 > - Nenhum endereço IP público é fixado no código-fonte. Quando nenhum segredo for fornecido, o serviço opera em modo STUN-only com servidores públicos.
 
 ### Algoritmo de Geração de Credenciais
 
 Quando uma chave secreta válida é configurada:
-1. Um nome de usuário temporário é gerado no formato: `<timestamp_expiracao>:<uuid>`, onde `timestamp_expiracao` é o momento atual acrescido de **3600 segundos (1 hora)**.
+1. Um nome de usuário temporário é gerado no formato: `<timestamp_expiracao>:<uuid>`, onde `timestamp_expiracao` é o momento atual acrescido de **3600 segundos (1 hora) por padrão**, configurável por `TURN_TTL_SECONDS`.
 2. A credencial é calculada como:
    $$\text{credential} = \text{Base64}(\text{HMAC-SHA1}(\text{secret}, \text{username}))$$
 3. A resposta JSON contém:
@@ -62,7 +63,7 @@ Quando uma chave secreta válida é configurada:
 A aplicação foi projetada para operar em modo resiliente sem interromper o usuário:
 
 1. **Servidor sem Segredo Configurado:**
-   Se `TURN_SECRET` e `TURN_SECRET_FILE` não estiverem definidos no servidor de sinalização, o endpoint `/turn-credentials` retorna apenas o servidor STUN público do Google:
+   Se não houver segredo disponível por variável ou arquivo (inclusive o caminho padrão), o endpoint `/turn-credentials` retorna apenas o servidor STUN público do Google:
    ```json
    { "iceServers": [{ "urls": "stun:stun.l.google.com:19302" }] }
    ```
@@ -112,7 +113,7 @@ Para confirmar se as credenciais TURN foram recebidas e se a negociação utiliz
 A presença de URLs TURN na resposta não comprova que o relay funciona.
 No build de validação, defina `VITE_ICE_TRANSPORT_POLICY=relay` para exigir TURN.
 Confirme `receiver-stats relay=true`, tráfego recebido e aumento de
-`framesDecoded` nos espectadores. Teste redes distintas, UDP e TCP/TLS, e
+`framesDecoded` nos espectadores. Teste redes distintas e os transportes realmente configurados (o endpoint padrão anuncia UDP/TCP na porta 3478), e
 verifique as regras de firewall do coturn. Remova essa variável para voltar à
 seleção automática de candidatos.
 
@@ -120,8 +121,4 @@ seleção automática de candidatos.
 de cinco segundos. `VITE_SIGNALING_URL` permite escolher a URL WebSocket.
 Recuperações atualizam as credenciais antes de tentar ICE restart.
 
-Os testes Chromium e Firefox locais usam conexões diretas. O endpoint local
-verificado retornou apenas STUN, sem relay. TURN externo, Chrome/Edge no site
-publicado e Safari precisam de validação no ambiente correspondente. No Firefox,
-áudio e parada nativa precisam de uma captura real quando o ambiente sintético
-não oferecer esses recursos.
+A validação deve incluir redes distintas e confirmação de mídia recebida e apresentada. Testes locais com captura sintética não comprovam o relay externo, permissões nativas ou áudio real. No Firefox, valide áudio e encerramento nativo com captura real quando o backend sintético não oferecer esses recursos.
