@@ -24,6 +24,7 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
+  cameraRequestCount?: number;
   cameraControl?: CameraControlProps;
   collapsible?: boolean;
   expanded?: boolean;
@@ -51,6 +52,7 @@ export interface FloatingControlDockProps {
 }
 
 export function FloatingControlDock({
+  cameraRequestCount = 0,
   cameraControl,
   collapsible = false,
   expanded = true,
@@ -213,7 +215,7 @@ export function FloatingControlDock({
           </Tooltip>
         )}
 
-        {isSharing && cameraControl && <CameraControl {...cameraControl} />}
+        {cameraControl && <CameraControl {...cameraControl} />}
 
         {/* Screen Audio Mute / Unmute Toggle (only active if sharing and track exists) */}
         {isSharing && hasAudioTrack && (
@@ -291,6 +293,7 @@ export function FloatingControlDock({
             }}
           >
             <IconUsers size={18} />
+            {cameraRequestCount > 0 && <span aria-label={`${cameraRequestCount} solicitações de câmera`} style={{ position: 'absolute', top: -8, left: -8, padding: '1px 4px', borderRadius: 8, background: '#1f6feb', color: 'white', fontSize: 11 }}>{cameraRequestCount}</span>}
             {raisedHandCount > 0 && <span style={{ position: 'absolute', top: -8, right: -8, background: '#161b22', borderRadius: 8, padding: '1px 3px' }}><HandCount count={raisedHandCount} /></span>}
           </UnstyledButton>
         </Tooltip>

@@ -3,7 +3,7 @@ import { useWatchParty } from './useWatchParty';
 import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
 import { useLocalClips } from './useLocalClips';
 import { readRoomSession, saveRoomSession, clearRoomSession } from '../signaling/room-session-storage';
-import type { RoomState } from '@screen-room/protocol';
+import type { CameraAccessEntry, RoomState } from '@screen-room/protocol';
 import { StageSelectionPublisher } from './stage-selection-publisher';
 import { LiveAnnotations } from '../collaboration/live-annotations';
 import type { CollaborationMessage } from '@screen-room/protocol';
@@ -181,10 +181,13 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const signalingRoomRef = useRef<string | null>(null);
   const peerManagerRef = useRef<PeerManager | null>(null);
   const statsCollectorRef = useRef<StatsCollector | null>(null);
+  const [cameraAccess, setCameraAccess] = useState<CameraAccessEntry[]>([]);
+  const cameraAccessRef = useRef<CameraAccessEntry[]>([]);
   const [camera, setCamera] = useState<CameraSnapshot>({ state: 'off', stream: null, error: null });
   const cameraController = useMemo(() => new CameraController({
-    eligible: () => !terminalSessionRef.current && Boolean(sharingIdRef.current) &&
-      (captureStateRef.current === 'sharing' || captureStateRef.current.startsWith('switch-')) &&
+    eligible: () => !terminalSessionRef.current && ((Boolean(sharingIdRef.current) &&
+      (captureStateRef.current === 'sharing' || captureStateRef.current.startsWith('switch-'))) ||
+      cameraAccessRef.current.some(entry => entry.peerId === localPeerRef.current && entry.status === 'approved')) &&
       signalingRef.current?.getState() === 'connected',
     capture: constraints => {
       if (!navigator.mediaDevices?.getUserMedia) return Promise.reject(new DOMException('Camera unavailable', 'NotFoundError'));
@@ -363,7 +366,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         && !qualityOperationRef.current && signalingRef.current?.getState() === 'connected'
         && participantsRef.current.filter(p => !p.isLocal).every(p => peerManager.getPeers().get(p.peerId)?.pc.connectionState === 'connected')
         && Boolean(localStreamRef.current?.getVideoTracks().some(track => track.readyState === 'live' && track.enabled)),
-      isCameraPublishing: () => !isDisposed && cameraController.isLive() && captureStateRef.current === 'sharing' && signalingRef.current?.getState() === 'connected',
+      isCameraPublishing: () => !isDisposed && cameraController.isLive() && signalingRef.current?.getState() === 'connected',
       onCameraSuspension: cameraController.suspendForQuality,
       onStats: (metrics) => { if (!isDisposed) setNetworkStats(metrics); },
       onDegradation: loss => { void adaptQuality(false, loss); },
@@ -410,7 +413,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           collaborationReadyRef.current = false;
           annotations.reset();
         }
-        if (state !== 'connected') { cameraController.stop(); setRemoteCameraStreams({}); }
+        if (state !== 'connected') { cameraAccessRef.current = []; setCameraAccess([]); cameraController.stop(); setRemoteCameraStreams({}); }
         if (state === 'disconnected') {
           peerManager.closeAll();
         }
@@ -571,6 +574,20 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           } else {
             showToast('Participante removeu o nickname.');
           }
+        } else if (message.type === 'camera-access') {
+          const previous = cameraAccessRef.current;
+          cameraAccessRef.current = message.entries;
+          setCameraAccess(message.entries);
+          const own = message.entries.find(entry => entry.peerId === peerId);
+          const previousOwn = previous.find(entry => entry.peerId === peerId);
+          if (own?.status === 'approved' && previousOwn?.status !== 'approved') showToast('Câmera autorizada pelo líder. Ative para ver a prévia e confirmar.');
+          if (previousOwn && !own) showToast(previousOwn.status === 'approved' ? 'Autorização de câmera encerrada.' : 'Solicitação de câmera recusada ou cancelada.');
+          if (own?.status !== 'approved' && !sharingIdRef.current) cameraController.stop();
+          if (message.entries.some(entry => entry.status === 'pending' && !previous.some(old => old.requestId === entry.requestId)) && readRoomSession(roomId).hostCredential) {
+            showToast('Nova solicitação de câmera. Abra Participantes para autorizar ou recusar.');
+          }
+        } else if (message.type === 'camera-access-error') {
+          showToast(message.message);
         } else if (message.type === 'camera-updated') {
           peerManager.setRemoteCamera(message.peerId, message.active);
         } else if (message.type === 'sharing-updated') {
@@ -1258,6 +1275,17 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       setModerationPending(Boolean(sent));
       if (!sent) { moderationRequestRef.current = null; setModerationFeedback('Sem conexão. Aguarde a reconexão para moderar.'); }
     },
+    cameraAccess,
+    canActivateCamera: connectionStatus === 'connected' && ((Boolean(sharingIdRef.current) && (captureState === 'sharing' || captureState.startsWith('switch-'))) || cameraAccess.some(entry => entry.peerId === localPeerRef.current && entry.status === 'approved')),
+    requestCameraAccess: () => {
+      if (signalingRef.current?.send({ type: 'request-camera', requestId: crypto.randomUUID() })) showToast('Solicitação enviada ao líder.');
+    },
+    cancelCameraRequest: () => {
+      const entry = cameraAccessRef.current.find(item => item.peerId === localPeerRef.current);
+      if (entry) signalingRef.current?.send({ type: 'cancel-camera-request', requestId: entry.requestId });
+    },
+    decideCameraAccess: (entry: CameraAccessEntry, allowed: boolean) => signalingRef.current?.send({ type: 'decide-camera', targetPeerId: entry.peerId, requestId: entry.requestId, allowed }),
+    revokeCameraAccess: (entry: CameraAccessEntry) => signalingRef.current?.send({ type: 'revoke-camera', targetPeerId: entry.peerId, requestId: entry.requestId }),
     camera,
     requestCamera: cameraController.request,
     publishCamera: cameraController.publish,

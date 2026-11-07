@@ -1,3 +1,4 @@
+import { SpectatorCameras } from '../features/room/components/SpectatorCameras';
 import { ClipControls } from '../features/room/components/ClipControls';
 import { AudioOutputProvider } from '../features/room/hooks/AudioOutput';
 import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
@@ -467,6 +468,10 @@ function RoomPageContent() {
         onToggleCinema={() => setIsCinema(value => !value)}
         remoteConnectionStates={session.remoteConnectionStates}
         onRetryPeer={session.retryPeer}
+        spectatorCameras={<SpectatorCameras participants={session.participants} streams={{
+          ...session.remoteCameraStreams,
+          ...(localPeerId && session.camera.state === 'live' && session.camera.stream ? { [localPeerId]: session.camera.stream } : {}),
+        }} />}
         camera={session.camera}
         remoteCameraStreams={session.remoteCameraStreams}
         localStream={session.localStream}
@@ -500,7 +505,10 @@ function RoomPageContent() {
 
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
-        cameraControl={{ camera: session.camera, canActivate: session.captureState === 'sharing' && session.connectionStatus === 'connected', onRequest: session.requestCamera, onPublish: session.publishCamera, onStop: session.stopCamera }}
+        cameraRequestCount={session.isHost ? session.cameraAccess.filter(entry => entry.status === 'pending').length : 0}
+        cameraControl={{ camera: session.camera, canActivate: session.canActivateCamera,
+          permission: session.isSharing ? undefined : session.cameraAccess.find(entry => entry.peerId === localPeerId)?.status ?? 'none',
+          canRequestPermission: connected && session.roomState.hostConnected, onRequestPermission: session.requestCameraAccess, onCancelPermission: session.cancelCameraRequest, onRequest: session.requestCamera, onPublish: session.publishCamera, onStop: session.stopCamera }}
         collapsible={dockCollapsible}
         expanded={dockExpanded}
         onExpandedChange={setDockPreference}
@@ -528,6 +536,9 @@ function RoomPageContent() {
 
       {/* Right Drawer: Participants */}
       <ParticipantsDrawer
+        cameraAccess={session.cameraAccess}
+        onDecideCamera={session.decideCameraAccess}
+        onRevokeCamera={session.revokeCameraAccess}
         roomState={isDemo ? undefined : session.roomState}
         isHost={session.isHost}
         moderationPending={session.moderationPending}

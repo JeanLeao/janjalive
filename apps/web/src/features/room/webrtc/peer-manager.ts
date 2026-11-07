@@ -84,7 +84,7 @@ export class PeerManager {
   setRemoteSharing(id: string, active: boolean): void {
     this.sharing.set(id, active);
     const stream = this.peers.get(id)?.remoteStream;
-    if (!active) { this.options.onRemoteStreamRemove(id); this.setRemoteCamera(id, false); }
+    if (!active) this.options.onRemoteStreamRemove(id);
     else if (stream) this.options.onRemoteStreamAdd(id, stream);
   }
 
