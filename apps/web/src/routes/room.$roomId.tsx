@@ -492,13 +492,13 @@ function RoomPageContent() {
       />
 
       {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
-        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+        <CapturePreview audioMode={session.displayAudioMode} quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
           onChangeQuality={session.changeQuality} stream={session.localStream} pending={session.captureState === 'publishing'}
           onConfirm={session.publishCapture} onCancel={session.stopSharing} />
       )}
 
       {session.pendingStream && (
-        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
+        <CapturePreview audioMode={session.displayAudioMode} quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
           stream={session.pendingStream} replacing cameraLive={session.camera.state === 'live'} pending={session.captureState === 'switch-publishing'}
           onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
       )}
@@ -558,6 +558,9 @@ function RoomPageContent() {
 
       {/* Right Drawer: Settings & Diagnostics */}
       <SettingsDrawer
+        displayAudioMode={session.displayAudioMode}
+        displayAudioModeLocked={session.displayAudioModeLocked}
+        onChangeDisplayAudioMode={session.changeDisplayAudioMode}
         opened={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         quality={session.quality}

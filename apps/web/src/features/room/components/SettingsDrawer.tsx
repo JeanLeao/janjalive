@@ -1,3 +1,4 @@
+import type { DisplayAudioMode } from '../media/display-media';
 import { AudioOutputSettings } from '../hooks/AudioOutput';
 import React, { useState } from 'react';
 import {
@@ -11,6 +12,7 @@ import {
   Code,
   Tabs,
   Switch,
+  NativeSelect,
 } from '@mantine/core';
 import { QUALITY_PROFILES, type QualitySelection } from '@screen-room/protocol';
 import { QualityControls } from './QualityControls';
@@ -31,6 +33,9 @@ import {
 } from './Icons';
 
 export interface SettingsDrawerProps {
+  displayAudioMode?: DisplayAudioMode;
+  displayAudioModeLocked?: boolean;
+  onChangeDisplayAudioMode?: (mode: DisplayAudioMode) => void;
   opened: boolean;
   onClose: () => void;
   quality: QualitySelection;
@@ -50,6 +55,7 @@ export interface SettingsDrawerProps {
 }
 
 export function SettingsDrawer({
+  displayAudioMode = 'system', displayAudioModeLocked = false, onChangeDisplayAudioMode,
   opened,
   onClose,
   quality,
@@ -233,12 +239,25 @@ export function SettingsDrawer({
         <Tabs.Panel value="audio">
           <Stack gap="md">
             <AudioOutputSettings />
+            {onChangeDisplayAudioMode && <div>
+              <NativeSelect label="Áudio da próxima captura" value={displayAudioMode} disabled={displayAudioModeLocked}
+                onChange={event => onChangeDisplayAudioMode(event.currentTarget.value === 'tab' ? 'tab' : 'system')}
+                data={[{ value: 'system', label: 'Sistema ou aba (padrão)' }, { value: 'tab', label: 'Áudio somente da aba' }]}
+                styles={{ input: { minHeight: 44 } }} />
+              <Text size="xs" c="#8c959f" mt={8}>
+                {displayAudioMode === 'tab'
+                  ? 'Escolha uma aba no seletor do navegador e marque Compartilhar áudio da aba. O áudio do sistema não será solicitado.'
+                  : 'Dependendo da fonte escolhida, o áudio do sistema pode incluir Discord e outros programas.'}
+              </Text>
+              {displayAudioModeLocked && <Text size="xs" c="#e3b341" mt={4}>Para mudar a fonte de áudio, pare o compartilhamento e inicie novamente. A seleção não altera uma transmissão em andamento.</Text>}
+            </div>}
+
             <div>
               <Text fw={600} size="sm" c="#fff" mb={4}>
                 Áudio da tela
               </Text>
               <Text size="xs" c="#8c959f">
-                O áudio transmitido provém da aba do navegador ou janela compartilhada. O microfone pessoal nunca é requisitado.
+                O áudio transmitido depende do modo escolhido e das opções do navegador. O microfone pessoal nunca é requisitado.
               </Text>
             </div>
 

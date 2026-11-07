@@ -1,3 +1,4 @@
+import type { DisplayAudioMode } from '../media/display-media';
 import { CameraController, type CameraSnapshot } from '../media/camera-controller';
 import { useWatchParty } from './useWatchParty';
 import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
@@ -114,6 +115,8 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
   const [remoteCameraStreams, setRemoteCameraStreams] = useState<Record<string, MediaStream>>({});
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [quality, setQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
+  const [displayAudioMode, setDisplayAudioMode] = useState<DisplayAudioMode>('system');
+  const displayAudioModeRef = useRef<DisplayAudioMode>('system');
   const preferenceRef = useRef<QualitySelection>(DEFAULT_QUALITY);
   const [requestedQuality, setRequestedQuality] = useState<QualitySelection>(DEFAULT_QUALITY);
   const [qualityVerification, setQualityVerification] = useState<'pending' | 'verified' | 'partial' | null>(null);
@@ -776,7 +779,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       const stream = await captureDisplayMedia(qualityRef.current, captured => {
         if (generation !== captureGenerationRef.current) stopAllTracks(captured);
         else localStreamRef.current = captured;
-      });
+      }, displayAudioModeRef.current);
       if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
       localStreamRef.current = stream;
       const applied = await applyCaptureQuality(stream.getVideoTracks()[0], qualityRef.current);
@@ -934,7 +937,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     const selection = captureDisplayMedia(qualityRef.current, captured => {
       if (generation !== captureGenerationRef.current) stopAllTracks(captured);
       else change.pending = captured;
-    });
+    }, displayAudioModeRef.current);
     signalingRef.current?.updateSharing({ active: true, paused: true, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: previous.getAudioTracks().length > 0, audioMuted: change.muted });
     try {
       const stream = await selection;
@@ -1331,6 +1334,13 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       interactions.answerQuestionText(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, answerText),
     updateQuestionStatus: (questionId: string, action: 'answer-verbal' | 'reopen' | 'highlight' | 'unhighlight') =>
       interactions.updateQuestionStatus(signalingRoomRef.current === roomId ? signalingRef.current : null, questionId, action),
+    displayAudioMode,
+    displayAudioModeLocked: captureState !== 'idle',
+    changeDisplayAudioMode: (mode: DisplayAudioMode) => {
+      if (captureStateRef.current !== 'idle') return;
+      displayAudioModeRef.current = mode;
+      setDisplayAudioMode(mode);
+    },
     captureState,
     pendingStream,
     switchCapture,

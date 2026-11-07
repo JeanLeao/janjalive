@@ -106,3 +106,7 @@ Configuração de TLS/proxy, Docker, systemd, firewall, atualização e verifica
 - [Benchmark local](apps/web/benchmark/README.md): execução e interpretação das medições.
 - [Produto](apps/web/PRODUCT.md) e [design](apps/web/DESIGN.md): contexto atual para manutenção da interface.
 - [Pendências jurídicas](docs/legal/README.md): confirmações necessárias antes de publicar as minutas.
+
+### Áudio somente da aba
+
+Em Configurações → Áudio, selecione **Áudio somente da aba** antes de iniciar a captura. Escolha uma aba no seletor do navegador e marque a opção de compartilhar seu áudio. Esse modo solicita a exclusão do áudio do sistema e rejeita janelas, telas inteiras ou fontes que o navegador não identifique como aba. Não há tentativa automática de capturar áudio do sistema ou microfone. Uma aba sem áudio pode ser compartilhada silenciosamente, com aviso na prévia. Para mudar o modo, encerre a captura; trocas de origem mantêm a mesma política de áudio. O modo padrão existente continua disponível.

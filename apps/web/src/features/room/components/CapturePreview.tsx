@@ -1,3 +1,4 @@
+import type { DisplayAudioMode } from '../media/display-media';
 import { useState } from 'react';
 import { resolveQuality, type QualitySelection } from '@screen-room/protocol';
 import { QualityControls } from './QualityControls';
@@ -6,7 +7,8 @@ import { useMediaStreamVideo } from '../hooks/useMediaStreamVideo';
 import classes from './CapturePreview.module.css';
 import { IconChevronDown, IconInfo, IconVolume, IconVolumeMute } from './Icons';
 
-export function CapturePreview({ stream, pending, replacing = false, onConfirm, onCancel, quality, onChangeQuality, qualityPending = false, qualityNotice, cameraLive = false }: {
+export function CapturePreview({ audioMode = 'system', stream, pending, replacing = false, onConfirm, onCancel, quality, onChangeQuality, qualityPending = false, qualityNotice, cameraLive = false }: {
+  audioMode?: DisplayAudioMode;
   cameraLive?: boolean;
   quality: QualitySelection; onChangeQuality?: (quality: QualitySelection) => void; qualityPending?: boolean; qualityNotice?: string | null;
   replacing?: boolean; stream: MediaStream; pending: boolean; onConfirm: () => void; onCancel: () => void;
@@ -27,6 +29,11 @@ export function CapturePreview({ stream, pending, replacing = false, onConfirm, 
       }}>
       <div className={classes.scrollArea}>
         <PreviewVideo stream={stream} />
+        {audioMode === 'tab' && <Text size="sm" role="status" mt="xs">
+          {hasAudio ? 'Áudio somente da aba selecionada. O áudio do sistema não foi solicitado.'
+            : 'A aba foi capturada sem áudio. Para incluir o som, cancele e marque Compartilhar áudio da aba no seletor do navegador.'}
+        </Text>}
+
         {cameraLive && <Text role="status" c="#7ee787" size="sm">Câmera continua ao vivo durante a troca de tela.</Text>}
         <Group className={classes.metadata} justify="space-between" gap="xs" aria-live="polite">
           <Text size="xs" c="#c9d1d9">{pending ? 'Entrando ao vivo…' : replacing ? 'Nova origem — não está ao vivo' : 'Não está ao vivo'}</Text>

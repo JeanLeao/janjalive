@@ -1,5 +1,11 @@
 import { CAPTURE_FRAMERATE_ENVELOPE, resolveQuality, type QualitySelection } from '@screen-room/protocol';
 
+export type DisplayAudioMode = 'system' | 'tab';
+
+class TabAudioCaptureError extends Error {
+  override name = 'TabAudioCaptureError';
+}
+
 export function canShareScreen(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) return false;
@@ -26,6 +32,7 @@ export function formatSharingErrorMessage(error: unknown): string {
   }
 
   const err = error as { name?: string; message?: string };
+  if (err.name === 'TabAudioCaptureError') return err.message || 'Escolha uma aba do navegador para compartilhar somente seu áudio.';
   const messages: Record<string, string> = {
     NotAllowedError: 'Permissão recusada ou compartilhamento cancelado. Clique novamente e escolha uma tela/aba.',
     AbortError: 'O seletor de tela foi fechado antes de escolher uma fonte.',
@@ -39,7 +46,7 @@ export function formatSharingErrorMessage(error: unknown): string {
   return messages[err.name ?? ''] || `Falha ${err.name || 'desconhecida'}: ${err.message || 'o navegador não informou o motivo.'}`;
 }
 
-export async function captureDisplayMedia(quality: QualitySelection, onCaptured?: (stream: MediaStream) => void): Promise<MediaStream> {
+export async function captureDisplayMedia(quality: QualitySelection, onCaptured?: (stream: MediaStream) => void, audioMode: DisplayAudioMode = 'system'): Promise<MediaStream> {
   if (!canShareScreen()) {
     throw new Error(getShareSupportMessage());
   }
@@ -60,9 +67,24 @@ export async function captureDisplayMedia(quality: QualitySelection, onCaptured?
     audio: true,
   };
 
+  if (audioMode === 'tab') {
+    // These are picker hints, not authorization. Validate the returned surface too.
+    Object.assign(constraints.video as MediaTrackConstraints, { displaySurface: 'browser' });
+    Object.assign(constraints, { systemAudio: 'exclude', windowAudio: 'exclude',
+      monitorTypeSurfaces: 'exclude', surfaceSwitching: 'exclude' });
+  }
+
   const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
   // Register ownership immediately: session cleanup must not wait for constraints.
-  try { onCaptured?.(stream); }
+  try {
+    if (audioMode === 'tab') {
+      const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface;
+      if (surface !== 'browser') throw new TabAudioCaptureError(surface
+        ? 'No modo Áudio somente da aba, escolha uma aba do navegador. Janelas e telas inteiras não são aceitas.'
+        : 'Este navegador não confirmou a captura de uma aba. Use Chrome ou Edge atualizado, ou escolha outro modo de áudio.');
+    }
+    onCaptured?.(stream);
+  }
   catch (error) { stopAllTracks(stream); throw error; }
   await applyCaptureQuality(stream.getVideoTracks()[0], quality);
   return stream;
