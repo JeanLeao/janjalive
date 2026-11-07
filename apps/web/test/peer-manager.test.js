@@ -962,3 +962,21 @@ test('camera adaptation setParameters failure releases only camera and preserves
   assert.equal(peer.videoSender.track,screen.getVideoTracks()[0]); assert.equal(peer.audioSender.track,screen.getAudioTracks()[0]);
   assert.equal(peer.pc.connectionState==='closed',false); manager.dispose();
 });
+
+
+test('camera-only participant stays visible when screen sharing is absent and hides on authoritative revoke', () => {
+  const received = [];
+  const manager = new PeerManager({ rtcConfig: { iceServers: [] },
+    onSendSignal: () => true, onRemoteStreamAdd: () => {}, onRemoteStreamRemove: () => {},
+    onRemoteCameraStream: (id, stream) => received.push([id, stream]),
+  });
+  const peer = manager.getOrCreatePeer('spectator');
+  const camera = new MockMediaStream();
+  peer.remoteCameraStream = camera;
+  manager.setRemoteCamera('spectator', true);
+  manager.setRemoteSharing('spectator', false);
+  assert.equal(received.at(-1)[1], camera);
+  manager.setRemoteCamera('spectator', false);
+  assert.equal(received.at(-1)[1], null);
+  manager.dispose();
+});

@@ -6,6 +6,7 @@ Compartilhamento de tela e áudio da aba/sistema no navegador, sem cadastro, em 
 
 - Prévia local e confirmação antes de transmitir; pausa, retomada, troca de origem e parada sem recarregar a página.
 - Webcam opcional do apresentador, somente vídeo, com prévia e publicação explícita durante a apresentação de tela. Pausar ou encerrar a tela e desconectar desliga a câmera; trocar a origem da tela preserva a câmera ativa. Não há captura de microfone.
+- Espectadores podem solicitar câmera ao host em Participantes. O host autoriza, recusa ou revoga cada solicitação. A aprovação não abre a câmera: exige ação do espectador, prévia e confirmação, sempre sem microfone. A desconexão do espectador ou do host invalida a autorização. Câmeras sem compartilhamento de tela aparecem em uma área própria do palco.
 - Múltiplos apresentadores, seleção de palco, acompanhamento opcional das escolhas de outro apresentador, Comparar, Cinema, tela cheia, zoom e PiP conforme suporte do navegador. Webcam sobreposta, separada ou oculta; ocultar afeta apenas a visualização local.
 - Perfis de qualidade Nitidez/Fluidez, limites de FPS, adaptação automática e diagnósticos de rede.
 - Chat, reações, mão levantada, perguntas, enquetes e anotações efêmeras.

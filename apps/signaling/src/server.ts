@@ -322,6 +322,13 @@ export function createSignalServer({
   const clips = new Clips(snapshot => broadcast(snapshot.roomId, snapshot));
 
   rooms.onRoomStateChanged = (roomId) => broadcast(roomId, { type: 'room-state', state: rooms.roomState(roomId) });
+  rooms.onCameraAccessChanged = roomId => {
+    broadcast(roomId, rooms.cameraAccessSnapshot(roomId));
+    for (const participant of rooms.getParticipants(roomId)) {
+      broadcast(roomId, { type: 'camera-updated', peerId: participant.peerId, active: participant.camera?.active ?? false });
+    }
+  };
+
 
   function depart(socket: SignalWebSocket, isVoluntary = false) {
     if (!socket.meta) return;
@@ -725,6 +732,7 @@ export function createSignalServer({
           );
           broadcast(normalizedRoom, { type: 'room-state', state: rooms.roomState(normalizedRoom) });
           broadcast(normalizedRoom, rooms.handsSnapshot(normalizedRoom));
+          if (rooms.cameraAccessSnapshot(normalizedRoom).entries.length) rooms.onCameraAccessChanged?.(normalizedRoom);
           const qaSnap = rooms.questionsSnapshot(normalizedRoom);
           if (qaSnap.revision > prevQaRev) {
             broadcast(normalizedRoom, qaSnap);
@@ -1025,6 +1033,21 @@ export function createSignalServer({
           return;
         }
 
+        if (message.type === 'request-camera' || message.type === 'cancel-camera-request' || message.type === 'decide-camera' || message.type === 'revoke-camera') {
+          const meta = socket.meta;
+          if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
+          try {
+            if (message.type === 'request-camera') rooms.requestCamera(meta.roomId, meta.peerId, message.requestId);
+            else if (message.type === 'cancel-camera-request') rooms.cancelCameraRequest(meta.roomId, meta.peerId, message.requestId);
+            else {
+              if (!meta.hostAuthorized) throw new Error('Somente o líder pode autorizar câmeras.');
+              rooms.decideCamera(meta.roomId, meta.peerId, message.targetPeerId, message.requestId,
+                message.type === 'decide-camera' && message.allowed, message.type === 'revoke-camera');
+            }
+          } catch (error) { send(socket, { type: 'camera-access-error', message: error instanceof Error ? error.message : 'Não foi possível atualizar a câmera.' }); }
+          return;
+        }
+
         if (message.type === 'update-camera') {
           const meta = socket.meta;
           if (!meta || peerSocket(meta.roomId, meta.peerId) !== socket) return;
@@ -1046,7 +1069,7 @@ export function createSignalServer({
           clips.sharing(roomId, peerId, effective);
           broadcast(roomId, { type: 'sharing-updated', peerId, ...effective }, peerId);
           if (!effective.active) {
-            broadcast(roomId, { type: 'camera-updated', peerId, active: false });
+            broadcast(roomId, { type: 'camera-updated', peerId, active: rooms.getParticipants(roomId).find(p => p.peerId === peerId)?.camera?.active ?? false });
             for (const { presenterPeerId, seq } of rooms.clearSelections(roomId, peerId, true)) {
               broadcast(roomId, { type: 'stage-selected', peerId: presenterPeerId, targetPeerId: null, seq });
             }

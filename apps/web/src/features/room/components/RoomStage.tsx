@@ -54,6 +54,7 @@ export interface RoomStageProps {
   drawingEnabled?: boolean;
   onToggleDrawingPermission?: () => void;
   onClearCollaborativeDrawings?: () => void;
+  spectatorCameras?: React.ReactNode;
   interactions?: React.ReactNode;
   /** Acesso contextual às interações quando o header está oculto (Cinema ou tela cheia). */
   interactionAccess?: React.ReactNode;
@@ -98,6 +99,7 @@ export function RoomStage({
   drawingEnabled,
   onToggleDrawingPermission,
   onClearCollaborativeDrawings,
+  spectatorCameras,
   interactions,
   interactionAccess,
   onOpenOrFocusInteractions,
@@ -457,7 +459,7 @@ export function RoomStage({
           onToggleFullscreen={toggleFullscreen}
           showAccess={showAccess}
           interactionAccess={interactionAccess}
-          interactions={interactions}
+          interactions={<>{spectatorCameras}{interactions}</>}
           stageContainerRef={stageContainerRef}
         />
       </>
@@ -507,6 +509,7 @@ export function RoomStage({
             .stage-empty-container { --stage-control-size: 44px; }
           }
         `}</style>
+        {spectatorCameras}
         {interactions}
         {stageNav}
         <Box style={{ position: 'absolute', top: 16, right: 16, zIndex: 25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>{clipControls}{showAccess && interactionAccess}</Box>
@@ -674,6 +677,7 @@ export function RoomStage({
       >
         {announceMessage}
       </Box>
+      {spectatorCameras}
       {interactions}
       <style>{`
         .stage-main-container { --stage-control-size: 36px; }

@@ -1,5 +1,5 @@
 import {
-  normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
+  type CameraAccessEntry, normalizeRoom, normalizePeer, type SharingState, type ParticipantInfo,
   type PresenterCollaborationMessage, type PointMessage, type SpectatorDrawingMessage,
   type ClearCollaborativeDrawingsMessage, COLLABORATION_LIMITS,
   type StageSelection, STAGE_SELECTION_LIMITS, type HandState, type HandsSnapshot, HAND_LIMITS,
@@ -50,6 +50,8 @@ export interface ParticipantMeta {
     drawingBySender?: Map<string, SpectatorDrawingSenderBudget>;
     aggregateDrawingTimes?: number[];
   };
+  cameraAccess?: CameraAccessEntry;
+  cameraRequestTimes?: number[];
   camera?: { active: boolean };
   sharing?: SharingState;
   nickname?: string;
@@ -128,6 +130,7 @@ export class RoomRegistry {
   readonly polls = new RoomPolls();
   #administration = new Map<string, Administration>();
   onRoomStateChanged?: (roomId: string) => void;
+  onCameraAccessChanged?: (roomId: string) => void;
   createRoom(
     roomId = crypto.randomBytes(16).toString('hex'),
     ttlMs = 60000,
@@ -235,6 +238,7 @@ export class RoomRegistry {
   #revokeHost(room: string): void {
     const admin = this.#administration.get(room);
     if (!admin) return;
+    this.clearCameraAccess(room);
     admin.credential = undefined;
     admin.hostPeerId = null;
     admin.locked = false;
@@ -343,6 +347,7 @@ export class RoomRegistry {
       crypto.randomUUID();
 
     const preservedSharing = existingMeta?.sharing ?? reservation?.sharing;
+    if (existingMeta) this.clearCameraAccess(room, admin.hostPeerId === peer ? undefined : peer);
     participants.set(peer, {
       hand: existingMeta?.hand ?? reservation?.hand,
       handTimes: existingMeta?.handTimes ?? reservation?.handTimes,
@@ -377,6 +382,7 @@ export class RoomRegistry {
     if (!participants) return [];
 
     const existingMeta = participants.get(peer);
+    this.clearCameraAccess(room, this.#administration.get(room)?.hostPeerId === peer ? undefined : peer);
     participants.delete(peer);
     const admin = this.#administration.get(room);
     if (existingMeta && admin) admin.revision++;
@@ -721,10 +727,57 @@ export class RoomRegistry {
     return cleared;
   }
 
+  cameraAccessSnapshot(roomId: string): { type: 'camera-access'; entries: CameraAccessEntry[] } {
+    return { type: 'camera-access', entries: [...(this.#rooms.get(roomId)?.values() ?? [])]
+      .flatMap(meta => meta.cameraAccess ? [{ ...meta.cameraAccess }] : []) };
+  }
+
+  clearCameraAccess(room: string, peerId?: string): void {
+    let changed = false;
+    for (const [id, meta] of this.#rooms.get(room) ?? []) {
+      if (peerId !== undefined && id !== peerId) continue;
+      if (meta.cameraAccess) {
+        changed = true;
+        meta.cameraAccess = undefined;
+        if (!meta.sharing?.active) meta.camera = { active: false };
+      }
+    }
+    if (changed) this.onCameraAccessChanged?.(room);
+  }
+
+  requestCamera(room: string, peer: string, _requestId: string, now = Date.now()): void {
+    const meta = this.#rooms.get(room)?.get(peer);
+    if (!meta || !this.roomState(room).hostConnected) throw new Error('O líder precisa estar conectado para autorizar a câmera.');
+    if (meta.cameraAccess) throw new Error('Você já tem uma solicitação ou autorização de câmera.');
+    meta.cameraRequestTimes = (meta.cameraRequestTimes ?? []).filter(time => now - time < 10000);
+    if (meta.cameraRequestTimes.length >= 5) throw new Error('Aguarde antes de solicitar a câmera novamente.');
+    meta.cameraRequestTimes.push(now);
+    // A server nonce prevents an old host decision from approving a new request.
+    meta.cameraAccess = { peerId: peer, requestId: crypto.randomUUID(), status: 'pending' };
+    this.onCameraAccessChanged?.(room);
+  }
+
+  cancelCameraRequest(room: string, peer: string, requestId: string): void {
+    const access = this.#rooms.get(room)?.get(peer)?.cameraAccess;
+    if (access?.requestId === requestId) this.clearCameraAccess(room, peer);
+  }
+
+  decideCamera(room: string, host: string, peer: string, requestId: string, allowed: boolean, revoke = false): void {
+    if (this.#administration.get(room)?.hostPeerId !== host || !this.hasPeer(room, host)) throw new Error('Somente o líder pode autorizar câmeras.');
+    const meta = this.#rooms.get(room)?.get(peer);
+    const access = meta?.cameraAccess;
+    if (!meta || !access || access.requestId !== requestId || access.status !== (revoke ? 'approved' : 'pending')) throw new Error('A solicitação de câmera mudou. Atualize a lista.');
+    if (allowed && !revoke) {
+      access.status = 'approved';
+      this.onCameraAccessChanged?.(room);
+    } else this.clearCameraAccess(room, peer);
+  }
+
   updateCamera(roomId: string, peerId: string, active: boolean): { active: boolean } | undefined {
     const meta = this.#rooms.get(roomId)?.get(peerId);
     if (!meta) return;
-    meta.camera = { active: active && Boolean(meta.sharing?.active) };
+    const approved = meta.cameraAccess?.status === 'approved' && this.roomState(roomId).hostConnected;
+    meta.camera = { active: active && Boolean(meta.sharing?.active || approved) };
     return meta.camera;
   }
 
@@ -756,7 +809,7 @@ export class RoomRegistry {
       meta.collaboration.drawingBySender?.clear();
       meta.collaboration.aggregateDrawingTimes = undefined;
     }
-    if (!nextSharing.active) meta.camera = { active: false };
+    if (!nextSharing.active && meta.cameraAccess?.status !== 'approved') meta.camera = { active: false };
     meta.sharing = nextSharing;
     return nextSharing;
   }

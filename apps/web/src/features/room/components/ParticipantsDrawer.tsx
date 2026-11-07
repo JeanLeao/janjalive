@@ -1,4 +1,4 @@
-import type { RoomState } from '@screen-room/protocol';
+import type { CameraAccessEntry, RoomState } from '@screen-room/protocol';
 import React, { useRef, useEffect, useState } from 'react';
 import {
   Drawer,
@@ -29,6 +29,9 @@ import {
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface ParticipantsDrawerProps {
+  cameraAccess?: CameraAccessEntry[];
+  onDecideCamera?: (entry: CameraAccessEntry, allowed: boolean) => void;
+  onRevokeCamera?: (entry: CameraAccessEntry) => void;
   roomState?: RoomState;
   isHost?: boolean;
   moderationPending?: boolean;
@@ -47,6 +50,7 @@ export interface ParticipantsDrawerProps {
 }
 
 export function ParticipantsDrawer({
+  cameraAccess = [], onDecideCamera, onRevokeCamera,
   roomState, isHost = false, moderationPending = false, moderationFeedback, onModerate,
   opened,
   onClose,
@@ -204,6 +208,7 @@ export function ParticipantsDrawer({
             {followActions}
           </Box>}
           {[...participants].sort((a, b) => (a.handOrder ?? Infinity) - (b.handOrder ?? Infinity) || a.peerId.localeCompare(b.peerId)).map((part) => {
+            const access = cameraAccess.find(entry => entry.peerId === part.peerId);
             const displayName = formatDisplayName(part.nickname, part.isLocal);
             const { bg, text } = getAvatarColor(part.nickname || 'Visitante');
 
@@ -220,6 +225,15 @@ export function ParticipantsDrawer({
                   border: '1px solid rgba(255, 255, 255, 0.05)',
                 }}
               >
+                {access && <Stack gap={4} mb={8}>
+                  <Text size="xs" role="status">{access.status === 'pending' ? 'Solicitou transmitir a câmera' : 'Câmera autorizada pelo líder'}</Text>
+                  {isHost && <Group gap={6}>
+                    {access.status === 'pending' ? <>
+                      <Button size="compact-xs" mih={44} onClick={() => onDecideCamera?.(access, true)} aria-label={`Autorizar câmera de ${displayName}`}>Autorizar câmera</Button>
+                      <Button size="compact-xs" mih={44} variant="default" onClick={() => onDecideCamera?.(access, false)} aria-label={`Recusar câmera de ${displayName}`}>Recusar</Button>
+                    </> : <Button size="compact-xs" mih={44} color="red" variant="subtle" onClick={() => onRevokeCamera?.(access)} aria-label={`Revogar câmera de ${displayName}`}>Revogar câmera</Button>}
+                  </Group>}
+                </Stack>}
                 {roomState?.hostPeerId === part.peerId && <Text size="xs" c="#93c5fd" fw={600} mb={4}>Host</Text>}
                 {part.handOrder != null && <Group gap={6} mb={4} c="#93c5fd"><IconHand size={14} aria-hidden /><Text size="xs">Mão levantada</Text></Group>}
                 <Group gap="sm" style={{ flex: 1, minWidth: 0 }}>

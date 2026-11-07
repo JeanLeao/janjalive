@@ -1,0 +1,9 @@
+.spectator-cameras { position: absolute; z-index: 12; top: 56px; right: 12px; width: min(164px, 38%); color: #e6edf3; pointer-events: auto; }
+.spectator-cameras > button { width: 100%; min-height: 44px; border: 1px solid #484f58; border-radius: 8px; background: #161b22; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.spectator-cameras > button:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.spectator-camera-list { max-height: min(45vh, 380px); overflow: auto; }
+.spectator-cameras figure { margin: 6px 0; background: #161b22; border-radius: 8px; overflow: hidden; }
+.spectator-cameras .stage-camera-video { display: block; position: static; width: 100%; max-height: none; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
+.spectator-cameras .stage-camera-video[hidden] { display: none; }
+.spectator-cameras figcaption { padding: 4px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 960px) { .stage-main-container:has(#room-chat-panel) .spectator-cameras { right: 392px; } }

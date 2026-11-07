@@ -13,7 +13,18 @@ export type SharingState = z.infer<typeof SharingStateSchema>;
 export const UpdateSharingMessageSchema = SharingStateSchema.extend({ type: z.literal('update-sharing') });
 export const SharingUpdatedMessageSchema = SharingStateSchema.extend({ type: z.literal('sharing-updated'), peerId: z.string().min(1) });
 
-// Camera publication belongs to the presenter, independently of temporary screen pause.
+// Spectators require a room host grant; capture still requires local confirmation.
+export const CameraAccessEntrySchema = z.object({
+  peerId: z.string().min(1).max(80), requestId: z.string().uuid(),
+  status: z.enum(['pending', 'approved']),
+}).strict();
+export type CameraAccessEntry = z.infer<typeof CameraAccessEntrySchema>;
+export const RequestCameraSchema = z.object({ type: z.literal('request-camera'), requestId: z.string().uuid() }).strict();
+export const CancelCameraRequestSchema = z.object({ type: z.literal('cancel-camera-request'), requestId: z.string().uuid() }).strict();
+export const DecideCameraSchema = z.object({ type: z.literal('decide-camera'), targetPeerId: z.string().min(1).max(80), requestId: z.string().uuid(), allowed: z.boolean() }).strict();
+export const RevokeCameraSchema = z.object({ type: z.literal('revoke-camera'), targetPeerId: z.string().min(1).max(80), requestId: z.string().uuid() }).strict();
+export const CameraAccessSchema = z.object({ type: z.literal('camera-access'), entries: z.array(CameraAccessEntrySchema).max(1000) }).strict();
+export const CameraAccessErrorSchema = z.object({ type: z.literal('camera-access-error'), message: z.string().max(200) }).strict();
 export const CameraStateSchema = z.object({ active: z.boolean() }).strict();
 export type CameraState = z.infer<typeof CameraStateSchema>;
 export const UpdateCameraSchema = CameraStateSchema.extend({ type: z.literal('update-camera') });
@@ -466,6 +477,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   JoinMessageSchema,
   UpdateSharingMessageSchema,
   UpdateCameraSchema,
+  RequestCameraSchema, CancelCameraRequestSchema, DecideCameraSchema, RevokeCameraSchema,
   SelectStageMessageSchema,
   SignalRelayMessageSchema,
   UpdateNicknameMessageSchema,
@@ -587,6 +599,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   PeersMessageSchema,
   SharingUpdatedMessageSchema,
   CameraUpdatedSchema,
+  CameraAccessSchema, CameraAccessErrorSchema,
   StageSelectedMessageSchema,
   PeerJoinedMessageSchema,
   PeerLeftMessageSchema,

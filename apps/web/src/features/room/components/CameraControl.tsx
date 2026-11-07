@@ -4,6 +4,10 @@ import { Button, Modal, Stack, Text, Tooltip, UnstyledButton } from '@mantine/co
 import type { CameraSnapshot } from '../media/camera-controller';
 
 export interface CameraControlProps {
+  permission?: 'none' | 'pending' | 'approved';
+  canRequestPermission?: boolean;
+  onRequestPermission?: () => void;
+  onCancelPermission?: () => void;
   camera: CameraSnapshot;
   canActivate: boolean;
   onRequest: () => void;
@@ -11,11 +15,13 @@ export interface CameraControlProps {
   onStop: () => void;
 }
 
-export function CameraControl({ camera, canActivate, onRequest, onPublish, onStop }: CameraControlProps) {
+export function CameraControl({ permission, canRequestPermission, onRequestPermission, onCancelPermission, camera, canActivate, onRequest, onPublish, onStop }: CameraControlProps) {
   const [details, setDetails] = useState(false);
   const preview = camera.state === 'preview' || camera.state === 'publishing';
   const opened = preview || details;
-  const label = camera.state === 'live' ? 'Desligar câmera — câmera ao vivo'
+  const waiting = permission === 'pending';
+  const needsPermission = waiting || permission === 'none';
+  const label = waiting ? 'Cancelar solicitação de câmera' : permission === 'none' ? 'Solicitar câmera ao líder' : camera.state === 'live' ? 'Desligar câmera — câmera ao vivo'
     : camera.state === 'requesting' ? 'Cancelar permissão da câmera'
     : camera.state === 'publishing' ? 'Publicando câmera'
     : camera.state === 'preview' ? 'Prévia local da câmera'
@@ -23,8 +29,10 @@ export function CameraControl({ camera, canActivate, onRequest, onPublish, onSto
   return <>
     <Tooltip label={label} events={{ hover: true, focus: true, touch: false }} withArrow>
       <UnstyledButton className="floating-dock-btn" aria-label={label} aria-pressed={camera.state === 'live'}
-        disabled={!canActivate && ['off', 'error', 'suspended'].includes(camera.state)}
+        disabled={needsPermission ? (!waiting && !canRequestPermission) : !canActivate && ['off', 'error', 'suspended'].includes(camera.state)}
         onClick={() => {
+          if (waiting) { onCancelPermission?.(); return; }
+          if (needsPermission) { onRequestPermission?.(); return; }
           if (camera.state === 'live' || camera.state === 'requesting') onStop();
           else if (preview) setDetails(true);
           else { setDetails(true); onRequest(); }
@@ -35,10 +43,10 @@ export function CameraControl({ camera, canActivate, onRequest, onPublish, onSto
       </UnstyledButton>
     </Tooltip>
     <span role="status" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>
-      {camera.state === 'live' ? 'Câmera ao vivo, inclusive durante a troca de tela.' : camera.state === 'off' ? 'Câmera desligada.' : camera.state === 'requesting' ? 'Solicitando permissão da câmera.' : camera.error}
+      {waiting ? 'Aguardando autorização do líder para a câmera.' : camera.state === 'live' ? 'Câmera ao vivo, inclusive durante a troca de tela.' : camera.state === 'off' ? 'Câmera desligada.' : camera.state === 'requesting' ? 'Solicitando permissão da câmera.' : camera.error}
     </span>
     <Modal opened={opened && camera.state !== 'live' && camera.state !== 'off' && camera.state !== 'suspended'}
-      onClose={() => { setDetails(false); onStop(); }} title="Câmera do apresentador" closeButtonProps={{ 'aria-label': 'Fechar prévia e desligar câmera', size: 44 }} centered>
+      onClose={() => { setDetails(false); onStop(); }} title="Sua câmera" closeButtonProps={{ 'aria-label': 'Fechar prévia e desligar câmera', size: 44 }} centered>
       <Stack>
         {preview && <CameraPreview stream={camera.stream!} />}
         <Text size="sm" role="status">{camera.error || (camera.state === 'requesting' ? 'Solicitando permissão… Você pode cancelar mesmo com o seletor do navegador aberto.'
