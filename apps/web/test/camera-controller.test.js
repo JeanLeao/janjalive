@@ -17,14 +17,17 @@ function fixture(overrides = {}) {
     announce: a => announcements.push(a), changed: s => states.push(s), ...overrides });
   return { controller, captured, states, announcements, attached, constraints, ineligible: () => { eligible=false; } };
 }
-test('camera: explicit request, local preview, manual confirmation, no audio and capped capture', async () => {
+test('camera: explicit request, instant activation in 1 click, no audio and capped capture', async () => {
   const f = fixture();
   assert.equal(f.constraints.length, 0);
   await f.controller.request();
   assert.deepEqual(f.constraints, [{ audio:false, video:{width:{ideal:640,max:640},height:{ideal:360,max:360},frameRate:{ideal:15,max:15}} }]);
-  assert.equal(f.states.at(-1).state, 'preview'); assert.equal(f.attached.length,0); assert.deepEqual(f.announcements,[]);
-  await f.controller.publish(); assert.equal(f.states.at(-1).state,'live'); assert.deepEqual(f.announcements,[true]);
-  f.controller.stop(); assert.equal(f.captured.track.readyState,'ended'); assert.deepEqual(f.announcements,[true,false]);
+  assert.equal(f.states.at(-1).state, 'live');
+  assert.equal(f.attached.length, 1);
+  assert.deepEqual(f.announcements, [true]);
+  f.controller.stop();
+  assert.equal(f.captured.track.readyState, 'ended');
+  assert.deepEqual(f.announcements, [true, false]);
 });
 test('camera: ineligible participants cannot request or publish', async () => {
   const f = fixture(); f.ineligible(); await f.controller.request(); assert.equal(f.constraints.length,0);
@@ -36,7 +39,7 @@ for (const reason of ['cancel','pause','end screen','disconnect','unmount']) {
     assert.equal(f.captured.track.readyState,'ended'); assert.equal(f.states.at(-1).state,'off'); assert.equal(f.attached.length,0);
   });
 }
-test('camera: cancel preview and native track end release capture and listener', async () => {
+test('camera: native track end releases capture and updates state to error', async () => {
   const f=fixture(); await f.controller.request(); f.captured.track.dispatchEvent(new Event('ended'));
   assert.equal(f.states.at(-1).state,'error'); assert.equal(f.captured.track.readyState,'ended');
   f.controller.stop(); f.captured.track.dispatchEvent(new Event('ended')); assert.equal(f.states.at(-1).state,'off');
@@ -48,30 +51,32 @@ for (const name of ['NotAllowedError','NotFoundError','NotReadableError','Securi
   });
 }
 test('camera: failure of publication stops camera and never announces active', async () => {
-  const f=fixture({attach:async()=>{throw new Error('failed');}}); await f.controller.request(); await f.controller.publish();
+  const f=fixture({attach:async()=>{throw new Error('failed');}}); await f.controller.request();
   assert.equal(f.states.at(-1).state,'error'); assert.equal(f.captured.track.readyState,'ended'); assert.ok(!f.announcements.includes(true));
 });
 test('camera: stop while publishing blocks late success and duplicate confirmations', async () => {
   const pending=deferred(); let attaches=0;
-  const f=fixture({attach:()=>{attaches++; return pending.promise;}}); await f.controller.request();
-  const publication=f.controller.publish(); await Promise.resolve(); await f.controller.publish();
+  const f=fixture({attach:()=>{attaches++; return pending.promise;}});
+  const publication=f.controller.request();
+  // Allow microtasks to resolve so capture completes and attach begins
+  for (let i = 0; i < 5; i++) await Promise.resolve();
   f.controller.stop(); pending.resolve(); await publication;
   assert.equal(attaches,1); assert.equal(f.states.at(-1).state,'off'); assert.ok(!f.announcements.includes(true));
 });
-test('camera: stale permission rejection cannot overwrite a new preview', async () => {
+test('camera: stale permission rejection cannot overwrite a fresh capture', async () => {
   const pending=deferred(); let calls=0; const fresh=stream();
   const f=fixture({capture:()=> ++calls===1 ? pending.promise : Promise.resolve(fresh)});
   const old=f.controller.request(); f.controller.stop(); await f.controller.request(); pending.reject(new Error()); await old;
-  assert.equal(f.states.at(-1).state,'preview'); assert.equal(fresh.track.readyState,'live'); f.controller.stop();
+  assert.equal(f.states.at(-1).state,'live'); assert.equal(fresh.track.readyState,'live'); f.controller.stop();
 });
-test('camera: lost eligibility after permission disposes result; after preview blocks publication', async () => {
+test('camera: lost eligibility after permission disposes result', async () => {
   const pending=deferred(); const f=fixture({capture:()=>pending.promise});
   const request=f.controller.request(); f.ineligible(); pending.resolve(f.captured); await request;
   assert.equal(f.states.at(-1).state,'off'); assert.equal(f.captured.track.readyState,'ended');
 });
 
 test('camera: announcement failure closes capture without claiming live', async () => {
-  const f=fixture({announce:active=>!active}); await f.controller.request(); await f.controller.publish();
+  const f=fixture({announce:active=>!active}); await f.controller.request();
   assert.equal(f.states.at(-1).state,'error'); assert.equal(f.captured.track.readyState,'ended');
 });
 test('camera: duplicate requests never trigger a second permission prompt', async () => {
@@ -80,17 +85,15 @@ test('camera: duplicate requests never trigger a second permission prompt', asyn
   pending.resolve(f.captured); await first; await f.controller.request(); assert.equal(calls,1); f.controller.stop();
 });
 
-test('camera: quality suspension releases capture, announces false and requires new preview and confirmation', async () => {
-  const f=fixture(); await f.controller.request(); await f.controller.publish();
+test('camera: quality suspension releases capture, announces false and allows reactivation', async () => {
+  const f=fixture(); await f.controller.request();
   f.controller.suspendForQuality();
   assert.equal(f.states.at(-1).state,'suspended');
   assert.match(f.states.at(-1).error,/qualidade de conexão/);
   assert.equal(f.captured.track.readyState,'ended');
   assert.deepEqual(f.announcements,[true,false]);
-  await f.controller.publish(); assert.equal(f.states.at(-1).state,'suspended');
   assert.equal(f.constraints.length,1);
   f.captured.track.readyState='live';
-  await f.controller.request(); assert.equal(f.states.at(-1).state,'preview');
-  assert.deepEqual(f.announcements,[true,false]);
-  await f.controller.publish(); assert.equal(f.states.at(-1).state,'live');
+  await f.controller.request(); assert.equal(f.states.at(-1).state,'live');
+  assert.deepEqual(f.announcements,[true,false,true]);
 });

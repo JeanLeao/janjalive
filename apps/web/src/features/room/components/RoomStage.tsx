@@ -76,6 +76,11 @@ export interface RoomStageProps {
   canShareScreen?: boolean | null;
   shortcutsEnabled?: boolean;
   onOpenQrCode?: (triggerEl?: HTMLElement | null) => void;
+  onRequestCamera?: () => void;
+  onStopCamera?: () => void;
+  hasAudioTrack?: boolean;
+  onToggleAudioMute?: () => void;
+  onTogglePause?: () => void;
 }
 
 interface StreamItem {
@@ -120,6 +125,11 @@ export function RoomStage({
   canShareScreen,
   shortcutsEnabled = false,
   onOpenQrCode,
+  onRequestCamera,
+  onStopCamera,
+  hasAudioTrack,
+  onToggleAudioMute,
+  onTogglePause,
 }: RoomStageProps) {
   const clipControls = originalClipControls;
   const [showStreams, setShowStreams] = useState(false);
@@ -128,7 +138,22 @@ export function RoomStage({
   const [watchControlsExpanded, setWatchControlsExpanded] = useState(true);
   const [secondaryControlsExpanded, setSecondaryControlsExpanded] = useState(true);
   const [secondaryId, setSecondaryId] = useState<string | null>(null);
-  const [audioPreferences, setAudioPreferences] = useState<Record<string, { volume: number; muted: boolean }>>({});
+  const [audioPreferences, setAudioPreferences] = useState<Record<string, { volume: number; muted: boolean }>>(() => {
+    const initial: Record<string, { volume: number; muted: boolean }> = {};
+    if (typeof window === 'undefined') return initial;
+    try {
+      const stored = localStorage.getItem('screen_room_spectator_volume');
+      if (stored !== null) {
+        const val = Number(stored);
+        if (!isNaN(val) && val >= 0 && val <= 1) {
+          initial['default'] = { volume: val, muted: false };
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return initial;
+  });
   const [manualAudio, setManualAudio] = useState<string | null>(null);
   const previousPrimary = useRef<string | null>(null);
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
@@ -270,14 +295,19 @@ export function RoomStage({
   }, [primaryId, sourceId, comparing, vanished, manualUnavailable]);
   const audioFor = (item: StreamItem) => ({
     selected: sourceId === item.id && !suspended,
-    preference: audioPreferences[item.id] ?? { volume: 1, muted: false },
+    preference: audioPreferences[item.id] ?? audioPreferences['default'] ?? { volume: 1, muted: false },
     comparing,
     paused: Boolean(item.paused),
     hasAudio: item.hasAudio,
     select: () => { setAudioSuspended(false); setManualAudio(comparing ? item.id : null); },
-    change: (patch: Partial<{ volume: number; muted: boolean }>) => setAudioPreferences(previous => ({
-      ...previous, [item.id]: { ...(previous[item.id] ?? { volume: 1, muted: false }), ...patch },
-    })),
+    change: (patch: Partial<{ volume: number; muted: boolean }>) => setAudioPreferences(previous => {
+      const current = previous[item.id] ?? previous['default'] ?? { volume: 1, muted: false };
+      const updated = { ...current, ...patch };
+      if (typeof patch.volume === 'number') {
+        try { localStorage.setItem('screen_room_spectator_volume', String(patch.volume)); } catch {}
+      }
+      return { ...previous, [item.id]: updated };
+    }),
   });
 
   const [announceMessage, setAnnounceMessage] = useState<string>('');
@@ -428,6 +458,11 @@ export function RoomStage({
     canFullscreen: true,
     onOpenOrFocusInteractions,
     canInteractions: Boolean(onOpenOrFocusInteractions),
+    onToggleCamera: camera && (camera.state === 'live' || camera.state === 'requesting' || camera.state === 'publishing')
+      ? onStopCamera
+      : onRequestCamera,
+    onToggleAudioMute: isSharing && hasAudioTrack ? onToggleAudioMute : undefined,
+    onTogglePause: isSharing ? onTogglePause : undefined,
   });
 
   const watchingParticipants = participants.filter((p) => !p.isSharing);

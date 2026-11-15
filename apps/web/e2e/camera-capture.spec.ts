@@ -4,33 +4,29 @@ import { gotoRoom } from './fixtures/rooms';
 import { synthetic, dock, start, preview, publish, cameraSenders } from './fixtures/camera';
 
 for (const mobile of [false,true]) {
-  test(`webcam B: preview, confirmation, switch, pause and independent stop ${mobile ? 'mobile' : 'desktop'}`, async ({browser}, info) => {
+  test(`webcam B: instant 1-click activation, switch, pause and independent stop ${mobile ? 'mobile' : 'desktop'}`, async ({browser}, info) => {
     const context=await browser.newContext({viewport:mobile ? {width:390,height:844}:{width:1280,height:800},hasTouch:mobile});
     const host=await context.newPage(), viewer=await context.newPage();
     await synthetic(host); await synthetic(viewer);
     await gotoRoom(host,'/room/camera-b'); await gotoRoom(viewer,'/room/camera-b');
     expect(await host.evaluate(()=>(window as any).cameraRequests.length)).toBe(0);
-    await start(host); await preview(host);
-    expect(await cameraSenders(host)).toBe(0);
-    expect(await host.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
-    expect(await host.getByRole('button',{name:'Transmitir câmera',exact:true}).evaluate(el=>el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
-    expect(await viewer.locator('video[aria-label="Prévia local da câmera"]').count()).toBe(0);
-    await expect(host.getByRole('button',{name:'Transmitir câmera',exact:true})).toBeVisible();
-    await host.screenshot({path:info.outputPath('camera-preview.png'), animations:'disabled'});
-    await host.getByRole('button',{name:'Cancelar câmera',exact:true}).click();
-    await expect.poll(()=>host.evaluate(()=>(window as any).cameraTracks[0].readyState)).toBe('ended');
-    await expect(host.getByRole('button',{name:'Ativar câmera',exact:true})).toBeFocused();
-    // Keyboard activation also stays tied to an explicit user gesture.
-    await host.getByRole('button',{name:'Ativar câmera',exact:true}).focus(); await host.keyboard.press('Enter');
-    await expect(host.locator('video[aria-label="Prévia local da câmera"]')).toBeVisible();
-    await expect(host.getByRole('button',{name:'Cancelar câmera',exact:true})).toBeFocused();
-    const confirm=host.getByRole('button',{name:'Transmitir câmera',exact:true});
-    await confirm.focus(); await expect(confirm).toBeFocused(); await host.keyboard.press('Enter');
+    await start(host);
+    // 1-click instant activation: click "Ativar câmera" immediately publishes to senders
+    await host.getByRole('button',{name:'Ativar câmera',exact:true}).click();
     await expect.poll(()=>cameraSenders(host)).toBeGreaterThan(0);
     await expect.poll(()=>host.evaluate(()=>(window as any).peers.flatMap((p:RTCPeerConnection)=>p.getSenders())
       .filter((s:RTCRtpSender)=>(window as any).cameraTracks.includes(s.track))
       .every((s:RTCRtpSender)=>s.getParameters().encodings.every(e=>e.maxBitrate===400000 && e.maxFramerate===15)))).toBe(true);
-    await expect(host.getByRole('dialog')).not.toBeVisible();
+    await expect(host.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true})).toBeVisible();
+    // Stop camera with 1 click
+    await host.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true}).click();
+    await expect.poll(()=>host.evaluate(()=>(window as any).cameraTracks[0].readyState)).toBe('ended');
+    await expect(host.getByRole('button',{name:'Ativar câmera',exact:true})).toBeVisible();
+
+    // Keyboard activation also activates directly in 1 click
+    await host.getByRole('button',{name:'Ativar câmera',exact:true}).focus(); await host.keyboard.press('Enter');
+    await expect.poll(()=>cameraSenders(host)).toBeGreaterThan(0);
+    await expect(host.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true})).toBeVisible();
     await host.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true}).blur();
     await host.mouse.move(0,0);
     await expect(host.getByText('● Câmera ao vivo',{exact:true})).toBeVisible();
@@ -75,20 +71,18 @@ test('webcam B: permission errors, pending cancellation and publication failure 
   for (const name of ['NotAllowedError','NotFoundError','NotReadableError']) {
     await page.evaluate(name=>{(window as any).cameraError=name;},name);
     await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
-    await expect(page.getByRole('button',{name:'Tentar novamente',exact:true})).toBeVisible();
-    await page.getByRole('button',{name:'Cancelar câmera',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Câmera indisponível — tentar novamente',exact:true})).toBeVisible();
     expect(await page.evaluate(()=>(window as any).screenTracks[0].readyState)).toBe('live');
   }
   await page.evaluate(()=>{(window as any).cameraError=null;(window as any).cameraDeferred=true;});
-  await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
-  await expect(page.getByText(/Solicitando permissão…/)).toBeVisible();
-  await page.getByRole('button',{name:'Cancelar câmera',exact:true}).click();
+  await page.getByRole('button',{name:'Câmera indisponível — tentar novamente',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Solicitando permissão da câmera',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Solicitando permissão da câmera',exact:true}).click();
   await page.evaluate(()=>{(window as any).resolveCamera();(window as any).cameraDeferred=false;});
   await expect.poll(()=>page.evaluate(()=>(window as any).cameraTracks[0].readyState)).toBe('ended');
   await publish(page);
   await page.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true}).click();
   expect(await page.evaluate(()=>(window as any).screenTracks[0].readyState)).toBe('live');
-  await preview(page);
   await page.evaluate(()=>{
     const replace=RTCRtpSender.prototype.replaceTrack;
     RTCRtpSender.prototype.replaceTrack=function(track) {
@@ -96,8 +90,8 @@ test('webcam B: permission errors, pending cancellation and publication failure 
       return replace.call(this,track);
     };
   });
-  await page.getByRole('button',{name:'Transmitir câmera',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Tentar novamente',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Câmera indisponível — tentar novamente',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as any).screenTracks[0].readyState)).toBe('live');
   await expect.poll(()=>cameraSenders(page)).toBe(0);
   await viewer.close();
@@ -114,7 +108,7 @@ test('webcam B: disconnect and pending cancellation invalidate capture', async (
   await page.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true}).click();
   await page.evaluate(()=>{(window as any).cameraDeferred=true;});
   await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
-  await page.getByRole('button',{name:'Cancelar câmera',exact:true}).click();
+  await page.getByRole('button',{name:'Solicitando permissão da câmera',exact:true}).click();
   await page.getByRole('button',{name:'Parar compartilhamento de tela',exact:true}).click();
   await page.evaluate(()=>{(window as any).resolveCamera();});
   await expect.poll(()=>page.evaluate(()=>(window as any).cameraTracks.at(-1).readyState)).toBe('ended');
@@ -125,7 +119,7 @@ test('webcam B: route teardown while permission is pending stops the eventual tr
   await synthetic(page); await gotoRoom(page,'/room/camera-teardown'); await start(page);
   await page.evaluate(()=>{(window as any).cameraDeferred=true;});
   await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
-  await expect(page.getByText(/Solicitando permissão…/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Solicitando permissão da câmera',exact:true})).toBeVisible();
   // Trigger the real SPA leave handler while the synthetic native permission is unresolved.
   await page.locator('.floating-dock-bar button[aria-label="Sair da sala"]').evaluate((el:HTMLButtonElement)=>el.click());
   await expect(page).toHaveURL('/');

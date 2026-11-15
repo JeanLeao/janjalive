@@ -29,6 +29,9 @@ export interface UseRoomShortcutsOptions {
   canFullscreen?: boolean;
   onOpenOrFocusInteractions?: () => void;
   canInteractions?: boolean;
+  onToggleCamera?: () => void;
+  onToggleAudioMute?: () => void;
+  onTogglePause?: () => void;
 }
 
 export function isEditableElement(target: EventTarget | null): boolean {
@@ -61,9 +64,12 @@ export function useRoomShortcuts({
   canFullscreen = false,
   onOpenOrFocusInteractions,
   canInteractions = false,
+  onToggleCamera,
+  onToggleAudioMute,
+  onTogglePause,
 }: UseRoomShortcutsOptions) {
   useEffect(() => {
-    if (!enabled || typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       // Avoid repeated execution on continuous keydown
@@ -75,17 +81,39 @@ export function useRoomShortcuts({
       // Ignore IME composition
       if (event.isComposing || event.keyCode === 229) return;
 
-      // Single-character shortcuts: ignore any modified keys (Alt, Ctrl, Meta, Shift)
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-        return;
-      }
-
       // Ignore if user is currently interacting with an editable field
       if (isEditableElement(event.target) || isEditableElement(document.activeElement)) {
         return;
       }
 
       const key = event.key.toLowerCase();
+
+      // Broadcast hotkeys (Alt+C, Alt+M, Alt+P) - governed by the shortcuts toggle
+      if (enabled && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        if (key === 'c' && onToggleCamera) {
+          event.preventDefault();
+          onToggleCamera();
+          return;
+        }
+        if (key === 'm' && onToggleAudioMute) {
+          event.preventDefault();
+          onToggleAudioMute();
+          return;
+        }
+        if (key === 'p' && onTogglePause) {
+          event.preventDefault();
+          onTogglePause();
+          return;
+        }
+      }
+
+      // Remaining are single-character shortcuts, requiring shortcuts to be enabled
+      if (!enabled) return;
+
+      // Single-character shortcuts: ignore any modified keys (Alt, Ctrl, Meta, Shift)
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
 
       // Check navigation context (menus, popovers, drawers, modals, dialogs)
       const inNavContext =
@@ -157,5 +185,8 @@ export function useRoomShortcuts({
     canFullscreen,
     onOpenOrFocusInteractions,
     canInteractions,
+    onToggleCamera,
+    onToggleAudioMute,
+    onTogglePause,
   ]);
 }

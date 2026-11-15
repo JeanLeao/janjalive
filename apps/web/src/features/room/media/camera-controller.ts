@@ -1,4 +1,4 @@
-export type CameraState = 'off' | 'requesting' | 'preview' | 'publishing' | 'live' | 'error' | 'suspended';
+export type CameraState = 'off' | 'requesting' | 'publishing' | 'live' | 'error' | 'suspended';
 export interface CameraSnapshot { state: CameraState; stream: MediaStream | null; error: string | null }
 
 /** Owns capture lifetime; a generation invalidates permission and publication continuations. */
@@ -70,16 +70,9 @@ export class CameraController {
       const ended = () => { if (generation === this.generation) this.fail(new DOMException('Camera ended', 'NotReadableError')); };
       track.addEventListener('ended', ended);
       this.removeEnded = () => track.removeEventListener('ended', ended);
-      this.change('preview', stream);
-    } catch (error) { if (generation === this.generation) this.fail(error); }
-  };
-  publish = async () => {
-    const { stream, state } = this.snapshot;
-    if (state !== 'preview' || !stream) return;
-    if (!this.options.eligible()) { this.stop(); return; }
-    const generation = this.generation;
-    this.change('publishing', stream);
-    try {
+
+      // Instant activation: immediately publish without intermediate preview
+      this.change('publishing', stream);
       await this.cleanup;
       if (generation !== this.generation) return;
       if (!this.options.eligible()) { this.stop(); return; }
@@ -89,5 +82,10 @@ export class CameraController {
       if (this.options.announce(true) === false) throw new Error('Camera announcement failed');
       this.change('live', stream);
     } catch (error) { if (generation === this.generation) this.fail(error); }
+  };
+  publish = async () => {
+    // Kept for backward compatibility or explicit triggers
+    if (this.snapshot.state === 'live') return;
+    return this.request();
   };
 }

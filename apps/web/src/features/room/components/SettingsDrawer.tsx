@@ -522,7 +522,7 @@ export function SettingsDrawer({
               <Group justify="space-between" align="center" mb="xs">
                 <div>
                   <Text fw={600} size="sm" c="#fff">
-                    Atalhos de uma tecla
+                    Atalhos de teclado
                   </Text>
                   <Text size="xs" c="#8c959f">
                     {shortcutsEnabled ? 'Ativados' : 'Desativados por padrão (WCAG 2.1.4)'}
@@ -531,7 +531,7 @@ export function SettingsDrawer({
                 <Switch
                   checked={shortcutsEnabled}
                   onChange={(event) => onToggleShortcuts?.(event.currentTarget.checked)}
-                  aria-label="Ativar atalhos de teclado de uma tecla"
+                  aria-label="Ativar atalhos de teclado"
                   size="sm"
                   color="blue"
                 />
@@ -540,7 +540,7 @@ export function SettingsDrawer({
               <Text size="xs" c="#8c959f" mb="sm" style={{ lineHeight: 1.45 }}>
                 {shortcutsEnabled
                   ? 'Atalhos ativos. Pressione as teclas abaixo quando não estiver digitando.'
-                  : 'Recurso desativado. Ative para navegar rapidamente com teclas únicas.'}
+                  : 'Recurso desativado. Ative para utilizar os atalhos de navegação e transmissão.'}
               </Text>
 
               <Stack gap="xs">
@@ -559,6 +559,18 @@ export function SettingsDrawer({
                 <Group justify="space-between" wrap="nowrap">
                   <Text size="xs" c="#d0d7de">Abrir ou focar o painel de interações</Text>
                   <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>I</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Ligar / Desligar webcam</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>Alt + C</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Mutar / Desmutar áudio da tela</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>Alt + M</Code>
+                </Group>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="xs" c="#d0d7de">Pausar / Retomar transmissão</Text>
+                  <Code style={{ backgroundColor: '#161b22', color: '#e6edf3', border: '1px solid rgba(255, 255, 255, 0.12)', minWidth: 26, textAlign: 'center' }}>Alt + P</Code>
                 </Group>
               </Stack>
             </Box>
