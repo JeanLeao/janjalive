@@ -65,7 +65,7 @@ export async function preview(page: Page) {
   await expect.poll(()=>page.locator('video[aria-label="Prévia local da câmera"]').evaluate((v: HTMLVideoElement)=>v.videoWidth)).toBe(640);
 }
 export async function publish(page: Page) {
-  await preview(page); await page.getByRole('button',{name:'Transmitir câmera',exact:true}).click();
+  await page.getByRole('button',{name:'Ativar câmera',exact:true}).click();
   await expect(page.getByRole('button',{name:'Desligar câmera — câmera ao vivo',exact:true})).toBeVisible();
 }
 export async function cameraSenders(page: Page) {

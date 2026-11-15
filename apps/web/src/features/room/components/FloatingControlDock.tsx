@@ -7,6 +7,10 @@ import {
   UnstyledButton,
   Tooltip,
   Menu,
+  Popover,
+  SegmentedControl,
+  Stack,
+  Text,
   Loader,
 } from '@mantine/core';
 import {
@@ -20,7 +24,19 @@ import {
   IconExit,
   IconUsers,
   IconQrCode,
+  IconSliders,
 } from './Icons';
+import { QualityControls } from './QualityControls';
+import {
+  type QualitySelection,
+  type VisualPriority,
+  type QualityProfileKey,
+  type FrameRate,
+  QUALITY_PROFILES,
+  normalizeQuality,
+  resolveQuality,
+  validFrameRates,
+} from '@screen-room/protocol';
 import { copyRoomInviteUrl } from '../utils/invite-url';
 
 export interface FloatingControlDockProps {
@@ -42,6 +58,10 @@ export interface FloatingControlDockProps {
   hasAudioTrack: boolean;
   isAudioMuted: boolean;
   onToggleAudioMute: () => void;
+  quality?: QualitySelection;
+  onChangeQuality?: (quality: QualitySelection) => void;
+  qualityPending?: boolean;
+  qualityNotice?: string | null;
   onOpenParticipants: () => void;
   participantCount: number;
   raisedHandCount?: number;
@@ -70,6 +90,10 @@ export function FloatingControlDock({
   hasAudioTrack,
   isAudioMuted,
   onToggleAudioMute,
+  quality,
+  onChangeQuality,
+  qualityPending,
+  qualityNotice,
   onOpenParticipants,
   participantCount,
   raisedHandCount = 0,
@@ -217,6 +241,35 @@ export function FloatingControlDock({
 
         {cameraControl && <CameraControl {...cameraControl} />}
 
+        {/* Screen Audio Warning / Toggle */}
+        {isSharing && !hasAudioTrack && (
+          <Tooltip
+            label="Transmissão sem áudio do sistema/aba. Para incluir áudio, selecione uma aba ou compartilhe o áudio do sistema."
+            events={{ hover: true, focus: true, touch: false }} withArrow multiline w={220}
+          >
+            <Box
+              aria-label="Aviso: transmissão sem áudio"
+              tabIndex={0}
+              role="status"
+              className="floating-dock-btn"
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(217, 119, 6, 0.15)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                color: '#fbbf24',
+                cursor: 'default',
+              }}
+            >
+              <IconVolumeMute size={18} />
+            </Box>
+          </Tooltip>
+        )}
+
         {/* Screen Audio Mute / Unmute Toggle (only active if sharing and track exists) */}
         {isSharing && hasAudioTrack && (
           <Tooltip
@@ -246,6 +299,115 @@ export function FloatingControlDock({
             </UnstyledButton>
           </Tooltip>
         )}
+
+        {/* Quality Controls Popover (when sharing) */}
+        {isSharing && quality && onChangeQuality && (() => {
+          const profile = resolveQuality(quality);
+          const allowedFps = validFrameRates(quality.priority, quality.profile);
+          const updateQuality = (patch: Partial<QualitySelection>) => {
+            onChangeQuality(normalizeQuality({ ...quality, ...patch }));
+          };
+
+          return (
+            <Popover position="top" withArrow shadow="md" withinPortal trapFocus>
+              <Popover.Target>
+                <Tooltip label="Alterar qualidade da transmissão" events={{ hover: true, focus: true, touch: false }} withArrow>
+                  <UnstyledButton
+                    aria-label="Alterar qualidade da transmissão"
+                    className="floating-dock-btn"
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: '#21262d',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: '#e6edf3',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <IconSliders size={18} />
+                  </UnstyledButton>
+                </Tooltip>
+              </Popover.Target>
+              <Popover.Dropdown style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3', width: 320, padding: 14 }}>
+                <Stack gap="sm">
+                  <Text size="sm" fw={600} c="#e6edf3">Qualidade da tela</Text>
+
+                  <div>
+                    <Text size="xs" fw={500} c="#8b949e" mb={4}>Prioridade visual</Text>
+                    <SegmentedControl
+                      fullWidth
+                      size="xs"
+                      value={quality.priority}
+                      disabled={qualityPending}
+                      aria-label="Prioridade visual"
+                      onChange={value => updateQuality({ priority: value as VisualPriority })}
+                      data={[
+                        { value: 'sharpness', label: 'Nitidez' },
+                        { value: 'motion', label: 'Fluidez' },
+                      ]}
+                      styles={{
+                        root: { background: '#0d1117', border: '1px solid #30363d' },
+                        label: { minHeight: 32, display: 'grid', placeItems: 'center' },
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <Text size="xs" fw={500} c="#8b949e" mb={4}>Nível de qualidade</Text>
+                    <SegmentedControl
+                      fullWidth
+                      size="xs"
+                      value={quality.profile}
+                      disabled={qualityPending}
+                      aria-label="Nível de qualidade"
+                      onChange={value => updateQuality({ profile: value as QualityProfileKey })}
+                      data={Object.entries(QUALITY_PROFILES).map(([value, item]) => ({
+                        value,
+                        label: item.label,
+                      }))}
+                      styles={{
+                        root: { background: '#0d1117', border: '1px solid #30363d' },
+                        label: { minHeight: 32, display: 'grid', placeItems: 'center' },
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <Text size="xs" fw={500} c="#8b949e" mb={4}>Limite de taxa de quadros (FPS)</Text>
+                    <SegmentedControl
+                      fullWidth
+                      size="xs"
+                      value={String(quality.fps)}
+                      disabled={qualityPending}
+                      aria-label="Limite de FPS"
+                      onChange={value => updateQuality({ fps: Number(value) as FrameRate })}
+                      data={allowedFps.map(fps => ({
+                        value: String(fps),
+                        label: `${fps} FPS`,
+                      }))}
+                      styles={{
+                        root: { background: '#0d1117', border: '1px solid #30363d' },
+                        label: { minHeight: 32, display: 'grid', placeItems: 'center' },
+                      }}
+                    />
+                  </div>
+
+                  <Text size="xs" c="#8b949e" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
+                    {profile.width} × {profile.height} ({profile.height}p) · {quality.fps} FPS · {profile.maxBitrate / 1_000_000} Mbps
+                  </Text>
+
+                  {qualityPending && <Text size="xs" c="#c9d1d9">Aplicando qualidade…</Text>}
+                  {!qualityPending && qualityNotice && <Text size="xs" c="#e3b341">{qualityNotice}</Text>}
+                </Stack>
+              </Popover.Dropdown>
+            </Popover>
+          );
+        })()}
 
         {/* Copy Invite Link */}
         {!isSharing && <Tooltip label={copied ? 'Link copiado!' : 'Copiar convite da sala'} events={{ hover: true, focus: true, touch: false }} withArrow>

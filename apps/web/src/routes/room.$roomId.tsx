@@ -2,7 +2,6 @@ import { SpectatorCameras } from '../features/room/components/SpectatorCameras';
 import { ClipControls } from '../features/room/components/ClipControls';
 import { AudioOutputProvider } from '../features/room/hooks/AudioOutput';
 import { InteractionActions, InteractionLayer, useInteractionsUi } from '../features/room/components/RoomInteractions';
-import { CapturePreview } from '../features/room/components/CapturePreview';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 import { Box, Alert, Button, Modal, TextInput, Stack, Group, Text, Tooltip, ActionIcon } from '@mantine/core';
@@ -211,6 +210,33 @@ function RoomPageContent() {
     ? Boolean(session.watch.blob && !session.watch.busy && !session.watch.pending && !session.watch.inviting &&
         !session.watch.deliveries.some(delivery => ['waiting', 'offered', 'queued', 'transferring', 'verifying'].includes(delivery.state)))
     : Boolean(isDemo ? demoStreams?.length : session.remoteStreams.length || session.participants.some(p => p.isSharing));
+  // Auto-hide dock after 3.5s of mouse inactivity when watching content (Theater/Focus mode)
+  const [userActive, setUserActive] = useState(true);
+  const userActivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const resetTimer = () => {
+      setUserActive(true);
+      if (userActivityTimer.current) clearTimeout(userActivityTimer.current);
+      userActivityTimer.current = setTimeout(() => {
+        setUserActive(false);
+      }, 3500);
+    };
+
+    window.addEventListener('mousemove', resetTimer);
+    window.addEventListener('touchstart', resetTimer);
+    window.addEventListener('keydown', resetTimer);
+    resetTimer();
+
+    return () => {
+      if (userActivityTimer.current) clearTimeout(userActivityTimer.current);
+      window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('touchstart', resetTimer);
+      window.removeEventListener('keydown', resetTimer);
+    };
+  }, []);
+
   const dockCollapsible = session.captureState === 'idle' && hasStageContent;
   useEffect(() => {
     if (dockCollapsible && dockPreference === null && !dockInteractionActive &&
@@ -218,7 +244,8 @@ function RoomPageContent() {
       setDockPreference(false);
     }
   }, [dockCollapsible, dockPreference, dockInteractionActive, isParticipantsOpen, isSettingsOpen, isQrModalOpen, showCreatorKeyModal, session.storedRoomKey]);
-  const dockExpanded = !dockCollapsible || dockPreference !== false || dockInteractionActive;
+  const dockExpanded = (!dockCollapsible || dockPreference !== false || dockInteractionActive) &&
+    (userActive || dockInteractionActive || isParticipantsOpen || isSettingsOpen || isQrModalOpen || session.isSharing);
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
     const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -489,19 +516,12 @@ function RoomPageContent() {
         canShareScreen={canShare}
         shortcutsEnabled={shortcutsEnabled}
         onOpenQrCode={handleOpenQrCode}
+        onRequestCamera={session.requestCamera}
+        onStopCamera={session.stopCamera}
+        hasAudioTrack={session.hasAudioTrack}
+        onToggleAudioMute={session.toggleAudioMute}
+        onTogglePause={session.captureState === 'paused' ? session.publishCapture : session.pauseSharing}
       />
-
-      {session.localStream && ['preview', 'publishing'].includes(session.captureState) && (
-        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
-          onChangeQuality={session.changeQuality} stream={session.localStream} pending={session.captureState === 'publishing'}
-          onConfirm={session.publishCapture} onCancel={session.stopSharing} />
-      )}
-
-      {session.pendingStream && (
-        <CapturePreview quality={session.quality} qualityPending={session.qualityPending} qualityNotice={session.qualityNotice}
-          stream={session.pendingStream} replacing cameraLive={session.camera.state === 'live'} pending={session.captureState === 'switch-publishing'}
-          onConfirm={session.confirmSwitch} onCancel={session.cancelSwitch} />
-      )}
 
       {/* Floating Bottom Control Dock */}
       <FloatingControlDock
@@ -525,6 +545,10 @@ function RoomPageContent() {
         hasAudioTrack={session.hasAudioTrack}
         isAudioMuted={session.isAudioMuted}
         onToggleAudioMute={session.toggleAudioMute}
+        quality={session.quality}
+        onChangeQuality={session.changeQuality}
+        qualityPending={session.qualityPending}
+        qualityNotice={session.qualityNotice}
         onOpenParticipants={() => setIsParticipantsOpen(true)}
         raisedHandCount={session.participants.filter(p => p.handOrder != null).length}
         participantCount={isDemo && demoParticipants ? demoParticipants.length : session.participantCount}

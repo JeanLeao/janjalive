@@ -1,3 +1,4 @@
+import { playJoinSound, playLeaveSound } from '../utils/sound';
 import { CameraController, type CameraSnapshot } from '../media/camera-controller';
 import { useWatchParty } from './useWatchParty';
 import { FileTransferManager, type FileDelivery } from '../files/file-transfer-manager';
@@ -199,7 +200,12 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     },
     stop: () => peerManagerRef.current?.stopCamera() ?? Promise.resolve(),
     announce: active => signalingRef.current?.updateCamera(active),
-    changed: setCamera,
+    changed: snap => {
+      setCamera(snap);
+      if (snap.state === 'error' && snap.error) {
+        showToast(snap.error);
+      }
+    },
   }), [roomId]);
 
   const [fileDeliveries, setFileDeliveries] = useState<FileDelivery[]>([]);
@@ -543,6 +549,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
           } else {
             showToast('Visitante entrou na sala.');
           }
+          playJoinSound();
 
         } else if (message.type === 'peer-left') {
           files.disconnect(message.peerId);
@@ -556,6 +563,7 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
               const name = leaving.nickname || 'Visitante';
               showToast(`${name} saiu da sala.`);
             }
+            playLeaveSound();
             return prev.filter((p) => p.peerId !== message.peerId);
           });
           cancelPendingRecovery();
@@ -783,13 +791,16 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
       if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
       if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { stopAllTracks(stream); throw new Error('Captura sem vídeo disponível.'); }
       if (!applied) setQualityNotice('O navegador não aplicou todos os limites. Confira a captura observada; você pode continuar ou escolher outro perfil.');
-      transition('preview');
+      transition('publishing');
       localStreamRef.current = stream;
       setLocalStream(stream);
 
       const hasAudio = stream.getAudioTracks().length > 0;
       setHasAudioTrack(hasAudio);
       setIsAudioMuted(false);
+      if (!hasAudio) {
+        showToast('Transmissão sem áudio do sistema/aba.');
+      }
 
       loggerRef.current?.log('screen-captured', {
         requested: JSON.stringify(qualityRef.current),
@@ -807,16 +818,55 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
         endedHandlerRef.current = { track: videoTrack, handler };
         videoTrack.addEventListener('ended', handler, { once: true });
       }
+
+      setFeaturedStreamId((current) => current || 'local');
+      sharingIdRef.current = crypto.randomUUID();
+      pointingEnabledRef.current = true;
+      setPointingEnabled(true);
+      drawingEnabledRef.current = false;
+      setDrawingEnabled(false);
+      annotations.setCapture(localPeerRef.current, sharingIdRef.current);
+      signalingRef.current?.updateSharing({
+        active: true,
+        paused: false,
+        streamId: sharingIdRef.current,
+        pointingEnabled: pointingEnabledRef.current,
+        drawingEnabled: false,
+        hasAudio,
+        audioMuted: false,
+      });
+
+      await peerManagerRef.current?.attachLocalStream(stream);
+      if (generation !== captureGenerationRef.current || localStreamRef.current !== stream) return;
+      transition('sharing');
+      sharingIdRef.current ||= crypto.randomUUID();
+      setIsSharing(true);
+      signalingRef.current?.updateSharing({
+        active: true,
+        paused: false,
+        streamId: sharingIdRef.current,
+        pointingEnabled: pointingEnabledRef.current,
+        drawingEnabled: drawingEnabledRef.current,
+        hasAudio,
+        audioMuted: false,
+      });
+      const stageId = featuredStreamIdRef.current;
+      const targetPeerId = !stageId || stageId === 'local' ? localPeerRef.current : stageId;
+      stageSelectionPublisher.select(targetPeerId);
     } catch (err: any) {
       if (generation !== captureGenerationRef.current) return;
       if (localStreamRef.current) stopSharing();
       else transition('idle');
+      if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
+        loggerRef.current?.log('screen-capture-cancelled', { error: err?.name });
+        return;
+      }
       const msg = formatSharingErrorMessage(err);
       setErrorMessage(msg);
       showToast(msg);
       loggerRef.current?.log('screen-capture-error', { error: err?.name, message: err?.message });
     }
-  }, [stopSharing, showToast, cameraController]);
+  }, [stopSharing, showToast, cameraController, annotations, stageSelectionPublisher]);
 
   const publishCapture = useCallback(async () => {
     const state = captureStateRef.current;
@@ -875,131 +925,116 @@ export function useRoomSession({ roomId, displayName, enabled = true }: UseRoomS
     }
   }, [stopSharing, cameraController]);
 
-  const cancelSwitch = useCallback(async () => {
-    const change = switchRef.current;
-    if (!change || captureStateRef.current === 'switch-restoring') return;
-    // Once publication starts, cancellation means stop: never restore over an in-flight attach.
-    if (captureStateRef.current === 'switch-publishing') { stopSharing(); return; }
-    const generation = ++captureGenerationRef.current;
-    transition('switch-restoring');
-    change.removePendingListener?.();
-    stopAllTracks(change.pending);
-    change.pending = null;
-    setPendingStream(null);
-    if (!await change.detached || generation !== captureGenerationRef.current) return;
-    const stream = change.previous;
-    if (!stream.getVideoTracks().some(track => track.readyState === 'live')) {
-      stopSharing();
-      setErrorMessage('A origem anterior foi encerrada. Compartilhe uma tela novamente.');
-      return;
-    }
-    for (const [track, enabled] of change.enabled) if (track.readyState === 'live') track.enabled = enabled;
-    try {
-      if (!change.wasPaused) await peerManagerRef.current?.attachLocalStream(stream);
-      if (generation !== captureGenerationRef.current) return;
-      if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { stopSharing(); return; }
-      switchRef.current = null;
-      transition(change.wasPaused ? 'paused' : 'sharing');
-      signalingRef.current?.updateSharing({ active: true, paused: change.wasPaused, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: stream.getAudioTracks().some(track => track.readyState === 'live'), audioMuted: change.muted });
-    } catch {
-      if (generation !== captureGenerationRef.current) return;
-      stopSharing();
-      setErrorMessage('Falha ao restaurar a origem anterior. Compartilhamento encerrado por segurança.');
-    }
-  }, [stopSharing]);
-
   const switchCapture = useCallback(async () => {
     const state = captureStateRef.current;
     const previous = localStreamRef.current;
     if (!previous || (state !== 'sharing' && state !== 'paused')) return;
     const generation = ++captureGenerationRef.current;
-    const change: CaptureSwitch = {
-      previous, wasPaused: state === 'paused', muted: isAudioMuted,
-      enabled: new Map(previous.getTracks().map(track => [track, track.enabled])),
-      detached: Promise.resolve(false), pending: null,
-    };
-    switchRef.current = change;
-    transition('switch-requesting');
+    const wasPaused = state === 'paused';
     setErrorMessage(null);
-    // Synchronous suppression protects both kinds while replaceTrack(null) is pending.
-    for (const track of previous.getTracks()) track.enabled = false;
-    change.detached = (peerManagerRef.current?.detachLocalStream() ?? Promise.resolve()).then(() => true, () => {
-      if (switchRef.current === change) {
-        stopSharing();
-        setErrorMessage('Falha ao suspender a transmissão. Capturas encerradas por segurança.');
-      }
-      return false;
-    });
-    // No await before this call: preserve the click's transient user activation.
-    const selection = captureDisplayMedia(qualityRef.current, captured => {
-      if (generation !== captureGenerationRef.current) stopAllTracks(captured);
-      else change.pending = captured;
-    });
-    signalingRef.current?.updateSharing({ active: true, paused: true, streamId: sharingIdRef.current, pointingEnabled: pointingEnabledRef.current, hasAudio: previous.getAudioTracks().length > 0, audioMuted: change.muted });
+
+    // Prompt user with native browser screen picker immediately to preserve transient user activation.
+    let selection: Promise<MediaStream>;
+    try {
+      selection = captureDisplayMedia(qualityRef.current);
+    } catch (err: any) {
+      const msg = formatSharingErrorMessage(err);
+      setErrorMessage(msg);
+      showToast(msg);
+      return;
+    }
+
     try {
       const stream = await selection;
-      if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
-      change.pending = stream;
-      await applyCaptureQuality(stream.getVideoTracks()[0], qualityRef.current);
-      if (generation !== captureGenerationRef.current) { stopAllTracks(stream); return; }
-      change.pending = stream;
-      const video = stream.getVideoTracks()[0];
-      if (!video || video.readyState !== 'live') throw new Error('Captura sem vídeo disponível.');
-      setStreamAudioMuted(stream, change.muted);
-      const ended = () => { if (switchRef.current === change) void cancelSwitch(); };
-      video.addEventListener('ended', ended, { once: true });
-      change.removePendingListener = () => video.removeEventListener('ended', ended);
-      if (!await change.detached || generation !== captureGenerationRef.current) return;
-      setPendingStream(stream);
-      transition('switch-preview');
-    } catch (error) {
-      if (generation !== captureGenerationRef.current) return;
-      setErrorMessage(formatSharingErrorMessage(error));
-      await cancelSwitch();
-    }
-  }, [isAudioMuted, cancelSwitch, stopSharing]);
-
-  const confirmSwitch = useCallback(async () => {
-    const change = switchRef.current;
-    const stream = change?.pending;
-    if (qualityOperationRef.current || !change || !stream || captureStateRef.current !== 'switch-preview') return;
-    if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { void cancelSwitch(); return; }
-    const generation = captureGenerationRef.current;
-    transition('switch-publishing');
-    try {
-      await peerManagerRef.current?.attachLocalStream(stream);
-      if (generation !== captureGenerationRef.current) return;
-      if (!stream.getVideoTracks().some(track => track.readyState === 'live')) { stopSharing(); return; }
-      if (endedHandlerRef.current) {
-        const { track, handler } = endedHandlerRef.current;
-        track.removeEventListener('ended', handler);
+      if (generation !== captureGenerationRef.current) {
+        stopAllTracks(stream);
+        return;
       }
-      change.removePendingListener?.();
-      const track = stream.getVideoTracks()[0];
-      const handler = () => { if (localStreamRef.current === stream) { if (switchRef.current) cameraController.stop(); else stopSharing(); } };
-      track.addEventListener('ended', handler, { once: true });
-      endedHandlerRef.current = { track, handler };
+      await applyCaptureQuality(stream.getVideoTracks()[0], qualityRef.current);
+      if (generation !== captureGenerationRef.current) {
+        stopAllTracks(stream);
+        return;
+      }
+      const video = stream.getVideoTracks()[0];
+      if (!video || video.readyState !== 'live') {
+        stopAllTracks(stream);
+        throw new Error('Captura sem vídeo disponível.');
+      }
+
+      setStreamAudioMuted(stream, isAudioMuted);
+
+      // Attach new stream to WebRTC senders immediately (replaceTrack)
+      if (!wasPaused) {
+        await peerManagerRef.current?.attachLocalStream(stream);
+      }
+      if (generation !== captureGenerationRef.current) {
+        stopAllTracks(stream);
+        return;
+      }
+
+      // Cleanup old ended handler and attach to new track
+      if (endedHandlerRef.current) {
+        endedHandlerRef.current.track.removeEventListener('ended', endedHandlerRef.current.handler);
+      }
+      const handler = () => {
+        if (localStreamRef.current === stream) {
+          cameraController.stop();
+          stopSharing();
+        }
+      };
+      video.addEventListener('ended', handler, { once: true });
+      endedHandlerRef.current = { track: video, handler };
+
+      // Stop previous tracks now that replacement succeeded
+      stopAllTracks(previous);
+
       localStreamRef.current = stream;
       setLocalStream(stream);
-      stopAllTracks(change.previous);
-      switchRef.current = null;
-      setPendingStream(null);
-      setHasAudioTrack(stream.getAudioTracks().some(track => track.readyState === 'live'));
-      setIsAudioMuted(change.muted);
+      const hasAudio = stream.getAudioTracks().some(track => track.readyState === 'live');
+      setHasAudioTrack(hasAudio);
+      if (!hasAudio) {
+        showToast('Transmissão sem áudio do sistema/aba.');
+      }
+
       sharingIdRef.current = crypto.randomUUID();
       pointingEnabledRef.current = true;
       setPointingEnabled(true);
       drawingEnabledRef.current = false;
       setDrawingEnabled(false);
       annotations.setCapture(localPeerRef.current, sharingIdRef.current);
-      transition('sharing');
-      signalingRef.current?.updateSharing({ active: true, paused: false, streamId: sharingIdRef.current, pointingEnabled: true, drawingEnabled: false, hasAudio: stream.getAudioTracks().some(track => track.readyState === 'live'), audioMuted: change.muted });
-    } catch {
+
+      transition(wasPaused ? 'paused' : 'sharing');
+      signalingRef.current?.updateSharing({
+        active: true,
+        paused: wasPaused,
+        streamId: sharingIdRef.current,
+        pointingEnabled: true,
+        drawingEnabled: false,
+        hasAudio,
+        audioMuted: isAudioMuted,
+      });
+
+      showToast('Tela alterada com sucesso.');
+    } catch (error: any) {
       if (generation !== captureGenerationRef.current) return;
-      stopSharing();
-      setErrorMessage('Falha ao publicar a nova origem. Compartilhamento encerrado por segurança.');
+      // If user canceled browser picker, don't interrupt active stream!
+      if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
+        loggerRef.current?.log('switch-cancelled', { error: error?.name });
+        return;
+      }
+      const msg = formatSharingErrorMessage(error);
+      setErrorMessage(msg);
+      showToast(msg);
     }
-  }, [cancelSwitch, stopSharing, annotations, cameraController]);
+  }, [isAudioMuted, stopSharing, annotations, cameraController, showToast]);
+
+  const confirmSwitch = useCallback(async () => {
+    // Legacy stub - switch is now instant
+  }, []);
+
+  const cancelSwitch = useCallback(async () => {
+    // Legacy stub - switch is now instant
+  }, []);
 
   const selectFeaturedStream = useCallback((streamId: string) => {
     // Only this explicit UI action publishes a choice. Remote follow and automatic fallback
